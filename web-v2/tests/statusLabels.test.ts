@@ -7,6 +7,11 @@ const now = Date.parse('2026-10-16T12:00:00Z')
 
 test('invoiceStatus folds lifecycle and payment into one Stripe-style badge', () => {
   assert.deepEqual(invoiceStatus({ status: 'draft', payment_status: 'pending' }, now), { label: 'Draft', tone: 'neutral' })
+  // A top-up is stored as a draft, but it waits for money; withdrawn, it is not "Void".
+  assert.deepEqual(invoiceStatus({ status: 'draft', billing_reason: 'topup', payment_status: 'pending' }, now), { label: 'Awaiting payment', tone: 'info' })
+  assert.deepEqual(invoiceStatus({ status: 'draft', billing_reason: 'topup', payment_status: 'failed' }, now), { label: 'Payment failed', tone: 'danger' })
+  assert.deepEqual(invoiceStatus({ status: 'voided', billing_reason: 'topup' }, now), { label: 'Withdrawn', tone: 'neutral' })
+  assert.deepEqual(invoiceStatus({ status: 'paid', billing_reason: 'topup', payment_status: 'succeeded' }, now), { label: 'Paid', tone: 'success' })
   assert.deepEqual(invoiceStatus({ status: 'finalized', payment_status: 'pending', due_at: '2026-10-31T00:00:00Z' }, now), { label: 'Open', tone: 'info' })
   assert.deepEqual(invoiceStatus({ status: 'finalized', payment_status: 'pending', due_at: '2026-09-12T00:00:00Z' }, now), { label: 'Past due', tone: 'danger' })
   assert.deepEqual(invoiceStatus({ status: 'finalized', payment_status: 'failed' }, now), { label: 'Payment failed', tone: 'danger' })

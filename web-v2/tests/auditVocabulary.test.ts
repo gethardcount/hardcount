@@ -135,6 +135,15 @@ test('a payment-setup-link row names the action, not a generic "Updated <custome
   )
 })
 
+test("a top-up's send reads as its link and its void as withdrawing it; an invoice keeps its words", () => {
+  const topup = { resource_type: 'invoice', resource_label: '', metadata: { billing_reason: 'topup', customer_id: 'hc_cus_1' } }
+  assert.equal(describeAction(entry({ ...topup, action: 'send' })), 'Emailed a top-up link')
+  assert.equal(describeAction(entry({ ...topup, action: 'void' })), 'Withdrew a top-up')
+  const invoice = { resource_type: 'invoice', resource_label: 'HC-000042', metadata: { customer_id: 'hc_cus_1' } }
+  assert.equal(describeAction(entry({ ...invoice, action: 'send' })), 'Emailed HC-000042')
+  assert.equal(describeAction(entry({ ...invoice, action: 'void' })), 'Voided HC-000042')
+})
+
 // The audit log printed every *_cents value with the workspace symbol, so a
 // EUR invoice's total read "$". A row that records its currency is shown in
 // it (credit rows record theirs since ADR-129); a row that records none is

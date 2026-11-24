@@ -12,7 +12,9 @@ the screen, and that the main things an operator does work end to end.
   signed out, and the emailed-link pages with no code.
 - `journeys.spec.ts` signs in, creates a customer, creates a subscription,
   finds an open invoice in the invoices list and opens it, opens the
-  public invoice page, and grants credits. In Grant credits, it picks the
+  public invoice page, grants credits and sells credit. Sell credit with
+  "Decide later" must land on an unpaid top-up with Withdraw and no PDF. In
+  Grant credits, it picks the
   second of two customers with the same name with the keyboard, and checks
   that the grant goes to that customer. It picks a credit expiry day on a
   grant and on a commit line, and checks that the dashboard sends the next

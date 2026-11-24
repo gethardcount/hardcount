@@ -857,9 +857,8 @@ func invoiceTextBody(customerName, invoiceNumber, amount, currency, hostedURL st
 // topupOfferTextBody is the plain-text part of the top-up offer
 // (renderTopupOfferHTML).
 func topupOfferTextBody(customerName, companyName string, payCents int64, credit domain.TopupCredit, currency, hostedURL string) string {
-	lead, validity := topupOfferCopy(companyName, payCents, credit, currency)
 	var b strings.Builder
-	fmt.Fprintf(&b, "Hi %s,\n\n%s\n%s\n\n", customerName, lead, validity)
+	fmt.Fprintf(&b, "Hi %s,\n\n%s\n\n", customerName, strings.Join(topupOfferCopy(companyName, payCents, credit, currency), "\n\n"))
 	if hostedURL != "" {
 		fmt.Fprintf(&b, "Buy credit: %s\n", hostedURL)
 	}

@@ -588,7 +588,7 @@ func validateSettings(ts *domain.TenantSettings) error {
 	// keeps that instant one Postgres can store, so a payment never fails on it.
 	if d := ts.TopupCreditValidDays; d != nil && (*d < 1 || *d > maxTopupCreditValidDays) {
 		return errs.Invalid("topup_credit_valid_days",
-			fmt.Sprintf("must be from 1 to %d days when set (send null for credit that never expires)", maxTopupCreditValidDays))
+			fmt.Sprintf("must be between 1 and %d days; leave it unset for credit that never expires", maxTopupCreditValidDays))
 	}
 
 	// Canonical UPPERCASE before persisting — ValidateCurrency accepts

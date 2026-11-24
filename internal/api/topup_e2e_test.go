@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/email"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -235,4 +236,67 @@ func TestTopup_HostedPageAndCheckout(t *testing.T) {
 	if r := checkout(); r.status != 409 || flowStr(r.body, "error", "code") != "not_payable" {
 		t.Errorf("Checkout on a withdrawn top-up: %d %s, want 409 not_payable", r.status, r.raw)
 	}
+}
+
+// An unpaid top-up's history shows before its payment issues it: its card
+// was declined and its link sent, on the invoice's Activity and on the
+// customer's Sent emails. It fails if the timeline answers every draft with
+// nothing again (invoice.Handler.paymentTimeline), or if the email lists find
+// rows by invoice number alone or leave out topup_offer
+// (email.OutboxStore.ListByInvoice and ListByCustomer): a top-up has no
+// number until it is paid.
+func TestTopup_HistoryBeforePayment(t *testing.T) {
+	e := newTopupEnv(t, "Topup History Co")
+	customerID, id := e.create(t)
+	ctx := callerCtx(e.tenantID, false)
+	if err := invoice.NewPostgresStore(e.db).RecordChargeAttempt(ctx, e.tenantID, domain.InvoiceChargeAttempt{
+		InvoiceID: id, Trigger: domain.ChargeTriggerChargeNow, Outcome: domain.ChargeAttemptFailed,
+		DeclineCode: "insufficient_funds", AmountCents: 9000, OccurredAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("record the declined charge: %v", err)
+	}
+	if err := email.NewOutboxSender(email.NewOutboxStore(e.db)).SendTopupOffer(ctx, e.tenantID, id, "topup@topup.test", nil,
+		"Topup", 9000, domain.TopupCredit{CreditCents: 10000}, "USD", "hc_pinv_topup_history"); err != nil {
+		t.Fatalf("queue the top-up's link: %v", err)
+	}
+
+	titles := map[string]bool{}
+	for _, ev := range flowList(e.call(t, "GET", "/v1/invoices/"+id+"/payment-timeline", nil).want(t, 200, "timeline").body, "events") {
+		titles[flowStr(ev, "line", "title")] = true
+	}
+	for _, want := range []string{"Top-up created", "Payment failed", "Top-up link queued"} {
+		if !titles[want] {
+			t.Errorf("the top-up's timeline has no %q row; it has %v", want, titles)
+		}
+	}
+
+	sent := flowList(e.call(t, "GET", "/v1/customers/"+customerID+"/sent-emails", nil).want(t, 200, "sent emails").body, "data")
+	if len(sent) != 1 || flowStr(sent[0], "email_type") != "topup_offer" || flowStr(sent[0], "line", "title") != "Top-up link queued" {
+		t.Errorf("Sent emails = %v, want the top-up's link", sent)
+	}
+}
+
+// A top-up has no document until it is paid: both PDF routes refuse an
+// unpaid one and a withdrawn one with one sentence. It fails if either route
+// renders it again (invoice.DocumentRefusal is checked in both
+// downloadPDF handlers): the answer is then a 200 PDF.
+func TestTopup_NoDocumentUntilPaid(t *testing.T) {
+	e := newTopupEnv(t, "Topup Document Co")
+	_, id := e.create(t)
+	token := flowStr(flowObj(e.call(t, "GET", "/v1/invoices/"+id, nil).want(t, 200, "get the top-up").body, "invoice"), "public_token")
+	const sentence = "A top-up has no document until it is paid."
+	check := func(state string) {
+		t.Helper()
+		for route, r := range map[string]flowResp{
+			"operator": e.call(t, "GET", "/v1/invoices/"+id+"/pdf", nil),
+			"hosted":   flowDo(t, e.ts, "GET", "/v1/public/invoices/"+token+"/pdf", flowReq{}),
+		} {
+			if r.status != 409 || r.errCode() != "invalid_state" || flowStr(r.body, "error", "message") != sentence {
+				t.Errorf("%s PDF of a %s top-up: %d %.200s, want 409 invalid_state %q", route, state, r.status, r.raw, sentence)
+			}
+		}
+	}
+	check("unpaid")
+	e.call(t, "POST", "/v1/invoices/"+id+"/void", nil).want(t, 200, "withdraw the top-up")
+	check("withdrawn")
 }

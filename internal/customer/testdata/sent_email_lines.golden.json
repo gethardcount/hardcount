@@ -229,6 +229,37 @@
     ]
   },
   {
+    "case": "type/topup_offer",
+    "line": {
+      "id": "email:hc_emob_1",
+      "kind": "email.topup_offer",
+      "title": "Top-up link delivered",
+      "detail": [
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "hc_inv_1",
+              "label": "Prepaid credit"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:00:00Z"
+    },
+    "text": [
+      "Top-up link delivered",
+      "meta: Prepaid credit · To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
     "case": "skipped because/gone",
     "line": {
       "id": "email:hc_emob_1",
@@ -742,6 +773,42 @@
     "text": [
       "Credit note email delivered",
       "meta: HC-000123 · CN-000012 · To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "top-up link not sent, top-up withdrawn",
+    "line": {
+      "id": "email:hc_emob_1",
+      "kind": "email.topup_offer",
+      "title": "Top-up link not sent",
+      "detail": [
+        [
+          {
+            "text": "The top-up was already withdrawn"
+          }
+        ],
+        [
+          {
+            "link": {
+              "kind": "invoice",
+              "id": "hc_inv_1",
+              "label": "Prepaid credit"
+            }
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2026-10-19T10:00:00Z"
+    },
+    "text": [
+      "Top-up link not sent",
+      "meta: The top-up was already withdrawn · Prepaid credit · To billing@acme.test",
       "tone: neutral"
     ]
   },

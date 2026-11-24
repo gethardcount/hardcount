@@ -13,6 +13,7 @@ import {
   ISSUE_CREDIT_ENDED,
   ISSUE_CREDIT_UNKNOWN,
   ISSUE_CREDIT_VALUES_DIFFER,
+  invoicePageOutcome,
   issueCreditFailure,
   isStripeRefundUnresolved,
   marginCardView,
@@ -75,6 +76,32 @@ test('charge now: nothing ever reads "Payment initiated"', () => {
   }
 })
 
+// A top-up is not an invoice until its payment issues it: no message reads
+// "Invoice Prepaid credit sent" or "Prepaid credit paid".
+test('charge now: a top-up is named as one', () => {
+  const topup = (status: string, payment_status: string) => ({ ...inv(status, payment_status), invoice_number: '', billing_reason: 'topup' })
+  assert.deepEqual(collectOutcome({ ...topup('paid', 'succeeded'), invoice_number: 'INV-7', amount_paid_cents: 9000, stripe_payment_intent_id: 'pi_1' }),
+    { tone: 'success', title: 'Top-up paid', description: "Its credit is on the customer's balance." })
+  assert.equal(collectOutcome(topup('draft', 'failed')).title, 'Top-up payment failed')
+  assert.equal(collectOutcome(topup('draft', 'failed')).description, 'The reason is shown on this top-up.')
+  assert.equal(collectOutcome(topup('draft', 'pending')).title, 'Top-up not charged')
+})
+
+test('invoice page: an unpaid top-up is withdrawn, paid and sent as a top-up', () => {
+  const topup = { status: 'draft', billing_reason: 'topup', invoice_number: '' }
+  const invoice = { status: 'finalized', billing_reason: 'manual', invoice_number: 'INV-1' }
+  assert.equal(invoicePageOutcome('voided', topup).title, 'Top-up withdrawn')
+  assert.equal(invoicePageOutcome('voided', invoice).title, 'Invoice INV-1 voided')
+  assert.deepEqual(invoicePageOutcome('payment_recorded', topup),
+    { tone: 'success', title: 'Top-up paid', description: "Payment recorded. Its credit is on the customer's balance." })
+  assert.equal(invoicePageOutcome('payment_recorded', invoice).title, 'Payment recorded — INV-1 marked paid')
+  assert.equal(invoicePageOutcome('email_sent', topup).title, 'Top-up link sent')
+  assert.equal(invoicePageOutcome('email_sent', invoice).title, 'Invoice email sent')
+  for (const a of ['voided', 'payment_recorded', 'email_sent'] as const) {
+    assert.doesNotMatch(invoicePageOutcome(a, topup).title, /Invoice|Prepaid credit/)
+  }
+})
+
 test('write-off: a failed pause is one warning that says collection was NOT paused', () => {
   const o = writeOffOutcome('INV-1', 'failed')
   assert.equal(o.tone, 'warning')
@@ -109,13 +136,6 @@ test('new invoice: each result gets its own single message', () => {
   const noEmail = newInvoiceOutcome('INV-9', { kind: 'no_email' })
   assert.equal(noEmail.tone, 'warning')
   assert.match(noEmail.description ?? '', /no email address/)
-
-  // A top-up is sent, never finalized; a refused send leaves its draft.
-  assert.equal(newInvoiceOutcome('Prepaid credit', { kind: 'topup_sent' }).title, 'Top-up created and its link sent')
-  const refused = newInvoiceOutcome('Prepaid credit', { kind: 'topup_not_sent', reason: 'Set HOSTED_INVOICE_BASE_URL.' })
-  assert.equal(refused.tone, 'warning')
-  assert.equal(refused.title, 'Top-up draft created, link not sent')
-  assert.equal(refused.description, 'Set HOSTED_INVOICE_BASE_URL.')
 })
 
 test('new invoice: Save & send on a server without email says the invoice was finalized and not emailed', () => {

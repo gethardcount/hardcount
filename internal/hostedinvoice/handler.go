@@ -567,6 +567,10 @@ func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if err := invoice.DocumentRefusal(inv); err != nil {
+		respond.FromError(w, r, err, "invoice")
+		return
+	}
 
 	_, items, err := h.invoices.GetWithLineItems(r.Context(), inv.TenantID, inv.ID)
 	if err != nil {
@@ -591,7 +595,7 @@ func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", "inline; filename=\""+invoice.PDFFileName(inv)+".pdf\"")
+	w.Header().Set("Content-Disposition", "inline; filename=\""+inv.InvoiceNumber+".pdf\"")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(pdfBytes)
 }

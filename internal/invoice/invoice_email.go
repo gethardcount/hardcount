@@ -142,6 +142,11 @@ func (h *Handler) emailInvoice(ctx context.Context, tenantID string, inv domain.
 		if trigger != "" {
 			meta["trigger"] = trigger
 		}
+		if inv.UnpaidTopup() {
+			// It has no number to name it: the audit log reads the row as
+			// sending a top-up's link.
+			meta["billing_reason"] = string(domain.BillingReasonTopup)
+		}
 		_ = h.auditLogger.Log(ctx, tenantID, domain.AuditActionSend, "invoice", inv.ID, inv.InvoiceNumber, meta)
 	}
 	return nil

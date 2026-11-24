@@ -94,10 +94,14 @@ func TestSentEmailLinesGolden(t *testing.T) {
 		}
 		cases = append(cases, sentEmailGoldenCase{Case: name, Line: l, Text: sentEmailLineText(l)})
 	}
-	// Each email type, naming its invoice.
+	// Each email type, naming its invoice. A top-up's link was sent before
+	// the top-up had a number, so it names the top-up by its id.
 	for _, et := range types {
 		r := base
 		r.EmailType = et
+		if et == "topup_offer" {
+			r.InvoiceNumber = ""
+		}
 		add("type/"+et, r)
 	}
 	// Why one was not sent: each recorded state, and a row skipped before the
@@ -133,6 +137,11 @@ func TestSentEmailLinesGolden(t *testing.T) {
 	add("credit note email/note exists", cn)
 	cn.CreditNoteID = ""
 	add("credit note email/note gone", cn)
+	// A top-up's link not sent: the top-up was withdrawn first.
+	offer := base
+	offer.EmailType, offer.InvoiceNumber, offer.Status, offer.DeliveryState, offer.DispatchedAt, offer.SkipReason =
+		"topup_offer", "", "skipped", "unknown", nil, "voided"
+	add("top-up link not sent, top-up withdrawn", offer)
 	// An invoice whose id is unknown is named, not linked.
 	noID := base
 	noID.EmailType, noID.InvoiceID = "invoice", ""

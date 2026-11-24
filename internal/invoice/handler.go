@@ -153,9 +153,17 @@ type EmailSender interface {
 // Without this, operators have no signal that the customer was
 // notified — the no-PM finalize email goes out asynchronously and
 // the only trace is the email_outbox row. Satisfied by
-// email.OutboxStore.ListByInvoice.
+// email.OutboxStore.ListByInvoice. An email names the invoice by its number,
+// or by its id when it has none (an unpaid top-up's offer).
 type EmailEventLister interface {
-	ListByInvoice(ctx context.Context, tenantID, invoiceNumber string) ([]EmailEventRow, error)
+	ListByInvoice(ctx context.Context, tenantID, invoiceID, invoiceNumber string) ([]EmailEventRow, error)
+}
+
+// TopupGrantReader reads the credit a paid top-up granted, for its "Credit
+// added" row: the amount and the expiry (nil: never); found is false when it
+// granted none. Satisfied by credit.PostgresStore.TopupGrant.
+type TopupGrantReader interface {
+	TopupGrant(ctx context.Context, tenantID, invoiceID string) (amountCents int64, expiresAt *time.Time, found bool, err error)
 }
 
 // EmailEventRow is the timeline-friendly view of an email_outbox row.
@@ -234,6 +242,7 @@ type Handler struct {
 	paymentSetups   PaymentSetupGetter
 	dunning         DunningResolver
 	emailEvents     EmailEventLister
+	topupGrants     TopupGrantReader
 	dunningTimeline DunningTimelineFetcher
 	emailSender     EmailSender
 	refundIssuer    RefundIssuer
@@ -317,6 +326,12 @@ func (h *Handler) SetCollector(c Collector) { h.collector = c }
 // charge attempts, credit notes, dunning) renders unchanged.
 func (h *Handler) SetEmailEvents(lister EmailEventLister) {
 	h.emailEvents = lister
+}
+
+// SetTopupGrants wires the read of a paid top-up's grant, for its "Credit
+// added" row. When nil, the timeline has no such row.
+func (h *Handler) SetTopupGrants(r TopupGrantReader) {
+	h.topupGrants = r
 }
 
 // SetAuditLogger configures audit logging for financial operations.
@@ -1356,7 +1371,9 @@ const (
 	rankRetryAttempted    = 40
 	rankEscalated         = 50
 	rankLifecycleTerminal = 60 // paid / voided / uncollectible
-	rankCreditNote        = 70
+	// A top-up's credit is added by its payment, in the same transaction.
+	rankCreditAdded = 61
+	rankCreditNote  = 70
 	// A credit note that left nothing due marks the invoice paid in its own
 	// transaction: the paid row follows the note that caused it.
 	rankPaidByNote = 71
@@ -1700,8 +1717,9 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Draft invoices have no payment activity
-	if inv.Status == domain.InvoiceDraft {
+	// A draft has no activity yet, except an unpaid top-up: its link is sent
+	// and its card charged before its payment issues it.
+	if inv.Status == domain.InvoiceDraft && !inv.UnpaidTopup() {
 		respond.JSON(w, r, http.StatusOK, map[string]any{"events": []TimelineEvent{}, "degraded": []string{}, "truncated": false})
 		return
 	}
@@ -1779,7 +1797,7 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 	reminderByAttempt := map[int]EmailEventRow{}
 	var escalationEmail *EmailEventRow
 	if h.emailEvents != nil {
-		if list, err := h.emailEvents.ListByInvoice(ctx, tenantID, inv.InvoiceNumber); err != nil {
+		if list, err := h.emailEvents.ListByInvoice(ctx, tenantID, inv.ID, inv.InvoiceNumber); err != nil {
 			degrade("emails", err)
 		} else {
 			emails, reminderByAttempt, escalationEmail = recoveryEmails(list)
@@ -1817,6 +1835,16 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 	stripeRefunds, srerr := h.svc.ListStripeRefunds(ctx, tenantID, inv.ID)
 	if srerr != nil {
 		degrade("stripe_refunds", srerr)
+	}
+
+	// The credit a paid top-up granted, in its payment's transaction.
+	var grant *topupGrant
+	if h.topupGrants != nil && inv.BillingReason == domain.BillingReasonTopup && inv.PaidAt != nil {
+		if cents, expires, found, err := h.topupGrants.TopupGrant(ctx, tenantID, inv.ID); err != nil {
+			degrade("credit", err)
+		} else if found {
+			grant = &topupGrant{cents: cents, expiresAt: expires}
+		}
 	}
 
 	// Charge attempts: the one owner of payment rows (ADR-103).
@@ -1951,6 +1979,10 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		i := addLifecycle("paid", "invoice.paid", *inv.PaidAt, rank,
 			paidLine(inv, retries, note, actor, byNote))
 		events[i].AttemptCount = retries
+		if grant != nil {
+			addLifecycle("credit_added", "credit.added", *inv.PaidAt, rankCreditAdded,
+				creditAddedLine(grant.cents, inv.Currency, grant.expiresAt))
+		}
 	}
 
 	// Credit-note rows. The settlement waterfall on the page already shows
@@ -2224,6 +2256,10 @@ func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {
 		respond.InternalError(w, r)
 		return
 	}
+	if err := DocumentRefusal(inv); err != nil {
+		respond.FromError(w, r, err, "invoice")
+		return
+	}
 
 	// One shared context builder across emailed/downloaded/hosted PDFs.
 	bt, ci, cnInfos := BuildPDFContext(r.Context(), h.customers, h.settings, h.pdfCreditNotes, tenantID, inv)
@@ -2235,16 +2271,18 @@ func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", "inline; filename=\""+PDFFileName(inv)+".pdf\"")
+	w.Header().Set("Content-Disposition", "inline; filename=\""+inv.InvoiceNumber+".pdf\"")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(pdfBytes)
 }
 
-// PDFFileName is the PDF's file name, without the extension: the invoice
-// number, or "prepaid-credit" for a top-up not yet numbered.
-func PDFFileName(inv domain.Invoice) string {
-	if inv.InvoiceNumber == "" {
-		return "prepaid-credit"
+// DocumentRefusal is why the invoice has no PDF, or nil. A top-up its payment
+// never issued, an unpaid one or one withdrawn, has no number and is not a
+// bill: its document is the invoice its payment issues. Both PDF routes, the
+// operator's and the hosted page's, answer with it.
+func DocumentRefusal(inv domain.Invoice) error {
+	if inv.BillingReason == domain.BillingReasonTopup && (inv.Status == domain.InvoiceDraft || inv.Status == domain.InvoiceVoided) {
+		return errs.InvalidState("A top-up has no document until it is paid.")
 	}
-	return inv.InvoiceNumber
+	return nil
 }
