@@ -1080,8 +1080,8 @@ export interface CreditGrantSummary {
   consumed_cents: number
   remaining_cents: number
   // Parts of consumed_cents no invoice used: expired_cents ran out of time;
-  // retired_cents was commit credit taken back when its invoice was voided
-  // or refunded; deducted_cents an operator deducted.
+  // retired_cents was commit credit taken back when its invoice was
+  // refunded by a credit note; deducted_cents an operator deducted.
   // used = consumed - expired - retired - deducted.
   expired_cents: number
   retired_cents: number

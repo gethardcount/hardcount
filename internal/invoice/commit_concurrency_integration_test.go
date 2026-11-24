@@ -13,9 +13,9 @@ import (
 
 // TestFinalize_ConcurrentDoubleFinalize pins the D5 CAS under true
 // concurrency: two operators finalize the same draft at once. Both
-// service-level draft guards read the same pre-flip snapshot; the
-// `AND status='draft'` predicate on FinalizeWithDates is what makes exactly
-// one win, so the finalize hook and its audit row run once.
+// service-level draft guards can read the same pre-flip snapshot; the
+// `AND status='draft'` predicate on FinalizeWithDates lets exactly one
+// succeed, and the other fails.
 func TestFinalize_ConcurrentDoubleFinalize(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Concurrent Finalize")
 

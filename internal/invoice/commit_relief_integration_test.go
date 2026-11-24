@@ -172,7 +172,7 @@ func TestCommitRelief_Gates(t *testing.T) {
 	inv := h.createTopup(t, ctx, "USD", 9000, 10000)
 	if _, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{
 		InvoiceID: inv.ID, RetireAll: true,
-	}); err == nil || !strings.Contains(err.Error(), "void the unpaid invoice") {
+	}); err == nil || !strings.Contains(err.Error(), "void it to withdraw it") {
 		t.Fatalf("unpaid relief: err = %v, want route-to-void", err)
 	}
 

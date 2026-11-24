@@ -278,8 +278,8 @@ func (s *Service) SetDunningResolver(d DunningResolver) { s.dunningResolver = d 
 type AuditLogger interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 	// LogInTx is the ADR-090 in-tx emission: Void uses it inside
-	// UpdateStatusWithReversalPrior so the status flip, the credit reversal,
-	// the commit-grant retirement, and the audit row share one fate.
+	// UpdateStatusWithReversalPrior so the status flip, the credit reversal
+	// and the audit row share one fate.
 	LogInTx(ctx context.Context, tx *sql.Tx, e audit.Entry) error
 }
 

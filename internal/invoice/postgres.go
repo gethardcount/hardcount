@@ -546,9 +546,9 @@ func (s *PostgresStore) UpdateStatusWithReversalPriorTx(ctx context.Context, tx 
 // The UPDATE carries an in-SQL allowed-source CAS (ADR-078 D5). The service
 // guards (Void's paid/in-flight checks, Finalize's draft check,
 // MarkUncollectible's switch) read an EARLIER snapshot on a different tx —
-// without the predicate, a pay-vs-void race flips paid→voided and retires
-// credits the customer just paid for, and a void-vs-finalize race resurrects
-// an annulled invoice. The CAS covers status only. Payment state and the
+// without the predicate, a pay-vs-void race flips paid→voided, voiding an
+// invoice the customer just paid, and a void-vs-finalize race resurrects an
+// annulled invoice. The CAS covers status only. Payment state and the
 // charge hold are checked by Void and MarkUncollectible on the row their
 // locking variant reads (#975), not here: this body also serves
 // draft→finalized. Allowed sources per target (matching the service-layer

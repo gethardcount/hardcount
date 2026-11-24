@@ -19,7 +19,7 @@ original text.
 
 ## [Unreleased]
 
-**Before upgrading:** stop every copy of the earlier version before you start this one: a copy of the earlier version could still make a test clock, or refuse a top-up's payment. Test clocks are removed. Upgrading deletes every test clock and every customer on one, with everything they own (test mode only); the audit log keeps its rows. A draft invoice whose prepaid commit line has an expiry loses it in migration `00239_commit_line_no_expiry`, so its credit will not expire: to keep the expiry, finalize those drafts before you upgrade, or void them and grant expiring credit by hand. Before upgrading, delete every draft invoice that sells prepaid credit: finalized and paid after the upgrade, it would grant no credit. One already finalized has granted its credit; paying it after the upgrade records the payment and grants nothing more.
+**Before upgrading:** stop every copy of the earlier version before you start this one: a copy of the earlier version could still make a test clock, or refuse a top-up's payment. Test clocks are removed. Upgrading deletes every test clock and every customer on one, with everything they own (test mode only); the audit log keeps its rows. Before upgrading, void every invoice that sells prepaid credit and is not paid, draft or issued, and grant by hand any credit you still mean to give: after the upgrade a draft that is finalized grants no credit, and voiding an issued one no longer takes its credit back.
 
 ### Added
 
@@ -27,7 +27,7 @@ original text.
 
 ### Changed
 
-- **A prepaid commit's line has no expiry date, and it is the only line on its invoice.** `commit_expires_at` is removed from invoice lines: a request that sends it is refused with `422`. Creating an invoice, or adding a line, refuses a commit line beside any other line with `422`; put other charges on a separate invoice. To sell credit that expires, set `topup_credit_valid_days` (see Added). A commit already finalized keeps the expiry on its credit ([#1907](https://github.com/gethardcount/hardcount/pull/1907)).
+- **A prepaid commit's line has no expiry date, and it is the only line on its invoice.** `commit_expires_at` is removed from invoice lines: a request that sends it is refused with `422`. Creating an invoice, or adding a line, refuses a commit line beside any other line with `422`; put other charges on a separate invoice. To sell credit that expires, set `topup_credit_valid_days` (see Added).
 - **An invoice created with one commit line is now a top-up.** It stays a draft with no number and no due date until it is paid: finalize on it answers `409`, and `invoice.finalized` is sent when it is paid, with its new number. Adding a commit line to an existing draft answers `422`. An integration that finalized such an invoice to grant the credit now charges the card (`collect`), sends the link (`send`) or records the payment instead.
 - **The events of one usage request share one time.** Events sent in one `POST /v1/usage-events/batch` with no `timestamp` are all dated when Hardcount receives the request, and so are the calls of one LiteLLM spend request that carry no time. Before, each read the clock in turn. A `last` meter bills the event with the latest `timestamp`, so if the events of one request must have an order, send each one's `timestamp`.
 
