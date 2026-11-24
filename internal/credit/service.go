@@ -812,7 +812,7 @@ func (s *Service) Adjust(ctx context.Context, tenantID string, input AdjustInput
 		return domain.CreditLedgerEntry{}, err
 	}
 	// One instant for the whole adjustment, bound before anything is
-	// written: the ledger entry and its audit row carry it.
+	// written: the ledger entry carries it.
 	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	if input.AmountCents == 0 {
 		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", "cannot be zero")

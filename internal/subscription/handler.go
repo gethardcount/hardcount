@@ -326,8 +326,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// One instant for the create and its audit row, bound before anything
-	// runs.
+	// One instant for all of the create's writes, bound before Create runs.
 	ctx := h.svc.BindNow(r.Context())
 	sub, err := h.svc.Create(ctx, tenantID, input)
 	if err != nil {

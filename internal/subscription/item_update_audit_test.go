@@ -16,8 +16,8 @@ import (
 )
 
 // capturingAudit records audit Log calls so a test can assert what a handler
-// wrote, without a real DB. Satisfies auditRecorder. It captures the instant
-// the emission's ctx carries as well as its metadata.
+// wrote, without a real DB. Satisfies auditRecorder. It keeps no instant: the
+// real writer stores created_at from the wall clock, not from ctx.
 type capturingAudit struct {
 	entries []capturedAudit
 }
@@ -25,12 +25,10 @@ type capturingAudit struct {
 type capturedAudit struct {
 	action string
 	meta   map[string]any
-	at     time.Time
 }
 
-func (c *capturingAudit) Log(ctx context.Context, _, action, _, _, _ string, metadata map[string]any) error {
-	at, _ := clock.EffectiveNow(ctx)
-	c.entries = append(c.entries, capturedAudit{action: action, meta: metadata, at: at})
+func (c *capturingAudit) Log(_ context.Context, _, action, _, _, _ string, metadata map[string]any) error {
+	c.entries = append(c.entries, capturedAudit{action: action, meta: metadata})
 	return nil
 }
 
@@ -113,9 +111,6 @@ func TestHandler_UpdateItem_PlanChangeAuditRunsOnTheRequestsInstant(t *testing.T
 	}
 	if entry.meta["action"] != "item_plan_changed" {
 		t.Errorf("meta.action: got %v, want item_plan_changed", entry.meta["action"])
-	}
-	if !entry.at.Equal(frozen) {
-		t.Errorf("emission ctx instant: got %v, want the request's %v", entry.at, frozen)
 	}
 	// The audit row carries the proration outcome: the handler writes it
 	// after the proration resolves, so the timeline shows the amount the

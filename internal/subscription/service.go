@@ -283,8 +283,8 @@ func (e *InsideInvoiceGraceError) Error() string {
 
 // BindNow binds one read of the service's clock on ctx, unless ctx already
 // carries an instant (clock.EnsureEffectiveNow). The create route calls it
-// before anything runs, so the create and its audit row share one instant;
-// it is on the service because the service holds the clock.
+// before Create runs, so all of the create's writes share one instant; it is
+// on the service because the service holds the clock.
 func (s *Service) BindNow(ctx context.Context) context.Context {
 	return clock.EnsureEffectiveNow(ctx, s.clock)
 }
@@ -672,7 +672,7 @@ type CreateInput struct {
 // Create creates a subscription that starts now, or starts its trial now,
 // and bills its first in-advance period when it has no trial. Its caller
 // binds the time first (BindNow, as the create route does), and Create reads
-// every instant from ctx, so the create and its audit row share one.
+// every instant from ctx, so all its writes share one.
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.Subscription, error) {
 	code := strings.TrimSpace(input.Code)
 	displayName := strings.TrimSpace(input.DisplayName)
@@ -2994,10 +2994,7 @@ func (s *Service) cancelTrialAtEnd(ctx context.Context, tenantID string, sub dom
 		"triggered_by": "schedule",
 		"canceled_at":  canceled.CanceledAt.UTC().Format(time.RFC3339),
 	}
-	// The trial-end instant is its OWN fact, under its own key. The row's
-	// sim_effective_at is a separate column the audit writer owns from the
-	// ctx binding (simColumns); the two used to collide on one key, with the
-	// writer silently winning.
+	// The trial-end instant is its own fact, under its own key.
 	if sub.TrialEndAt != nil {
 		meta["trial_end_at"] = sub.TrialEndAt.UTC().Format(time.RFC3339)
 	}

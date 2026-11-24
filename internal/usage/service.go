@@ -126,8 +126,8 @@ func (s *Service) Backfill(ctx context.Context, tenantID string, input IngestInp
 	if input.Timestamp.After(s.clock.Now(bound)) {
 		return domain.UsageEvent{}, errs.Invalid("timestamp", "must not be in the future for backfill — use POST /usage-events for real-time ingest")
 	}
-	// The decided ctx goes downstream: ingest reads its instant, and the
-	// audit emission, built from it, carries the clock, not just the instant.
+	// The bound ctx goes downstream, so the check and the ingest read one
+	// instant.
 	return s.ingestAudited(bound, tenantID, input, domain.UsageOriginBackfill, s.backfillEmission(bound))
 }
 

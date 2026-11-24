@@ -474,7 +474,7 @@ Four rules span a customer's subscriptions:
 
 - one live item per meter (section 4 step 1);
 - one currency ([ADR-100](100-currency-coherence-guard-ring.md));
-- no new subscription or draft activation for an archived customer
+- no new subscription for an archived customer
   ([ADR-067](067-archive-blocks-never-cancels.md));
 - a customer update reads and writes the row as one step.
 
@@ -487,10 +487,9 @@ twice.
   held to commit or rollback, so it is safe behind a transaction-mode
   pooler. It conflicts only with itself. The key is defined once, in
   `postgres.LockCustomerRulesTx`.
-- **Who takes it, and where.** An item writer and a draft activation take
-  it right after their subscription row (step 1). A create takes it before
-  its insert. A customer update and a billing
-  profile write take it first. Each reads what its rule checks after it
+- **Who takes it, and where.** An item writer takes it right after its
+  subscription row (step 1). A create takes it before its insert. A
+  customer update and a billing profile write take it first. Each reads what its rule checks after it
   gets the lock.
 - **The order.** It comes before step 2 and everything after: plans, the
   number row, invoices, credit notes, the credit ledger lock and the

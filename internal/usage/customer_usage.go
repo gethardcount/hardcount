@@ -77,12 +77,11 @@ func NewCustomerUsageService(
 	}
 }
 
-// readTime returns ctx with the read's one instant bound. The read's time is
-// decided before it: the API's door binds one read of the server's clock,
-// and the public cost dashboard decides its own (GetByToken). A clock's
-// decision carries its instant. A decision of real time may carry none, and
-// then the server's clock (the usage service's) is read here once, so the
-// window, the rater and the buckets all read one instant. The constructors
+// readTime returns ctx with the read's one instant bound: the instant the
+// API's door bound, or, on the public cost dashboard (GetByToken), whose
+// route the door does not bind, one read of the server's clock (the usage
+// service's) here. So the window, the rater and the buckets all read one
+// instant. The constructors
 // guarantee the chain: NewCustomerUsageService requires the usage service,
 // and NewService gives it the real clock until SetClock replaces it.
 func (s *CustomerUsageService) readTime(ctx context.Context) context.Context {
@@ -400,8 +399,8 @@ func composeDailyBuckets(rows []DailyBucketRow, from, to time.Time) []CustomerUs
 //
 // Returns a DomainError so the handler maps to 422 with the right code.
 //
-// now is the read's instant (test-clock frozen_time when pinned). The
-// default uses it to skip cycles that have not started.
+// now is the read's instant. The default uses it to skip cycles that have not
+// started.
 func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription, now time.Time) (time.Time, time.Time, string, error) {
 	hasFrom := !period.From.IsZero()
 	hasTo := !period.To.IsZero()

@@ -27,9 +27,9 @@ func TestBindNow(t *testing.T) {
 	}
 }
 
-// One instant per create: the create and its audit row run on the route's
-// one read of the server's clock.
-func TestCreateRoute_OneDecisionForTheCreateAndItsAuditRow(t *testing.T) {
+// One instant per create: the create runs on the route's one read of the
+// server's clock.
+func TestCreateRoute_OneReadOfTheServersClock(t *testing.T) {
 	past := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 	srv := &subSteppingClock{at: past}
 	h := NewHandler(NewService(newMemStore(), srv))
@@ -50,7 +50,7 @@ func TestCreateRoute_OneDecisionForTheCreateAndItsAuditRow(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil || !created.StartedAt.Equal(want) {
 		t.Errorf("started_at %v (%v); want the route's %v", created.StartedAt, err, want)
 	}
-	if len(audits.entries) != 1 || !audits.entries[0].at.Equal(want) || srv.reads != 1 {
-		t.Errorf("audit rows %+v after %d server reads; want one at %v after 1", audits.entries, srv.reads, want)
+	if len(audits.entries) != 1 || srv.reads != 1 {
+		t.Errorf("%d audit rows after %d server reads; want 1 after 1", len(audits.entries), srv.reads)
 	}
 }

@@ -10,11 +10,8 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 )
 
-// fakeEngineAudit records the engine's finalize emissions. It captures the ctx
-// CLOCK BINDING, not just the entry: the sim axis is resolved by the audit writer
-// from ctx (audit.simColumns) and by nothing else, so "did this row land on the
-// sim axis?" is a question about the ctx the emission ran under. Asserting
-// hand-stamped metadata keys instead would pin a mechanism that no longer exists.
+// fakeEngineAudit records the engine's finalize emissions: each entry, and
+// whether it was written in the transaction.
 type fakeEngineAudit struct {
 	rows []auditRow
 	// inTx records whether the emission arrived via LogInTx (the shared-fate

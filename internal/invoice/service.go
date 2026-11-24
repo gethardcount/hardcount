@@ -714,8 +714,8 @@ func (s *Service) requireCustomer(ctx context.Context, tenantID, customerID stri
 // the caller's tenant and mode, and that it belongs to this customer. Same
 // reason as the customer read above: the foreign key on
 // invoices.subscription_id is on the id alone, so it says nothing about
-// tenant, mode or owner. Dunning, the collection-paused gate, the test clock
-// and the cycle slot all act on the invoice's subscription, so another
+// tenant, mode or owner. Dunning, the collection-paused gate and the cycle
+// slot all act on the invoice's subscription, so another
 // customer's id would make this invoice act on that customer's account.
 // Both columns are write-once, so checking here at create closes it.
 // Unwired reader (narrow unit tests) skips the read.
@@ -1416,12 +1416,9 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	// for the lookup, except the paid case below. What remains is one hit on
 	// the unique partial index idx_credit_ledger_commit_fund_dedup.
 	//
-	// The clock here is the RESOLVER's, deliberately unlike atc.Now a few lines
-	// above: that one ages an in-flight payment, which settles in the real
-	// world, while this one decides whether a grant has expired — and expiry is
-	// a billing-domain instant that a test clock moves. drainPositiveBlocks
-	// judges the same grant against the same axis, so a banner and a drawdown
-	// can never disagree about whether credit is still live.
+	// Expiry is judged at the request's instant (s.clock.Now(ctx)), with the
+	// predicate drainPositiveBlocks uses, so a banner and a drawdown agree
+	// about whether credit is still live.
 	//
 	// A read error leaves both figures zero and claims no exposure. The
 	// alternative — a banner asserting a balance we could not read — is the

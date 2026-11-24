@@ -72,9 +72,7 @@ export interface SentEmail {
      * happened to it ("Receipt email delivered"), why it was not
      * sent, the invoice it was about, and who it went to. Dated when
      * the mail server took it, or when it was queued if it was not
-     * sent. For an email caused on a test clock, it is dated at the
-     * clock time instead, with the real send time as `recorded_at`.
-     * Present for every email type this list returns.
+     * sent. Present for every email type this list returns.
      */
   line?: ActivityLine;
 }

@@ -2579,8 +2579,8 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 // (pending→succeeded/failed) that the create-call cannot observe. Returns
 // ErrNotFound for an unknown/foreign refund id — the caller decides ack vs retry.
 func (s *Service) ApplyRefundWebhook(ctx context.Context, tenantID, stripeRefundID string, status domain.RefundStatus, failureReason string) error {
-	// The write and its audit row read one instant. No note holds the
-	// refund: the write answers ErrNotFound itself.
+	// The write reads one instant. No note holds the refund: the write
+	// answers ErrNotFound itself.
 	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	// ADR-090 in-tx emission: the refund-status transition and its audit
 	// row commit together; the store fires the emission ONLY when the

@@ -2799,10 +2799,9 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	//   - MarkPaid for zero-amount auto-paid invoices stamps PaidAt at
 	//     the cycle close, aligning with IssuedAt.
 	//
-	// In the cron (wall-clock) path NextBillingAt ≈ time.Now() within
-	// one scheduler tick, so the change is neutral — invoice timestamps
-	// land exactly on the period boundary instead of "few minutes after,"
-	// which is the more defensible cosmetic anyway.
+	// For a close that runs on time, NextBillingAt is within one scheduler
+	// tick of now, so invoice timestamps land on the period boundary rather
+	// than a few minutes after it.
 	if sub.NextBillingAt == nil {
 		return false, fmt.Errorf("bill a period of subscription %s: it has no next_billing_at", sub.ID)
 	}

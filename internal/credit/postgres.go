@@ -1075,9 +1075,8 @@ func (s *PostgresStore) LockCommitGrantTx(ctx context.Context, tx *sql.Tx, tenan
 // Drawability mirrors drainPositiveBlocks' liveness predicate exactly —
 // positive, not exhausted, expires_at at or after `now` — because the one thing
 // this must never do is promise the operator spendable credit that the drawdown
-// would refuse to spend. `now` is the caller's resolver-bound instant for the
-// same reason the drain takes one: on a clock-pinned invoice, wall-clock is the
-// wrong axis to judge expiry on.
+// would refuse to spend. `now` is the caller's bound instant, as the drain
+// takes one.
 //
 // Consumed is reported even when the grant is exhausted or expired, because it
 // is the half that no recovery can claw back and the half that decides how

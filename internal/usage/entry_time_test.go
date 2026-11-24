@@ -51,8 +51,9 @@ func (c *callSpy) IngestCallResolvingHeld(ctx context.Context, tenantID string, 
 
 // Each ingest entry binds its time itself, once per event (a LiteLLM call,
 // once for the call), and everything below reads it. Every row runs from
-// three contexts: nothing bound; the door's real time (clock.WithRealTime,
-// what production hands usage); and a real instant bound above the service.
+// three contexts: nothing bound, which is what usage's routes get from the
+// door; real time marked with no instant (clock.WithRealTime, what a
+// scheduled job runs on); and a real instant bound above the service.
 // The event is stamped at one read of the server's clock, or at the real
 // instant when one is bound.
 func TestUsageEntries_StampTheCustomersDecidedTime(t *testing.T) {
@@ -73,7 +74,7 @@ func TestUsageEntries_StampTheCustomersDecidedTime(t *testing.T) {
 		serverReads int
 	}{
 		{"nothing bound", testMode, serverAt, 1},
-		{"the door's real time", func() context.Context { return clock.WithRealTime(testMode()) }, serverAt, 1},
+		{"real time marked", func() context.Context { return clock.WithRealTime(testMode()) }, serverAt, 1},
 		{"a real instant bound above", func() context.Context { return clock.WithEffectiveNow(testMode(), realAt) }, realAt, 0},
 	} {
 		t.Run("Ingest, from "+base.name, func(t *testing.T) {
@@ -118,6 +119,22 @@ func TestUsageEntries_StampTheCustomersDecidedTime(t *testing.T) {
 				t.Errorf("not after %v; want %v", store.notAfter, base.want)
 			}
 		})
+	}
+}
+
+// Backfill's future check reads the bound instant, not the machine's time: at
+// a past instant, a backfill at that instant is accepted and one a second
+// later is refused.
+func TestBackfill_TheFutureIsAfterTheBoundInstant(t *testing.T) {
+	at := time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC)
+	svc := NewService(newMemStore())
+	ctx := clock.WithEffectiveNow(testMode(), at)
+	if _, err := svc.Backfill(ctx, "t1", IngestInput{CustomerID: "cus_n", MeterID: "mtr_1", Quantity: dec(1), Timestamp: &at}); err != nil {
+		t.Fatalf("a backfill at the bound instant: %v", err)
+	}
+	later := at.Add(time.Second)
+	if _, err := svc.Backfill(ctx, "t1", IngestInput{CustomerID: "cus_n", MeterID: "mtr_1", Quantity: dec(1), Timestamp: &later}); err == nil {
+		t.Error("a backfill a second after the bound instant was accepted; want it refused as in the future")
 	}
 }
 

@@ -126,7 +126,7 @@ type attentionContext struct {
 	//
 	// Drawable applies the SAME liveness predicate the drawdown itself uses
 	// (drainPositiveBlocks: positive, not exhausted, not past expires_at,
-	// evaluated against the resolver's now) — so an expired-but-unswept grant
+	// evaluated at the request's instant) — so an expired-but-unswept grant
 	// reports 0 and the banner cannot claim spendable credit the drain would
 	// refuse to spend.
 	//
@@ -143,7 +143,7 @@ type attentionContext struct {
 	// Now is wall-clock now, used only to age the in-flight payment banner
 	// (processing → Info under the expected-settle window, Warning past it).
 	// Staleness is a REAL-WORLD duration (the provider settles in wall-clock),
-	// so this is wall-clock, not resolver-bound sim-time. Zero value disables
+	// so this is wall-clock time. Zero value disables
 	// the age escalation (the banner stays Info) — safe for callers that don't
 	// set it.
 	Now time.Time

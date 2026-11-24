@@ -77,7 +77,7 @@ The door is last, so the instant is read just before the handler runs: a request
    {"POST", "/v1/invoices/{id}/finalize"}: needs(invoiceWrite).withAudit(explicit("invoice.Service.Finalize (LogInTx)")),
    ```
    - who may call it: `needs(…)` with a permission value (`invoiceRead`, `invoiceWrite`, …), `membersSession`, `settingsSession` or `anyCaller`; or `outsideAuth()` for a route outside `/v1`'s authentication;
-   - `decidedIn("package.Type.Method")` before it, only when that function binds the route's time instead of the door, such as one that binds each of many records' own instant;
+   - `decidedIn("package.Type.Method")` before it, only when that function binds the route's time instead of the door: one read after the reads that check the request, or one per record when it works through many;
    - where its audit row comes from, if it changes state or exports: `.withAudit(explicit("…"))`, naming the function that writes it, or `.withAudit(exempt(reason, "…"))`, saying why it writes none;
    - `.withShowOnce()`, when its answer carries a secret shown once.
 3. **Describe it in `api/openapi.yaml`** ([OpenAPI workflow](dev/openapi-workflow.md)).

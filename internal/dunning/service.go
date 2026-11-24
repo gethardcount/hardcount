@@ -1130,7 +1130,7 @@ func (s *Service) retrySettledFirst(ctx context.Context, tenantID string, run do
 // that retry's instant. A caller must pass a ctx with the action's time
 // bound (processRun does); the final actions are dated at it.
 func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, stampAt, attemptAt time.Time) error {
-	// Its caller, processRun, decided the time and bound an instant.
+	// Its caller, processRun, bound the action's instant.
 	now := stampAt
 	if now.IsZero() {
 		now = s.clock.Now(ctx)
