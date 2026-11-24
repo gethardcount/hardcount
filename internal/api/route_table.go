@@ -22,9 +22,9 @@ type routeKey struct {
 }
 
 // routeDecl is one route's entry, built in steps. needs or outsideAuth says
-// who may call it, which makes the entry. Then withAudit adds its audit,
-// withShowOnce marks its answer, and withPaging, withQuery or withAnyQuery
-// says which query parameters it takes.
+// who may call it, which makes the entry. Then withPaging, withQuery or
+// withAnyQuery says which query parameters it takes, withAudit adds its
+// audit, and withShowOnce marks its answer.
 type routeDecl struct {
 	// access is who may call the route, which auth.RequirePermission checks;
 	// it is zero on a route outside authentication.
@@ -66,10 +66,9 @@ func (d routeDecl) withQuery(names ...string) routeDecl {
 }
 
 // withPaging is d taking a list's paging parameters, which respond.ParsePage
-// reads: limit and offset, and after, which ParsePage refuses with its own
-// message so a caller still holding a cursor learns to page with offset.
+// reads: limit and offset.
 func (d routeDecl) withPaging() routeDecl {
-	return d.withQuery("limit", "offset", "after")
+	return d.withQuery("limit", "offset")
 }
 
 // withAnyQuery is d taking any query parameter. It is for a route whose URL
@@ -305,7 +304,10 @@ var routeTable = map[routeKey]routeDecl{
 	{"GET", "/v1/public/invoices/{token}/pdf"}:              outsideAuth(),
 	{"GET", "/v1/public/payment-updates/{token}"}:           outsideAuth(),
 	{"POST", "/v1/public/payment-updates/{token}/checkout"}: outsideAuth().withAudit(explicit("payment.PublicPaymentHandler.createCheckoutSession (LogInTx)")),
-	{"GET", "/v1/public/cost-dashboard/{token}"}:            outsideAuth(),
+	// The cost dashboard's URL is given to the tenant's customers, who open it
+	// in a browser from a mail or a chat; those add their own tracking
+	// parameters to a link.
+	{"GET", "/v1/public/cost-dashboard/{token}"}: outsideAuth().withAnyQuery(),
 
 	// --- tenant-wide reads and streams ------------------------------------
 	{"GET", "/v1/webhook_events/stream"}: needs(apikeyRead),

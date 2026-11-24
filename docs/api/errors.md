@@ -350,7 +350,10 @@ A query string may hold only the parameters its operation lists in the
   names the first in sorted order.
 - A parameter sent with an empty value, such as `status=`, is still one the
   operation takes.
-- The Stripe and Postmark webhooks take any query string.
+- A query string that does not parse (a bad `%` escape, or `;` between
+  parameters) is refused whole, with no `param`.
+- The Stripe and Postmark webhooks and the cost dashboard's public link
+  take any query string.
 
 ## Answers in another shape
 

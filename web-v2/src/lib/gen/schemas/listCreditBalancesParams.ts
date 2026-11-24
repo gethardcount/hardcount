@@ -11,7 +11,6 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { AfterParameter } from './afterParameter';
 import type { LimitParameter } from './limitParameter';
 import type { ListCreditBalancesBalance } from './listCreditBalancesBalance';
 import type { OffsetParameter } from './offsetParameter';
@@ -40,10 +39,4 @@ limit?: LimitParameter;
  * @minimum 0
  */
 offset?: OffsetParameter;
-/**
- * Not supported: there is no cursor. A request that sends `after` is
- * a 422 with `param: after` and the message "after is not supported;
- * page with offset". Page with `offset`.
- */
-after?: AfterParameter;
 };

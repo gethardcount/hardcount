@@ -167,6 +167,26 @@ func TestRouteTable_AnyCallerStaysSmall(t *testing.T) {
 	}
 }
 
+// TestRouteTable_AnyQueryStaysSmall lists the routes that take any query
+// parameter, so one added to skip the query check shows in review.
+func TestRouteTable_AnyQueryStaysSmall(t *testing.T) {
+	var got []string
+	for k, d := range routeTable {
+		if d.anyQuery {
+			got = append(got, k.Method+" "+k.Pattern)
+		}
+	}
+	sort.Strings(got)
+	want := []string{
+		"GET /v1/public/cost-dashboard/{token}",
+		"POST /v1/webhooks/postmark",
+		"POST /v1/webhooks/stripe/{endpoint_id}",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("routes taking any query parameter: %v, want %v. A route takes any only when another party writes or adds to its URL.", got, want)
+	}
+}
+
 // TestRouteTable_SessionOnlyRoutesAreListed lists the routes only a dashboard
 // session may call, so a key permission given to one shows in review: on a
 // members route it would let any secret key change who belongs to the

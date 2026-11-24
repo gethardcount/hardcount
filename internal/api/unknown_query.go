@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"net/url"
 	"slices"
 
 	"github.com/gethardcount/hardcount/internal/api/respond"
@@ -15,13 +16,15 @@ import (
 // filter was sent. The answer is 422 validation_error with param naming the
 // first such parameter in sorted order, so the same request always gets the
 // same answer. A parameter sent with an empty value is still one the route
-// takes or not. A request no route serves passes, for the router's 404 or
-// 405.
+// takes or not. A query string that does not parse is refused whole: Go's
+// lenient reading drops the pairs it cannot read, and a dropped filter is the
+// same silent answer. A request no route serves passes, for the router's 404
+// or 405.
 //
-// It runs in every group, after authentication, the permission check and the
-// rate limit, so a caller who is not signed in gets 401 and never learns from
-// a 422 that a route exists; and before Idempotency, so a refused request
-// holds no key.
+// It runs in every group. Where the group has a caller check and a rate
+// limit, it runs after them, so a caller who is not signed in to a /v1 route
+// gets 401 and never learns from a 422 that the route exists. It runs before
+// Idempotency, so a refused request holds no key.
 func refuseUnknownQuery(next http.Handler) http.Handler {
 	return queryChecked{next: next}
 }
@@ -35,7 +38,12 @@ type queryChecked struct {
 func (h queryChecked) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	d, ok := routeTable[routeKeyOf(r.Context())]
 	if ok && !d.anyQuery {
-		if name, unknown := firstUnknownQuery(r, d.query); unknown {
+		q, err := url.ParseQuery(r.URL.RawQuery)
+		if err != nil {
+			respond.Validation(w, r, "the query string could not be read: check its escapes, and separate parameters with &")
+			return
+		}
+		if name, unknown := firstUnknownQuery(q, d.query); unknown {
 			respond.ValidationField(w, r, name, fmt.Sprintf("unknown query parameter %q", name))
 			return
 		}
@@ -43,10 +51,10 @@ func (h queryChecked) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.next.ServeHTTP(w, r)
 }
 
-// firstUnknownQuery is the first name in r's query string, in sorted order,
-// that takes does not list.
-func firstUnknownQuery(r *http.Request, takes []string) (string, bool) {
-	for _, name := range slices.Sorted(maps.Keys(r.URL.Query())) {
+// firstUnknownQuery is the first name in q, in sorted order, that takes does
+// not list.
+func firstUnknownQuery(q url.Values, takes []string) (string, bool) {
+	for _, name := range slices.Sorted(maps.Keys(q)) {
 		if !slices.Contains(takes, name) {
 			return name, true
 		}

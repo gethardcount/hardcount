@@ -51,7 +51,7 @@ Every request passes the root chain, then its group's chain, then its handler. I
 | — exports | general rate limit, query check, 5 minutes, the request's time |
 | — the event stream | general rate limit, query check, the request's time |
 
-The query check (`refuseUnknownQuery`) refuses a query parameter the route table does not list for the route. It comes after authentication, so a caller who is not signed in gets `401` and learns nothing about the route, and before Idempotency, so a refused request holds no key.
+The query check (`refuseUnknownQuery`) refuses a query parameter the route table does not list for the route. In the signed-in `/v1` groups it comes after authentication, so a caller who is not signed in gets `401` and learns nothing about the route. It comes before Idempotency, so a refused request holds no key. A query string that does not parse is refused whole.
 
 The request's time is bound last, so it is read just before the handler runs: a request that waits in an earlier step, such as Idempotency's wait for the first request with its key, does not run on a time read before the wait, and a replayed request never reads the clock.
 
@@ -83,7 +83,7 @@ The request's time is bound last, so it is read just before the handler runs: a 
    - who may call it: `needs(…)` with a permission value (`invoiceRead`, `invoiceWrite`, …), `membersSession`, `settingsSession` or `anyCaller`; or `outsideAuth()` for a route outside `/v1`'s authentication;
    - where its audit row comes from, if it changes state or exports: `.withAudit(explicit("…"))`, naming the function that writes it, or `.withAudit(exempt(reason, "…"))`, saying why it writes none;
    - `.withShowOnce()`, when its answer carries a secret shown once;
-   - the query parameters its handler reads: `.withPaging()` for a list's `limit`, `offset` and `after`, and `.withQuery("status", …)` for the rest. With neither, it takes none. `.withAnyQuery()` is only for a URL another party writes, such as a webhook's.
+   - the query parameters its handler reads: `.withPaging()` for a list's `limit` and `offset`, and `.withQuery("status", …)` for the rest. With neither, it takes none. `.withAnyQuery()` is only for a URL another party writes or adds to, such as a webhook's; `TestRouteTable_AnyQueryStaysSmall` lists those routes.
 3. **Describe it in `api/openapi.yaml`** ([OpenAPI workflow](dev/openapi-workflow.md)).
 4. **Read or write is your choice.** A route that changes data takes its area's write permission. `TestRouteTable_WritesNeedAWritePermission` fails on a `POST`, `PUT`, `PATCH` or `DELETE` that takes a read one, unless the test lists it with its reason.
 5. **What fails when a part is forgotten:**

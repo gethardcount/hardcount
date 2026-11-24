@@ -53,7 +53,8 @@ with `param` naming the parameter:
 - a `limit` below 1 or above 100;
 - a negative `offset`;
 - a `limit` or `offset` that is not a whole number, or that is sent twice;
-- `after`: there is no cursor. Page with `offset`.
+- `after`, like any query parameter a list does not take: there is no
+  cursor. Page with `offset`.
 
 ```json
 {
@@ -81,8 +82,8 @@ with `param` naming the parameter:
 ## Lists that answer in one piece
 
 These routes answer a set of rows in one response. They have no `total`, and
-they take no `limit`, `offset` or `after`: a request that sends one is refused
-with `422`, `param` naming it:
+they take no `limit` or `offset`: a request that sends one is refused with
+`422`, `param` naming it:
 
 - `GET /v1/usage-events/held` lists the 200 external customers whose held
   usage arrived last. `total_customers` and `total_rows` count all of it.

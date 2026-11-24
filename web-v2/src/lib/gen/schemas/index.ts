@@ -25,7 +25,6 @@ export * from './activityMoney';
 export * from './activityPart';
 export * from './addSubscriptionItemBody';
 export * from './adjustCreditsBody';
-export * from './afterParameter';
 export * from './aggregateUsageEventsParams';
 export * from './analyticsOverview';
 export * from './analyticsOverviewCreditBalanceByCurrencyItem';

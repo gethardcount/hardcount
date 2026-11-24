@@ -84,6 +84,17 @@ func TestRefuseUnknownQuery_RouteWithNoDeclarationRefusesAnyName(t *testing.T) {
 	}
 }
 
+// A query string Go cannot parse is refused whole, with no param: its lenient
+// reading drops the pair, and a dropped filter answers as if none was sent.
+func TestRefuseUnknownQuery_QueryThatDoesNotParseIs422(t *testing.T) {
+	for _, query := range []string{"staus=paid;", "status=paid;limit=5", "status=%zz"} {
+		status, param, message := queryCheckAnswer(t, "GET", "/v1/invoices", "/v1/invoices?"+query)
+		if status != http.StatusUnprocessableEntity || param != "" || message == "" {
+			t.Errorf("GET /v1/invoices?%s = %d, param %q, message %q; want 422 with a message and no param", query, status, param, message)
+		}
+	}
+}
+
 // A route marked withAnyQuery takes any name.
 func TestRefuseUnknownQuery_AnyQueryRoutePassesAnyName(t *testing.T) {
 	if status, param, _ := queryCheckAnswer(t, "POST", "/v1/webhooks/postmark", "/v1/webhooks/postmark?anything=1&else="); status != http.StatusNoContent {

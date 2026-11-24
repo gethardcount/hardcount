@@ -187,17 +187,6 @@ components:
         type: integer
         minimum: 0
         default: 0
-    After:
-      name: after
-      in: query
-      required: false
-      deprecated: true
-      description: |
-        Not supported: there is no cursor. A request that sends `after` is
-        a 422 with `param: after` and the message "after is not supported;
-        page with offset". Page with `offset`.
-      schema:
-        type: string
 
   headers:
     RetryAfter:
@@ -9866,7 +9855,6 @@ paths:
             default: desc
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: One page of customers, and how many match.
@@ -10446,7 +10434,6 @@ paths:
             type: string
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: One page of the emails, and how many there are in the 30 days.
@@ -10748,7 +10735,6 @@ paths:
             type: string
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: One page of payment methods, and how many there are.
@@ -12152,7 +12138,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: One page of meters, and how many there are.
@@ -12673,7 +12658,6 @@ paths:
             default: desc
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: Credit note list.
@@ -12976,7 +12960,6 @@ paths:
             enum: [out, low]
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: Balances.
@@ -13074,7 +13057,6 @@ paths:
             default: desc
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: Ledger entries. `total` counts entries matching the filter.
@@ -13262,7 +13244,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: One page of endpoints.
@@ -13581,7 +13562,6 @@ paths:
           description: The endpoint's id (`hc_whe_…`).
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: One page of the endpoint's deliveries.
@@ -13721,7 +13701,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: One row per endpoint
@@ -13766,7 +13745,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: One page of events.
@@ -14452,7 +14430,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: One page of plans, and how many there are.
@@ -14767,7 +14744,6 @@ paths:
             type: string
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: One page of prices, and how many the plan has.
@@ -15424,7 +15400,6 @@ paths:
             default: desc
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: Subscription list
@@ -17745,7 +17720,6 @@ paths:
             type: string
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: Event list
@@ -18628,7 +18602,6 @@ paths:
             default: desc
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: Invoice list
@@ -20653,7 +20626,6 @@ paths:
             type: string
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: The invoice's disputes.
@@ -20720,7 +20692,6 @@ paths:
             type: string
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: The invoice's refunds made in Stripe.
@@ -23400,7 +23371,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: One page of rates, and how many there are.
@@ -23983,7 +23953,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: One page of recipes, and how many there are.
@@ -24136,7 +24105,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: One page of install records, and how many there are.
@@ -25201,7 +25169,6 @@ paths:
             enum: [active, escalated, resolved]
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: Dunning run list.
@@ -25411,7 +25378,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: Policies
@@ -26023,7 +25989,6 @@ paths:
           description: Only this price's overrides.
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: One page of active overrides, and how many match.
@@ -26389,7 +26354,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: One page of keys.
@@ -27455,7 +27419,6 @@ paths:
           description: The only supported order. Any other value is a 400.
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
-        - $ref: "#/components/parameters/After"
       responses:
         "200":
           description: Audit entries
