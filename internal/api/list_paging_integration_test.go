@@ -71,7 +71,6 @@ var notListRoutes = map[string]string{
 	"/v1/members":                            "the team page: members and pending invitations in one answer (dashboard session only)",
 	"/v1/analytics/overview":                 "one object of figures",
 	"/v1/analytics/revenue-chart":            "a chart series for one period",
-	"/v1/analytics/mrr-movement":             "a chart series for one period",
 	"/v1/analytics/usage":                    "a chart series for one period",
 	"/v1/exports/audit-log.csv":              "a CSV download of every matching row",
 	"/v1/exports/customers.csv":              "a CSV download of every matching row",

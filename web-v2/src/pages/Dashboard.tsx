@@ -10,7 +10,7 @@ import { ATTENTION_LISTS, homeAttentionLines, type AttentionSeverity } from '@/l
 import type { Invoice } from '@/lib/api'
 import { timeAgo, wallClockNow } from '@/lib/effectiveNow'
 import { useNowResolver } from '@/hooks/useNow'
-import { CUSTOMERS_DEFINITION, FAILED_PAYMENTS_DEFINITION, MRR_DEFINITION, REVENUE_DEFINITION, currencyScopedHint, customersTrend, failedPaymentsTrend, subscriptionsHint } from '@/lib/homeKpis'
+import { CREDIT_HELD_DEFINITION, CREDIT_SOLD_DEFINITION, PAID_DEFINITION, USAGE_BILLED_DEFINITION, amountsCardValue, currencyScopedHint } from '@/lib/homeKpis'
 import { LoadError } from '@/components/LoadError'
 import { FeedSkeleton } from '@/components/ui/TableSkeleton'
 import { cn } from '@/lib/utils'
@@ -84,16 +84,20 @@ export default function DashboardPage() {
 
   // Needs attention: each count is the total of the list its line opens
   // (lib/homeAttention), so the line and the list never disagree.
+  const { data: outOfCredit } = useListTotal('outOfCredit', () => api.listBalanceTotal(ATTENTION_LISTS.outOfCredit.query))
+  const { data: lowOnCredit } = useListTotal('lowOnCredit', () => api.listBalanceTotal(ATTENTION_LISTS.lowOnCredit.query))
   const { data: failedOpen } = useListTotal('failed', () => api.listInvoices(`${ATTENTION_LISTS.failed.query}&limit=1`))
   const { data: retrying } = useListTotal('retrying', () => api.listDunningRuns(`${ATTENTION_LISTS.retrying.query}&limit=1`))
   const { data: openTotal } = useListTotal('open', () => api.listInvoices(`${ATTENTION_LISTS.open.query}&limit=1`))
   const alerts = useMemo(() => homeAttentionLines({
+    outOfCredit,
+    lowOnCredit,
     failed: failedOpen,
     retrying,
     open: openTotal,
     refunds: overview?.refunds_needing_attention,
     outstanding: overview?.outstanding_by_currency,
-  }), [failedOpen, retrying, openTotal, overview])
+  }), [outOfCredit, lowOnCredit, failedOpen, retrying, openTotal, overview])
 
   return (
     <>
@@ -157,40 +161,31 @@ export default function DashboardPage() {
           {/* KPI row */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
             <TrendCard
-              label="MRR"
-              definition={MRR_DEFINITION}
-              value={formatCents(overview.mrr, overview.currency)}
-              current={overview.mrr}
-              previous={overview.mrr_prev}
-              hint={currencyScopedHint(`ARR ${formatCents(overview.arr, overview.currency)}`, overview.currency)}
+              label="Credit held"
+              definition={CREDIT_HELD_DEFINITION}
+              value={amountsCardValue(overview.credit_balance_by_currency, overview.currency)}
             />
             <TrendCard
-              label="Revenue"
-              definition={REVENUE_DEFINITION}
+              label="Credit sold"
+              definition={CREDIT_SOLD_DEFINITION}
+              value={amountsCardValue(overview.credit_sold_by_currency, overview.currency)}
+            />
+            <TrendCard
+              label="Paid"
+              definition={PAID_DEFINITION}
               value={formatCents(overview.revenue, overview.currency)}
               current={overview.revenue}
               previous={overview.revenue_prev}
               hint={currencyScopedHint(`${overview.paid_invoices} ${overview.paid_invoices === 1 ? 'invoice' : 'invoices'} paid`, overview.currency)}
             />
             <TrendCard
-              label="Customers"
-              definition={CUSTOMERS_DEFINITION}
-              value={overview.live_customers}
-              {...customersTrend(overview)}
-              hint={subscriptionsHint(overview)}
-            />
-            <TrendCard
-              label="Failed payments"
-              definition={FAILED_PAYMENTS_DEFINITION}
-              value={overview.failed_payments}
-              {...failedPaymentsTrend(overview)}
-              inverseDelta
-              valueTone={overview.failed_payments > 0 ? 'danger' : 'default'}
-              hint={`${overview.failed_payments_prev} in the previous ${PERIOD_LABELS[period].toLowerCase()}`}
+              label="Usage billed"
+              definition={USAGE_BILLED_DEFINITION}
+              value={amountsCardValue(overview.usage_billed_by_currency, overview.currency)}
             />
           </div>
 
-          {/* Revenue chart */}
+          {/* What customers paid, per day or month */}
           {chartLoading ? (
             <div className="mt-6"><ChartCardSkeleton height={220} /></div>
           ) : (
@@ -198,12 +193,12 @@ export default function DashboardPage() {
               <CardContent className="p-5">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <p className="text-sm font-medium text-foreground">Revenue</p>
+                    <p className="text-sm font-medium text-foreground">Paid</p>
                     <p className="text-xs text-muted-foreground mt-0.5">Last {PERIOD_LABELS[period].toLowerCase()}</p>
                   </div>
                 </div>
                 {chartData.length > 0 ? (
-                  <div role="img" aria-label={`Revenue trend over the last ${PERIOD_LABELS[period].toLowerCase()}`}>
+                  <div role="img" aria-label={`Paid over the last ${PERIOD_LABELS[period].toLowerCase()}`}>
                   <ResponsiveContainer width="100%" height={220}>
                     <AreaChart data={chartSeries} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
                       <defs>
@@ -228,7 +223,7 @@ export default function DashboardPage() {
                         width={55}
                       />
                       <Tooltip
-                        formatter={(value) => [formatCents(Number(value), overview.currency), 'Revenue']}
+                        formatter={(value) => [formatCents(Number(value), overview.currency), 'Paid']}
                         labelFormatter={(label) => revenueBucketLabel(String(label))}
                         contentStyle={tooltipStyle(theme)}
                         itemStyle={{ color: theme.tooltipText }}
@@ -249,7 +244,7 @@ export default function DashboardPage() {
                 ) : (
                   <div className="h-[220px] flex items-center justify-center text-sm text-muted-foreground">
                     {/* The chart sums the workspace currency only, like the
-                        Revenue card, so the empty text names it. */}
+                        Paid card, so the empty text names it. */}
                     No paid {overview.currency?.toUpperCase()} invoices in this period.
                   </div>
                 )}

@@ -868,12 +868,10 @@ func TestCreate(t *testing.T) {
 		if sub.StartedAt == nil {
 			t.Error("started_at should be set")
 		}
-		// Immediate activation must stamp activated_at — MRR movement /
-		// point-in-time / churn key on it as the MRR-start event. A NULL
-		// here (the old bug) makes the sub count in headline MRR but
-		// vanish from New/Net movement, so the dashboard never reconciles.
+		// Immediate activation must stamp activated_at: an active
+		// subscription has a time it became active.
 		if sub.ActivatedAt == nil {
-			t.Error("a start-now create must stamp activated_at (else invisible to MRR movement)")
+			t.Error("a start-now create must stamp activated_at")
 		} else if sub.StartedAt != nil && !sub.ActivatedAt.Equal(*sub.StartedAt) {
 			t.Errorf("activated_at %v should equal started_at %v on a start-now create", *sub.ActivatedAt, *sub.StartedAt)
 		}

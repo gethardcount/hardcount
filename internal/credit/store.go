@@ -53,9 +53,9 @@ type Store interface {
 	GetSpendableBalance(ctx context.Context, tenantID, customerID string, at time.Time) (map[string]int64, error)
 	// GetSpendableBalanceTx is GetSpendableBalance on the caller's tx.
 	GetSpendableBalanceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID string, at time.Time) (map[string]int64, error)
-	// ListBalances returns one page of the (customer, currency) balances and
-	// how many there are.
-	ListBalances(ctx context.Context, tenantID string, limit, offset int) ([]domain.CreditBalance, int, error)
+	// ListBalances returns one page of the (customer, currency) balances the
+	// filter picks ("" for all) and how many there are.
+	ListBalances(ctx context.Context, tenantID string, filter domain.CreditBalanceFilter, limit, offset int) ([]domain.CreditBalance, int, error)
 	ListEntries(ctx context.Context, filter ListFilter) ([]domain.CreditLedgerEntry, error)
 	// CountEntries returns the TOTAL rows matching the filter (limit/
 	// offset/sort ignored) so paginated consumers can be honest about

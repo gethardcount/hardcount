@@ -825,9 +825,9 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		billingAnchorDay = anchorDay
 	} else {
 		startedAt = &now
-		// MRR movement, point-in-time MRR and churn key on activated_at as
-		// the MRR-start event, so a subscription that starts now is stamped
-		// here. A trialing one is stamped when its trial ends.
+		// activated_at is when the subscription became active, so one that
+		// starts now is stamped here. A trialing one is stamped when its
+		// trial ends.
 		activatedAt = &now
 		interval, err := s.firstPlanInterval(ctx, tenantID, items)
 		if err != nil {

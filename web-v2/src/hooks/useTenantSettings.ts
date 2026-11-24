@@ -19,11 +19,16 @@ export function useTenantSettings() {
 // writeSavedSettings puts a Settings save's answer into the settings query of
 // every client given: both modes' (useBothModeQueryClients), since test and
 // live mode share the settings. When the default currency changed, it also
-// marks stale the figures the server scopes to it.
+// marks stale the figures the server scopes to it; when the low-balance
+// threshold changed, the balances it picks.
 export function writeSavedSettings(clients: readonly QueryClient[], saved: TenantSettings) {
   for (const client of clients) {
     const before = client.getQueryData(tenantSettingsQuery.queryKey)
     client.setQueryData(tenantSettingsQuery.queryKey, saved)
     if (before?.default_currency !== saved.default_currency) invalidateDefaultCurrencyFigures(client)
+    if (before?.credit_balance_low_threshold_cents !== saved.credit_balance_low_threshold_cents) {
+      client.invalidateQueries({ queryKey: ['home-attention', 'lowOnCredit'] })
+      client.invalidateQueries({ queryKey: ['credits', 'balances', 'low'] })
+    }
   }
 }

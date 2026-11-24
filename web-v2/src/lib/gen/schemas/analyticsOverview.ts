@@ -11,76 +11,51 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { AnalyticsMrrMovementTotals } from './analyticsMrrMovementTotals';
 import type { AnalyticsOverviewCreditBalanceByCurrencyItem } from './analyticsOverviewCreditBalanceByCurrencyItem';
+import type { AnalyticsOverviewCreditSoldByCurrencyItem } from './analyticsOverviewCreditSoldByCurrencyItem';
 import type { AnalyticsOverviewOutstandingByCurrencyItem } from './analyticsOverviewOutstandingByCurrencyItem';
+import type { AnalyticsOverviewUsageBilledByCurrencyItem } from './analyticsOverviewUsageBilledByCurrencyItem';
 import type { AnalyticsPeriod } from './analyticsPeriod';
 
 /**
  * The dashboard's headline metrics, from `GET /v1/analytics/overview`.
  * "The window" is the requested period, ending now. "The previous
  * window" is the one of equal length before it. Money is in the minor
- * unit of `currency` (cents for USD). Rates are fractions, so 0.05
- * means 5%.
+ * unit of `currency` (cents for USD), except in the lists that carry a
+ * currency on each entry. Amounts in two currencies are never added
+ * together.
  */
 export interface AnalyticsOverview {
   period: AnalyticsPeriod;
-  /** The account's default currency (USD when none is set). Every money field uses it, except `credit_balance_by_currency` and `outstanding_by_currency`, which carry their own. */
+  /** The account's default currency (USD when none is set). `revenue` and `paid_invoices` use it. Each `..._by_currency` list carries its own currency on each entry, with this one first. */
   currency: string;
-  /**
-     * MRR now, from plan base fees only (base amount times quantity,
-     * yearly plans divided by 12) on `active` subscriptions with plans
-     * in `currency`. Trialing subscriptions and usage charges are not
-     * counted.
-     */
-  mrr: number;
-  /** MRR at the start of the window, rebuilt from item change history. */
-  mrr_prev: number;
-  /** `mrr` times 12. */
-  arr: number;
-  /** `mrr_prev` times 12. */
-  arr_prev: number;
   /** What customers paid for the invoices paid in the window, by card or offline. Credit applied to an invoice is not counted again; credit bought ahead counts when it was paid. A credit note that lowered an invoice before it was paid is not counted. */
   revenue: number;
   /** `revenue` for the previous window. */
   revenue_prev: number;
-  /** Amount due on finalized invoices whose payment has not succeeded, in `currency` only. */
-  outstanding_ar: number;
   /**
      * Amount due on the invoices `open_invoices` counts, one entry per
      * currency. `currency` comes first, then the largest amount. Empty
      * when nothing is owed.
      */
   outstanding_by_currency: AnalyticsOverviewOutstandingByCurrencyItem[];
-  /** Average total of invoices paid in the window. */
-  avg_invoice_value: number;
   /** Customers' credit balances added up per currency, `currency` first, then largest. A currency whose balance is zero is left out. */
   credit_balance_by_currency: AnalyticsOverviewCreditBalanceByCurrencyItem[];
   /**
-     * Customer records with status `active`. Includes customers with
-     * no subscription or only canceled ones; `live_customers` counts
-     * the customers you bill.
+     * Credit granted by the top-ups paid in the window, one entry per
+     * currency, `currency` first, then largest. It is the credit the
+     * customer got, not what they paid: a top-up sold at a discount
+     * (pay $90 for $100 of credit) counts $100 here and $90 in
+     * `revenue`. An unpaid top-up is not counted.
      */
-  active_customers: number;
-  /** Customers created in the window. */
-  new_customers: number;
-  /** Customers with at least one `active` or `trialing` subscription now. */
-  live_customers: number;
+  credit_sold_by_currency: AnalyticsOverviewCreditSoldByCurrencyItem[];
   /**
-     * `live_customers` at the start of the window, rebuilt from
-     * subscription start and cancel times.
+     * Usage lines on the invoices issued in the window and not voided, one entry per currency, `currency` first, then
+     * largest. A currency with no usage billed is left out.
      */
-  live_customers_prev: number;
-  /** Subscriptions with status `active`. */
-  active_subscriptions: number;
-  /** Subscriptions with status `trialing`. */
-  trialing_subscriptions: number;
+  usage_billed_by_currency: AnalyticsOverviewUsageBilledByCurrencyItem[];
   /** Invoices in `currency` paid in the window. */
   paid_invoices: number;
-  /** Open invoices created in the window whose payment failed. A voided or written-off invoice is not counted. All currencies. */
-  failed_payments: number;
-  /** `failed_payments` for the previous window. */
-  failed_payments_prev: number;
   /** Finalized invoices whose payment has not succeeded. All currencies. */
   open_invoices: number;
   /** Dunning runs (automatic payment retries) still in progress. */
@@ -94,17 +69,4 @@ export interface AnalyticsOverview {
   refunds_needing_attention: number;
   /** Usage events with a timestamp in the window. */
   usage_events: number;
-  /** Subscriptions canceled in the window, divided by subscriptions active at its start. 0 when none were active. */
-  logo_churn_rate: number;
-  /** Churned MRR divided by `mrr_prev`. 0 when `mrr_prev` is 0. */
-  revenue_churn_rate: number;
-  /**
-     * Net revenue retention: (`mrr_prev` + expansion - contraction -
-     * churned) divided by `mrr_prev`. Can be above 1. 0 when
-     * `mrr_prev` is 0.
-     */
-  nrr: number;
-  /** Dunning runs opened in the window that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0), divided by all runs opened in the window. A run closed by a void, a write-off, or a credit note or customer credit that left nothing due is not recovered. 0 when none were opened. */
-  dunning_recovery_rate: number;
-  mrr_movement: AnalyticsMrrMovementTotals;
 }

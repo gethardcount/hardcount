@@ -753,8 +753,8 @@ func (s *Service) LiveBalance(ctx context.Context, tenantID, customerID string) 
 	return s.live.LiveCreditBalance(ctx, tenantID, customerID)
 }
 
-func (s *Service) ListBalances(ctx context.Context, tenantID string, limit, offset int) ([]domain.CreditBalance, int, error) {
-	return s.store.ListBalances(ctx, tenantID, limit, offset)
+func (s *Service) ListBalances(ctx context.Context, tenantID string, filter domain.CreditBalanceFilter, limit, offset int) ([]domain.CreditBalance, int, error) {
+	return s.store.ListBalances(ctx, tenantID, filter, limit, offset)
 }
 
 func (s *Service) ListEntries(ctx context.Context, filter ListFilter) ([]domain.CreditLedgerEntry, error) {

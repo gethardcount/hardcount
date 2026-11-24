@@ -11,11 +11,11 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { AnalyticsPeriod } from './analyticsPeriod';
 
-export type GetAnalyticsMrrMovementParams = {
-/**
- * The window. Any other value is treated as `30d`. `12m` is 365 days.
- */
-period?: AnalyticsPeriod;
-};
+export type ListCreditBalancesBalance = typeof ListCreditBalancesBalance[keyof typeof ListCreditBalancesBalance];
+
+
+export const ListCreditBalancesBalance = {
+  out: 'out',
+  low: 'low',
+} as const;

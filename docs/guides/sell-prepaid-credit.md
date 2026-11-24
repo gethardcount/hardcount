@@ -298,7 +298,8 @@ threshold.
 - **The threshold** is **Settings → Invoicing → Credit low-balance alert**
   (`credit_balance_low_threshold_cents`). It is one number for the whole
   account, applied in each currency's own units, not one per customer.
-  With none set, the event is never sent.
+  With none set, the event is never sent. Home also lists the balances
+  below it, and the ones that ran out, under "needs attention".
 - **It fires once per crossing:** when one change takes a currency's balance
   from at or above the threshold to below it. Further spending below the
   threshold sends nothing more, until the balance is back at or above it.
