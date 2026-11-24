@@ -1103,13 +1103,13 @@ func classifyPaymentAnomaly(inv domain.Invoice) *domain.Attention {
 // actions makes it. The Stripe dispute id goes in Detail, where the Stripe
 // dashboard search needs it.
 //
-// A paid invoice that bought prepaid credit is different in two ways: the
-// credit stays spendable after the bank took the money back, and an ordinary
-// credit note is refused there (ADR-078 D4). Commit relief is the one action
-// that retires the credit (ADR-080), so the notice names it, with the
-// spendable amount up front. The service reads the grant for exactly this
-// case (decorateInvoice). Relief is for paid invoices only, so the branch is
-// too.
+// A paid invoice that bought prepaid credit is different: the credit stays
+// spendable after the bank took the money back, and both an ordinary credit
+// note (ADR-078 D4) and commit relief (ADR-080, refused after a lost dispute)
+// are refused there. Hardcount does not take the credit back, so the notice
+// says how much is still spendable and how to stop the spending. The service
+// reads the grant for exactly this case (decorateInvoice). The branch is for
+// paid invoices only.
 func classifyDisputeLost(inv domain.Invoice, d domain.InvoiceDispute, atc attentionContext) *domain.Attention {
 	since := inv.UpdatedAt
 	if d.ClosedAt != nil {
@@ -1129,11 +1129,9 @@ func classifyDisputeLost(inv domain.Invoice, d domain.InvoiceDispute, atc attent
 	case inv.Status == domain.InvoicePaid && drawable > 0:
 		message = "The customer's bank took back " + taken + " after a lost dispute, and the customer can still spend " +
 			domain.FormatMoneyMinor(drawable, inv.Currency) + " of this invoice's prepaid credit." +
-			"\nRetire that credit with commit relief, recorded as money returned outside Hardcount."
-		detail += " The prepaid credit stays spendable until you retire it. An ordinary credit note is refused on an invoice that bought prepaid credit: " +
-			"use POST /v1/credit-notes with commit_relief {\"retire_all\": true, \"out_of_band_amount_cents\": <amount>}, the amount inside commit_relief and never as a card refund, because the bank already returned the money. " +
-			"If the amount you send differs, the answer names the right one. " +
-			"Relief returns at most the price paid for the unspent credit; record any rest of the loss in your own books."
+			"\nHardcount does not take that credit back, so pause the customer's key at your gateway to stop the spending."
+		detail += " A refund of the unused credit is refused after a lost dispute, since the bank already returned the money, and an ordinary credit note is refused on an invoice that bought prepaid credit. " +
+			"Record the loss in your own books."
 	case inv.Status == domain.InvoicePaid && spent > 0:
 		message = "The customer's bank took back " + taken +
 			" after a lost dispute, so bill the customer again or write it off in your books."

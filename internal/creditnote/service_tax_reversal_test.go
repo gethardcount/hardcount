@@ -449,11 +449,8 @@ func TestRetryPendingCreditNoteTaxReversal_RecoversANoteWhoseInlineReversalNever
 // fakeCreditGranter satisfies the CreditGranter optional dep so
 // CreateRefund doesn't blow up when refund_type is credit.
 type fakeCreditGranter struct {
-	cnCalls                                        []fakeCreditGranterCNCall
-	seenCNIDs                                      map[string]bool
-	commitGranted, commitConsumed, commitCNRetired int64
-	commitFound                                    bool
-	retiredSlices, refundedGross                   []int64
+	cnCalls   []fakeCreditGranterCNCall
+	seenCNIDs map[string]bool
 }
 
 type fakeCreditGranterCNCall struct {
@@ -476,19 +473,13 @@ func (f *fakeCreditGranter) GrantForCreditNoteTx(_ context.Context, _ *sql.Tx, _
 	return nil
 }
 
-// Relief-pair stubs: unit doubles carry a configurable commit grant so the
-// relief coordinator's math is unit-testable; lock semantics are proven on
-// real Postgres.
-func (f *fakeCreditGranter) LockCommitGrantForReliefTx(_ context.Context, _ *sql.Tx, _, _ string) (int64, int64, int64, bool, error) {
-	return f.commitGranted, f.commitConsumed, f.commitCNRetired, f.commitFound, nil
+// Relief is proven on real Postgres; the unit double holds no commit grant.
+func (f *fakeCreditGranter) LockCommitGrantForReliefTx(context.Context, *sql.Tx, string, string, time.Time) (ReliefGrant, bool, error) {
+	return ReliefGrant{}, false, nil
 }
 
-func (f *fakeCreditGranter) RetireCommitSliceForReliefTx(_ context.Context, _ *sql.Tx, _, _, _ string, slice, refundedGross, _ int64) (int64, error) {
-	f.retiredSlices = append(f.retiredSlices, slice)
-	f.refundedGross = append(f.refundedGross, refundedGross)
-	f.commitConsumed += slice
-	f.commitCNRetired += slice
-	return f.commitGranted - f.commitConsumed, nil
+func (f *fakeCreditGranter) RetireCommitSliceForReliefTx(context.Context, *sql.Tx, string, string, string, string, int64, int64, int64) (int64, error) {
+	return 0, errors.New("fakeCreditGranter: commit relief is proven on real Postgres")
 }
 
 // An invoice Stripe Tax recorded with no tax still has a tax transaction: it

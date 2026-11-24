@@ -16,7 +16,8 @@
  * Mutually exclusive with lines and credit_amount_cents. The
  * relief's split goes in here, not at the top level: a top-level
  * `refund_amount_cents`, `out_of_band_amount_cents` or
- * `refund_type` is a 422. Example after a lost dispute:
+ * `refund_type` is a 422. Example, all the unused credit
+ * refunded outside Stripe:
  * `{"invoice_id": "hc_inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
  */
 export type CreateCreditNoteBodyCommitRelief = {
@@ -24,12 +25,12 @@ export type CreateCreditNoteBodyCommitRelief = {
   invoice_id?: string;
   /**
      * Optional. Wins over the top-level `reason`. When both
-     * are empty, the note's reason is `commit_relief`.
+     * are empty, the note's reason is `Unused prepaid credit refunded`.
      */
   reason?: string;
-  /** Commit credits to retire, from 1 to what is left of the commit. */
+  /** Credit to retire, in the currency's minor unit (cents for USD), from 1 to the unused credit. More than is unused is a 422 that names the figure. */
   retire_cents?: number;
-  /** Retire all the commit credit left at the moment the relief runs, so credit the customer spends meanwhile is not counted. `retire_cents` is then ignored. */
+  /** Retire all the unused credit at the moment the relief runs, so credit the customer spends meanwhile is not counted. `retire_cents` is then ignored. */
   retire_all?: boolean;
   /** Optional. Part of the cash refunded to the card. With `out_of_band_amount_cents` it must add up to the cash Hardcount works out. When both are left out, the cash goes to the card if the invoice was paid by card, otherwise out of band. */
   refund_amount_cents?: number;

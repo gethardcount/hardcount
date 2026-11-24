@@ -26,7 +26,7 @@ type cnCapturingSender struct {
 	pdf      []byte
 }
 
-func (c *cnCapturingSender) SendCreditNote(_ context.Context, _, to string, cc []string, _, cnNumber, invoiceNumber string, amountCents int64, _ string, pdf []byte) error {
+func (c *cnCapturingSender) SendCreditNote(_ context.Context, _, to string, cc []string, _, cnNumber, invoiceNumber string, amountCents, _ int64, _ string, pdf []byte) error {
 	c.called = true
 	c.to, c.cc, c.cnNumber, c.invoice, c.amount, c.pdf = to, cc, cnNumber, invoiceNumber, amountCents, pdf
 	return nil

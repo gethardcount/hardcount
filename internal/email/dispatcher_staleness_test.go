@@ -52,7 +52,7 @@ func (r *recordingDeliverer) SendMemberInvite(_ context.Context, _, _, _, _, _ s
 	r.sent = append(r.sent, TypeMemberInvite)
 	return nil
 }
-func (r *recordingDeliverer) SendCreditNote(_ context.Context, _, _ string, _ []string, _, _, _ string, _ int64, _ string, _ []byte) error {
+func (r *recordingDeliverer) SendCreditNote(_ context.Context, _, _ string, _ []string, _, _, _ string, _, _ int64, _ string, _ []byte) error {
 	r.sent = append(r.sent, TypeCreditNote)
 	return nil
 }

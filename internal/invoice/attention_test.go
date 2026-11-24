@@ -1810,10 +1810,10 @@ func TestClassifyDisputeLost_PrepaidCommit(t *testing.T) {
 		if !strings.Contains(att.Message, domain.FormatMoneyMinor(6000, "USD")) {
 			t.Errorf("message %q must say how much prepaid credit is still spendable", att.Message)
 		}
-		if !strings.Contains(att.Message, "commit relief") {
-			t.Errorf("message %q must name commit relief, the action that retires the credit", att.Message)
+		if !strings.Contains(att.Message, "pause the customer's key") || strings.Contains(att.Message, "commit relief") {
+			t.Errorf("message %q must say to pause the key, and not name commit relief, which is refused after a loss", att.Message)
 		}
-		for _, want := range []string{"commit_relief", "retire_all", "out_of_band_amount_cents", "du_lost_1"} {
+		for _, want := range []string{"refused after a lost dispute", "du_lost_1"} {
 			if !strings.Contains(att.Detail, want) {
 				t.Errorf("detail %q does not name %q", att.Detail, want)
 			}

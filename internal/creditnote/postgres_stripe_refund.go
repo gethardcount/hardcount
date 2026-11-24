@@ -206,6 +206,75 @@ func (s *PostgresStore) AttachStripeRefundTx(ctx context.Context, tx *sql.Tx, cr
 	return n == 1, nil
 }
 
+// StripeRefundedOutsideNotesTx sums, on the caller's tx, the refunds made in
+// Stripe of payment paymentIntentID on the invoice that moved or may still
+// move money (succeeded, pending, requires_action) and that no credit note
+// holds: what left the card besides the notes' own refunds. The operator's
+// decision on the row (needs review, dismissed) does not matter, because the
+// money left either way. A refund of another payment is not this card's. Zero
+// when there is no payment.
+func (s *PostgresStore) StripeRefundedOutsideNotesTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) (int64, error) {
+	if paymentIntentID == "" {
+		return 0, nil
+	}
+	var sum int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(r.amount_cents), 0) FROM invoice_stripe_refunds r
+		WHERE r.invoice_id = $1 AND r.stripe_payment_intent_id = $2
+		  AND r.status IN ('succeeded', 'pending', 'requires_action')
+		  AND r.credit_note_id IS NULL
+		  AND NOT EXISTS (SELECT 1 FROM credit_notes n WHERE n.tenant_id = r.tenant_id AND n.stripe_refund_id = r.stripe_refund_id)`,
+		invoiceID, paymentIntentID).Scan(&sum); err != nil {
+		return 0, fmt.Errorf("sum refunds made in Stripe on invoice %s: %w", invoiceID, err)
+	}
+	return sum, nil
+}
+
+// ReturnRefundAnotherWayTx moves an issued note's failed card refund to
+// out_of_band on tx, as a CAS on the refund amount the caller read: false when
+// the note moved since. The refund id stays on the note, as the record of the
+// refund that failed.
+func (s *PostgresStore) ReturnRefundAnotherWayTx(ctx context.Context, tx *sql.Tx, creditNoteID string, refundCents int64) (bool, error) {
+	res, err := tx.ExecContext(ctx, `
+		UPDATE credit_notes SET out_of_band_amount_cents = out_of_band_amount_cents + refund_amount_cents,
+			refund_amount_cents = 0, refund_status = 'none', refund_unknown_key = NULL,
+			returned_another_way_at = $3, updated_at = $3
+		WHERE id = $1 AND status = 'issued' AND refund_status = 'failed' AND refund_amount_cents = $2 AND refund_amount_cents > 0`,
+		creditNoteID, refundCents, clock.Now(ctx))
+	if err != nil {
+		return false, fmt.Errorf("move the refund of credit note %s to out_of_band: %w", creditNoteID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
+// ClaimFailedRefundForRetry moves an issued note's failed card refund to
+// pending, as a CAS: false when the refund is no longer failed. Retry refund
+// claims its attempt this way before it calls Stripe, so "returned another
+// way", whose CAS needs the refund failed, loses while a retry runs.
+func (s *PostgresStore) ClaimFailedRefundForRetry(ctx context.Context, tenantID, creditNoteID string) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return false, err
+	}
+	defer postgres.Rollback(tx)
+	res, err := tx.ExecContext(ctx, `
+		UPDATE credit_notes SET refund_status = 'pending', updated_at = $2
+		WHERE id = $1 AND status = 'issued' AND refund_status = 'failed' AND refund_amount_cents > 0`,
+		creditNoteID, clock.Now(ctx))
+	if err != nil {
+		return false, fmt.Errorf("claim the refund retry of credit note %s: %w", creditNoteID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, tx.Commit()
+}
+
 func (s *PostgresStore) LinkStripeRefundTx(ctx context.Context, tx *sql.Tx, id, creditNoteID string) (domain.InvoiceStripeRefund, error) {
 	var out domain.InvoiceStripeRefund
 	err := tx.QueryRowContext(ctx, `
@@ -244,10 +313,13 @@ func (s *PostgresStore) DismissStripeRefundTx(ctx context.Context, tx *sql.Tx, i
 // ApplyRefundWebhookStatusAudited (failed > succeeded > pending; an unknown
 // row is never moved by a webhook), on the caller's tx.
 func (s *PostgresStore) ApplyRefundWebhookStatusTx(ctx context.Context, tx *sql.Tx, stripeRefundID string, status domain.RefundStatus) (domain.CreditNote, bool, bool, error) {
+	// A note with no card refund has no refund status to move: its failed
+	// refund was returned another way (ReturnRefundAnotherWayTx).
 	var cn domain.CreditNote
 	err := tx.QueryRowContext(ctx, `
 		UPDATE credit_notes SET refund_status=$1, updated_at=$2
 		WHERE stripe_refund_id=$3
+		  AND refund_amount_cents > 0
 		  AND refund_status IS DISTINCT FROM $1
 		  AND refund_status NOT IN ('failed', 'unknown')
 		  AND ($1 = 'failed' OR refund_status <> 'succeeded')

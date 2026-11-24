@@ -5,9 +5,14 @@ import "time"
 // DisputeStatus is Stripe's Dispute.status, stored as Stripe sends it
 // (https://docs.stripe.com/api/disputes/object#dispute_object-status). The
 // warning_* values are an inquiry: the card network asks about the payment
-// before any chargeback. The other values are a chargeback.
+// before any chargeback. The other values are a chargeback. Stripe sends the
+// appeal_* values only when appeals are turned on: under_review moves to
+// appeal_needs_response when the bank rejects the response and the dispute
+// can be appealed, then to appeal_under_review once the appeal is sent, and
+// the dispute closes won or lost. Closing it at appeal_needs_response makes it
+// lost.
 //
-// The column's CHECK lists the same eight values (migration 00185). The
+// The column's CHECK lists the same ten values (migration 00246). The
 // webhook handler refuses, loudly, a status that Stripe adds later, until both
 // lists are extended together.
 type DisputeStatus string
@@ -18,12 +23,14 @@ const (
 	DisputeWarningClosed        DisputeStatus = "warning_closed"
 	DisputeNeedsResponse        DisputeStatus = "needs_response"
 	DisputeUnderReview          DisputeStatus = "under_review"
+	DisputeAppealNeedsResponse  DisputeStatus = "appeal_needs_response"
+	DisputeAppealUnderReview    DisputeStatus = "appeal_under_review"
 	DisputeWon                  DisputeStatus = "won"
 	DisputeLost                 DisputeStatus = "lost"
 	DisputePrevented            DisputeStatus = "prevented"
 )
 
-// Valid reports whether s is one of the eight statuses Hardcount stores.
+// Valid reports whether s is one of the ten statuses Hardcount stores.
 func (s DisputeStatus) Valid() bool {
 	return s.stage() > 0
 }
@@ -35,12 +42,20 @@ func (s DisputeStatus) Closed() bool {
 	return s.stage() == disputeStageClosed
 }
 
-const disputeStageClosed = 5
+// Inquiry reports whether s is an inquiry, not a chargeback: the card
+// network asks about the payment, and no money has left yet.
+func (s DisputeStatus) Inquiry() bool {
+	return s == DisputeWarningNeedsResponse || s == DisputeWarningUnderReview || s == DisputeWarningClosed
+}
+
+const disputeStageClosed = 7
 
 // stage orders statuses along the dispute's life, so two snapshots stamped in
 // the same second apply in the order they happened: an inquiry before the
-// chargeback it became, an open dispute before its close. Statuses at the
-// same stage do not order each other. 0 means not a status Hardcount knows.
+// chargeback it became, a review before its appeal, an open dispute before its
+// close. Statuses at the same stage do not order each other. 0 means not a
+// status Hardcount knows. A close outranks an appeal, so a closed dispute
+// never reads as open.
 func (s DisputeStatus) stage() int {
 	switch s {
 	case DisputeWarningNeedsResponse:
@@ -51,6 +66,10 @@ func (s DisputeStatus) stage() int {
 		return 3
 	case DisputeUnderReview:
 		return 4
+	case DisputeAppealNeedsResponse:
+		return 5
+	case DisputeAppealUnderReview:
+		return 6
 	case DisputeWarningClosed, DisputeWon, DisputeLost, DisputePrevented:
 		return disputeStageClosed
 	default:

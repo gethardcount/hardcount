@@ -12,6 +12,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/activity"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/listorder"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -342,10 +343,8 @@ func (s *PostgresStore) insertEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 //     backdated ApplyToInvoiceAtomic (at <= expires_at passes the eligibility
 //     filter on a not-yet-retired grant) can drain the grant between the
 //     list read and this call. `remaining` is therefore recomputed HERE,
-//     under the same FOR UPDATE row lock the apply/adjust paths take —
-//     that row lock is the ONLY mutual exclusion between expiry and
-//     apply/adjust (the customer advisory lock below serializes only
-//     AppendEntry-path writers; apply/adjust never acquire it).
+//     under the customer advisory lock that every balance writer takes
+//     first (apply, adjust, relief and the append path).
 //   - The consumed_cents flip and the expiry entry must commit together.
 //     Entry-then-flip split: a crash in between leaves phantom headroom on
 //     a grant the candidate queries no longer re-list — the backdated-apply
@@ -1016,16 +1015,24 @@ type commitGrantState struct {
 	AmountCents    int64  // G
 	ConsumedCents  int64  // C
 	CNRetiredCents int64  // K — cumulative credits retired by relief CNs
+	// Live is whether the grant can still be spent at the instant the
+	// caller passed: drainPositiveBlocks' predicate, so credit is live at
+	// its expires_at and expired a moment later, swept or not.
+	Live bool
+	// PendingDraw is the oldest issued invoice still to draw on the grant
+	// (domain.CreditDrawPendingInvoiceSQL), nil when there is none.
+	PendingDraw *domain.PendingCreditDraw
 }
 
 func (g commitGrantState) Remaining() int64 { return g.AmountCents - g.ConsumedCents }
 
 // LockCommitGrantTx locates the commit grant funded by invoiceID and
 // returns its state under the ADR-078 lock discipline (customer advisory
-// lock, then grant row FOR UPDATE re-read). found=false when the invoice
-// funded no grant; the relief callers treat that as corruption, since cash
-// is about to move.
-func (s *PostgresStore) LockCommitGrantTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) (commitGrantState, bool, error) {
+// lock, then grant row FOR UPDATE re-read), with Live judged at `at` and
+// PendingDraw read in the same statement.
+// found=false when the invoice funded no grant; the relief callers treat
+// that as corruption, since cash is about to move.
+func (s *PostgresStore) LockCommitGrantTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (commitGrantState, bool, error) {
 	var g commitGrantState
 	// Find the funded grant. No FOR UPDATE yet — the advisory lock comes
 	// first (grant-path writers serialize on it, not on row locks).
@@ -1051,14 +1058,28 @@ func (s *PostgresStore) LockCommitGrantTx(ctx context.Context, tx *sql.Tx, tenan
 	// Re-read under the row lock — the pre-lock snapshot is stale by
 	// construction (a concurrent drain can bump consumed_cents between
 	// the lookup and the lock).
+	var (
+		drawNumber, drawStatus, drawTZ sql.NullString
+		drawStart, drawEnd             sql.NullTime
+		drawPaused                     sql.NullBool
+	)
 	err = tx.QueryRowContext(ctx, `
-		SELECT amount_cents, consumed_cents, cn_retired_cents
-		FROM customer_credit_ledger
-		WHERE tenant_id = $1 AND id = $2
-		FOR UPDATE
-	`, tenantID, g.GrantID).Scan(&g.AmountCents, &g.ConsumedCents, &g.CNRetiredCents)
+		SELECT g.amount_cents, g.consumed_cents, g.cn_retired_cents, (g.expires_at IS NULL OR g.expires_at >= $3),
+		       d.*
+		FROM customer_credit_ledger g
+		LEFT JOIN LATERAL (`+domain.CreditDrawPendingInvoiceSQL("g", "$3::timestamptz")+`) d ON true
+		WHERE g.tenant_id = $1 AND g.id = $2
+		FOR UPDATE OF g
+	`, tenantID, g.GrantID, at).Scan(&g.AmountCents, &g.ConsumedCents, &g.CNRetiredCents, &g.Live,
+		&drawNumber, &drawStatus, &drawStart, &drawEnd, &drawTZ, &drawPaused)
 	if err != nil {
 		return commitGrantState{}, false, fmt.Errorf("re-read commit grant %s under lock: %w", g.GrantID, err)
+	}
+	if drawStatus.Valid { // NULL only when the lateral join found no invoice
+		g.PendingDraw = &domain.PendingCreditDraw{
+			InvoiceNumber: drawNumber.String, Status: domain.InvoiceStatus(drawStatus.String),
+			PeriodStart: drawStart.Time, PeriodEnd: drawEnd.Time, Timezone: drawTZ.String, CollectionPaused: drawPaused.Bool,
+		}
 	}
 	return g, true, nil
 }
@@ -1085,8 +1106,10 @@ func (s *PostgresStore) LockCommitGrantTx(ctx context.Context, tx *sql.Tx, tenan
 // would refuse to spend. `now` is the caller's bound instant, as the drain
 // takes one.
 //
-// Consumed is reported even when the grant is exhausted or expired, because it
-// is the half that no recovery can claw back.
+// Consumed is consumed_cents as the ledger holds it, reported even when the
+// grant is exhausted or expired. It counts what invoices drew, and also what
+// relief retired and what the expiry sweep wrote off, since both mark credit
+// used up.
 func (s *PostgresStore) CommitGrantExposure(
 	ctx context.Context, tenantID, invoiceID string, now time.Time,
 ) (int64, int64, error) {
@@ -1203,10 +1226,11 @@ func (s *PostgresStore) retireCommitSliceTx(ctx context.Context, tx *sql.Tx, ten
 // grant is a LOUD error (cash is about to move against a grant that must
 // exist — the top-up's payment funds it in the same tx, so absence is
 // corruption), and cn_retired_cents is bumped (the telescoping anchor K
-// advances with every relief). Returns the post-retire state so the caller
-// can surface remaining/K without a re-read.
-func (s *PostgresStore) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID string, slice, refundedGrossCents, grossPaidCents int64) (commitGrantState, error) {
-	g, found, err := s.LockCommitGrantTx(ctx, tx, tenantID, invoiceID)
+// advances with every relief). The ledger entry names the credit note by
+// its number. Returns the post-retire state so the caller can surface
+// remaining/K without a re-read.
+func (s *PostgresStore) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64) (commitGrantState, error) {
+	g, found, err := s.LockCommitGrantTx(ctx, tx, tenantID, invoiceID, clock.Now(ctx))
 	if err != nil {
 		return commitGrantState{}, err
 	}
@@ -1217,7 +1241,7 @@ func (s *PostgresStore) RetireCommitSliceForReliefTx(ctx context.Context, tx *sq
 		return commitGrantState{}, fmt.Errorf("%w: %d requested, %d remaining", ErrCommitInsufficientRemaining, slice, g.Remaining())
 	}
 	if err := s.retireCommitSliceTx(ctx, tx, tenantID, g, slice,
-		fmt.Sprintf("Commit relief — %d credits retired for credit note (grant %s)", slice, g.GrantID),
+		fmt.Sprintf("Refunded by credit note %s — %s of bought credit", creditNoteNumber, activity.FormatMoney(activity.Money{Cents: slice, Currency: g.Currency})),
 		map[string]any{
 			"reason":               "commit_refund_retire",
 			"grant_id":             g.GrantID,
@@ -1363,7 +1387,12 @@ func (s *PostgresStore) GetSpendableBalance(ctx context.Context, tenantID, custo
 		return nil, err
 	}
 	defer postgres.Rollback(tx)
+	return s.GetSpendableBalanceTx(ctx, tx, tenantID, customerID, at)
+}
 
+// GetSpendableBalanceTx is GetSpendableBalance on the caller's tx, so a writer
+// holding the customer's credit lock reads the balance it is about to change.
+func (s *PostgresStore) GetSpendableBalanceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID string, at time.Time) (map[string]int64, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT currency,
 		       COALESCE(SUM(amount_cents), 0)

@@ -47,6 +47,16 @@ type Store interface {
 	// in sorted order, on the caller's tx — called before the first create by
 	// a transaction that writes credit notes on several invoices.
 	LockInvoicesTx(ctx context.Context, tx *sql.Tx, tenantID string, invoiceIDs []string) error
+	// StripeRefundedOutsideNotesTx sums the refunds made in Stripe of the
+	// invoice's payment that moved or may move money and that no note holds,
+	// on the caller's tx under its credit-note lock.
+	StripeRefundedOutsideNotesTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) (int64, error)
+	// ReturnRefundAnotherWayTx moves an issued note's failed card refund to
+	// out_of_band, as a CAS on the refund amount read; false when it moved.
+	ReturnRefundAnotherWayTx(ctx context.Context, tx *sql.Tx, creditNoteID string, refundCents int64) (bool, error)
+	// ClaimFailedRefundForRetry moves an issued note's failed card refund to
+	// pending, as a CAS; false when it is no longer failed.
+	ClaimFailedRefundForRetry(ctx context.Context, tenantID, creditNoteID string) (bool, error)
 	// BeginTx opens the RLS-scoped coordinator tx Issue() owns (ADR-056/061):
 	// the draft→issued CAS and the internal money effect commit together.
 	BeginTx(ctx context.Context, tenantID string) (*sql.Tx, error)

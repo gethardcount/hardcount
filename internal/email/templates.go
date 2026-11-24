@@ -681,16 +681,24 @@ func itoa(n int) string {
 // renderCreditNoteHTML is the credit-note document email (ADR-082
 // rider). No CTA — no hosted CN page exists; the PDF is the document.
 // invoiceNumber names the APPLIED invoice so finance can match the
-// credit to the bill it adjusts.
-func renderCreditNoteHTML(customerName, creditNoteNumber, invoiceNumber, amount, companyName string) (subject, contentHTML string) {
+// credit to the bill it adjusts. A note that took credit back (a top-up's
+// refund, creditTakenBackCents > 0) states the refund and the credit taken
+// back, never that an amount was credited.
+func renderCreditNoteHTML(customerName, creditNoteNumber, invoiceNumber string, amountCents, creditTakenBackCents int64, currency, companyName string) (subject, contentHTML string) {
 	subject = "Credit note " + creditNoteNumber + " from " + sellerName(companyName)
 	var b strings.Builder
 	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">Credit note issued</h1>`)
 	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">Hi ` + escape(customerName) + `,</p>`)
 	b.WriteString(`<p style="margin:0 0 20px;color:#4b5563;">Credit note <strong style="color:#111827;">` + escape(creditNoteNumber) + `</strong> has been issued against invoice <strong style="color:#111827;">` + escape(invoiceNumber) + `</strong>.</p>`)
 	b.WriteString(`<div style="background:#f9fafb;border-radius:8px;padding:16px 20px;margin:8px 0 16px;">`)
-	b.WriteString(`<div style="font-size:13px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;">Amount credited</div>`)
-	b.WriteString(`<div style="font-size:24px;font-weight:600;color:#111827;margin-top:4px;font-variant-numeric:tabular-nums;">` + escape(amount) + `</div>`)
+	for i, f := range creditNoteFigures(amountCents, creditTakenBackCents, currency) {
+		top := ""
+		if i > 0 {
+			top = "margin-top:12px;"
+		}
+		b.WriteString(`<div style="font-size:13px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;` + top + `">` + escape(f.label) + `</div>`)
+		b.WriteString(`<div style="font-size:24px;font-weight:600;color:#111827;margin-top:4px;font-variant-numeric:tabular-nums;">` + escape(f.amount) + `</div>`)
+	}
 	b.WriteString(`</div>`)
 	b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">The credit note PDF is attached for your records.</p>`)
 	return subject, b.String()

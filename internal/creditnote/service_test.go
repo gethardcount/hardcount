@@ -427,6 +427,21 @@ func (m *memStore) ListLineItems(_ context.Context, _, creditNoteID string) ([]d
 // the (nil) tx, mutating the map directly — so the logic still runs end-to-end.
 func (m *memStore) LockInvoicesTx(context.Context, *sql.Tx, string, []string) error { return nil }
 
+// The relief's card sum and the move of a failed refund are SQL rules,
+// proven on the real store; the in-memory double holds neither.
+func (m *memStore) StripeRefundedOutsideNotesTx(context.Context, *sql.Tx, string, string) (int64, error) {
+	return 0, nil
+}
+
+// The retry's claim is a CAS proven on the real store; here it always wins.
+func (m *memStore) ClaimFailedRefundForRetry(context.Context, string, string) (bool, error) {
+	return true, nil
+}
+
+func (m *memStore) ReturnRefundAnotherWayTx(context.Context, *sql.Tx, string, int64) (bool, error) {
+	return false, fmt.Errorf("memStore: returned another way is proven on the real store")
+}
+
 func (m *memStore) BeginTx(_ context.Context, _ string) (*sql.Tx, error) {
 	return nil, nil
 }
@@ -526,6 +541,10 @@ func (m *memInvoiceReader) ListLineItemsTx(ctx context.Context, _ *sql.Tx, tenan
 
 func (m *memInvoiceReader) LockForCreditNoteTx(ctx context.Context, _ *sql.Tx, tenantID, id string) (domain.Invoice, error) {
 	return m.Get(ctx, tenantID, id)
+}
+
+func (m *memInvoiceReader) DisputeStatusesTx(context.Context, *sql.Tx, string, string) ([]domain.DisputeStatus, error) {
+	return nil, nil
 }
 
 // ApplyCreditNoteTx ignores the (nil) coordinator tx — the in-memory double

@@ -72,8 +72,11 @@ type outboxMessage struct {
 	// CreditNoteNumber names the CN document on TypeCreditNote rows
 	// (InvoiceNumber then carries the APPLIED invoice for the body copy).
 	CreditNoteNumber string `json:"credit_note_number,omitempty"`
-	AmountCents      int64  `json:"amount_cents,omitempty"`
-	Currency         string `json:"currency,omitempty"`
+	// CreditTakenBackCents is the credit a TypeCreditNote row's note took
+	// back (a top-up's refund). A row without it credited its amount.
+	CreditTakenBackCents int64  `json:"credit_taken_back_cents,omitempty"`
+	AmountCents          int64  `json:"amount_cents,omitempty"`
+	Currency             string `json:"currency,omitempty"`
 	// CreditCents and CreditValidDays are the credit a top-up sells, on its
 	// offer and its receipt (domain.TopupCredit). A receipt row without
 	// credit_cents is an ordinary invoice's receipt.
@@ -446,16 +449,17 @@ func (s *OutboxSender) SendPaymentSetupLink(ctx context.Context, tenantID, to, c
 // rider). invoiceNumber is the APPLIED invoice — named in the body so
 // finance can match the credit to the bill it adjusts. No CTA link: no
 // hosted CN page exists, the PDF is the document.
-func (s *OutboxSender) SendCreditNote(ctx context.Context, tenantID, to string, cc []string, customerName, creditNoteNumber, invoiceNumber string, amountCents int64, currency string, pdfBytes []byte) error {
+func (s *OutboxSender) SendCreditNote(ctx context.Context, tenantID, to string, cc []string, customerName, creditNoteNumber, invoiceNumber string, amountCents, creditTakenBackCents int64, currency string, pdfBytes []byte) error {
 	return s.enqueue(ctx, tenantID, TypeCreditNote, outboxMessage{
-		To:               to,
-		Cc:               cc,
-		CustomerName:     customerName,
-		CreditNoteNumber: creditNoteNumber,
-		InvoiceNumber:    invoiceNumber,
-		AmountCents:      amountCents,
-		Currency:         currency,
-		PDF:              pdfBytes,
+		To:                   to,
+		Cc:                   cc,
+		CustomerName:         customerName,
+		CreditNoteNumber:     creditNoteNumber,
+		InvoiceNumber:        invoiceNumber,
+		AmountCents:          amountCents,
+		CreditTakenBackCents: creditTakenBackCents,
+		Currency:             currency,
+		PDF:                  pdfBytes,
 	})
 }
 

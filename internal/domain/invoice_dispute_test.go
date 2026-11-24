@@ -5,13 +5,14 @@ import (
 	"time"
 )
 
-// TestDisputeStatus_ValidAndClosed: the eight statuses Stripe documents for a
-// Dispute are the eight Hardcount stores (the column's CHECK lists the same), and
+// TestDisputeStatus_ValidAndClosed: the ten statuses Stripe documents for a
+// Dispute are the ten Hardcount stores (the column's CHECK lists the same), and
 // exactly won, lost, warning_closed and prevented are closed.
 func TestDisputeStatus_ValidAndClosed(t *testing.T) {
 	closed := map[DisputeStatus]bool{
 		DisputeWarningNeedsResponse: false, DisputeWarningUnderReview: false,
 		DisputeNeedsResponse: false, DisputeUnderReview: false,
+		DisputeAppealNeedsResponse: false, DisputeAppealUnderReview: false,
 		DisputeWarningClosed: true, DisputeWon: true, DisputeLost: true, DisputePrevented: true,
 	}
 	for s, want := range closed {
@@ -64,5 +65,28 @@ func TestInvoiceDispute_SupersededBy(t *testing.T) {
 	// Two closes in one second do not order each other: the first one stays.
 	if lost.SupersededBy(snap("evt_won", DisputeWon, at)) {
 		t.Error("won in the same second as lost must not replace it")
+	}
+
+	// Stripe's appeal: under_review, then appeal_needs_response once the
+	// response is rejected, appeal_under_review once the appeal is sent, then
+	// won or lost. Within one second a close beats an appeal in either order,
+	// so a closed dispute never reads as open.
+	appeal := InvoiceDispute{Status: DisputeAppealUnderReview, LastEventAt: at, LastStripeEventID: "evt_appeal"}
+	for _, tc := range []struct {
+		name string
+		row  InvoiceDispute
+		s    DisputeSnapshot
+		want bool
+	}{
+		{"appeal a second after the review", row, snap("evt_a", DisputeAppealNeedsResponse, at.Add(time.Second)), true},
+		{"won a second after the appeal", appeal, snap("evt_w", DisputeWon, at.Add(time.Second)), true},
+		{"appeal response, then its review", InvoiceDispute{Status: DisputeAppealNeedsResponse, LastEventAt: at}, snap("evt_r", DisputeAppealUnderReview, at), true},
+		{"same second: won after an appeal row", appeal, snap("evt_w", DisputeWon, at), true},
+		{"same second: appeal after a lost row", lost, snap("evt_a", DisputeAppealNeedsResponse, at), false},
+		{"same second: appeal after the first review", row, snap("evt_a", DisputeAppealNeedsResponse, at), true},
+	} {
+		if got := tc.row.SupersededBy(tc.s); got != tc.want {
+			t.Errorf("%s: SupersededBy = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

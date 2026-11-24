@@ -5,7 +5,8 @@ and later invoices in the same currency draw the credit down. It walks
 through the calls: create the top-up (`POST /v1/invoices`), then take the
 payment by charging the saved card (`collect`), sending the payment link
 (`send`) or recording a payment (`record-payment`), or withdraw it (`void`).
-Then what the customer sees, and how to top up a customer's credit
+Then what the customer sees, the top-up's history, how to refund the credit
+the customer has not used, and how to top up a customer's credit
 automatically from your own code.
 
 Think of a gift card: the customer buys it once, and each purchase after
@@ -231,6 +232,59 @@ curl -s "$HARDCOUNT/v1/invoices/$TOPUP_ID/payment-timeline" \
 credit row carries the amount and, when the credit expires, its expiry. A
 withdrawn one ends in `"Top-up withdrawn"`.
 
+## Refund unused credit
+
+A credit note with a `commit_relief` block takes back the credit a customer
+has not used on a paid top-up, and refunds what they paid for it, at the
+price they paid. $60.00 of credit from a $90 top-up of $100 refunds $54.00.
+
+```bash
+curl -s -X POST "$HARDCOUNT/v1/credit-notes" \
+  -H "Authorization: Bearer $HARDCOUNT_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"invoice_id\": \"$TOPUP_ID\", \"commit_relief\": {\"retire_all\": true}}" \
+  | jq -c '{status, total_cents, commit_retired_cents, refund_amount_cents, out_of_band_amount_cents}'
+```
+
+**You see** (the top-up paid by bank transfer in step 2, with no credit used
+and no usage reported):
+`{"status":"issued","total_cents":9000,"commit_retired_cents":10000,"refund_amount_cents":0,"out_of_band_amount_cents":9000}`
+
+- **Unused credit** is what is left of the top-up's credit now, but no more
+  than the customer's balance less the usage not invoiced yet, which has
+  already used credit. Credit is usable up to its expiry instant, and expired
+  after it, even before Hardcount writes the expiry off. Tax, a fee billed
+  at the end of the period and what unpaid invoices owe are not taken off:
+  an invoice bills them.
+- **Usage your gateway has not reported yet** is not known to Hardcount.
+  Pause the customer's key and let reporting catch up before you refund.
+- **While an invoice is waiting to use the credit,** such as the invoice of
+  a period that has just closed, the refund answers `409` and names it. Try
+  again after the next collection pass. A draft not yet finalized, or an
+  invoice whose collection is paused, waits on you: finalize or void the
+  draft, or resume collection or void the invoice.
+- **How much:** `retire_all` takes all the unused credit. `retire_cents`
+  takes part of it; more than is unused answers `422` with the figure.
+- **Where the money goes:** to the card that paid. The card gets at most
+  what it paid less every refund of that payment, including refunds made in
+  the Stripe dashboard; put the rest in `out_of_band_amount_cents`. For a
+  top-up paid another way, the refund is `out_of_band_amount_cents`: you pay
+  the customer back, and Hardcount records it.
+- **Refused** with `409` `payment_disputed` while the customer's bank
+  disputes the payment (a chargeback, or your appeal of one), and after the
+  bank has decided for the customer, when nothing is left to refund. An
+  inquiry, before any chargeback, does not stop a refund.
+- **A card refund that fails** leaves the credit note's `refund_status`
+  `failed`. When it failed because a chargeback opened during the refund,
+  don't pay the customer back while the dispute is open. If you win it,
+  retry the refund. If you lose it, the bank has already returned the money:
+  mark the refund as returned another way without paying
+  (`POST /v1/credit-notes/{id}/mark-returned-another-way`). For any other
+  failure, such as a closed card, pay the customer back outside Stripe, then
+  mark it. Returned another way means outside Stripe: a refund you make
+  later in the Stripe dashboard is recorded as a refund made in Stripe,
+  apart from this credit note.
+
 ## Automatic top-up with your own code
 
 Hardcount does not top up a customer's credit by itself yet. Your code can:
@@ -353,8 +407,9 @@ ask a lawyer where you sell:
   shortest allowed period. Whether unclaimed-property, escheat or gift-card
   rules apply to credit that is not spent.
 - **Refunds:** whether a customer may claim back unspent credit, and on
-  what terms. Taking credit back with a credit note is your decision in
-  Hardcount, for each top-up.
+  what terms. Refunding unused credit
+  ([above](#refund-unused-credit)) is your decision in Hardcount, for each
+  top-up.
 - **What your terms and your invoices must say** about the credit, its
   validity and refunds.
 

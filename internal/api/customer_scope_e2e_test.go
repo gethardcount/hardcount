@@ -507,6 +507,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 			return map[string]any{"email": "billing@example.com"}
 		}, 404, "", 0},
 		{"credit note retry refund [path credit note]", "POST", at("/v1/credit-notes/%s/retry-refund", note), none, 404, "", 0},
+		{"credit note returned another way [path credit note]", "POST", at("/v1/credit-notes/%s/mark-returned-another-way", note), none, 404, "", 0},
 		{"credit note void [path credit note]", "POST", at("/v1/credit-notes/%s/void", note), none, 404, "", 0},
 		{"credit note issue [path credit note]", "POST", at("/v1/credit-notes/%s/issue", note), none, 404, "", 200},
 

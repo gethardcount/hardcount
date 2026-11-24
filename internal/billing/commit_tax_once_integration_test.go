@@ -59,7 +59,16 @@ func buyTopup(t *testing.T, ctx context.Context, svc *invoice.Service, tenantID,
 func newReliefService(db *postgres.DB, invStore *invoice.PostgresStore, creditSvc *credit.Service, settings *tenant.SettingsStore) *creditnote.Service {
 	svc := creditnote.NewService(creditnote.NewPostgresStore(db), invStore, nil, &cnGrantAdapter{creditSvc})
 	svc.SetNumberGenerator(settings)
+	svc.SetUnbilledUsageReader(noUnbilledUsage{})
 	return svc
+}
+
+// noUnbilledUsage is the unbilled usage these reliefs count: none, since no
+// relief here runs while usage waits to be invoiced.
+type noUnbilledUsage struct{}
+
+func (noUnbilledUsage) UnbilledUsage(context.Context, string, string) (map[string]int64, error) {
+	return nil, nil
 }
 
 // TestCommitTax_PurchaseUntaxed_UsageTaxedOnce_E2E: manual tax at 10%. The

@@ -470,16 +470,17 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/invoices/{id}/void"}:                                      needs(invoiceWrite).withAudit(explicit("invoice.Service.Void (LogInTx)")),
 
 	// --- credit notes -------------------------------------------------------
-	{"GET", "/v1/credit-notes"}:                            needs(invoiceWrite).withPaging().withQuery("customer_id", "dir", "invoice_id", "refund_status", "sort", "status"),
-	{"GET", "/v1/credit-notes/stats"}:                      needs(invoiceWrite),
-	{"POST", "/v1/credit-notes"}:                           needs(invoiceWrite).withAudit(explicit("creditnote.Service.Create (LogInTx)")),
-	{"GET", "/v1/credit-notes/{id}"}:                       needs(invoiceWrite),
-	{"POST", "/v1/credit-notes/{id}/attach-stripe-refund"}: needs(invoiceWrite).withAudit(explicit("creditnote.Service.AttachStripeRefund (LogInTx)")),
-	{"POST", "/v1/credit-notes/{id}/issue"}:                needs(invoiceWrite).withAudit(explicit("creditnote.Service.Issue (LogInTx)")),
-	{"GET", "/v1/credit-notes/{id}/pdf"}:                   needs(invoiceWrite),
-	{"POST", "/v1/credit-notes/{id}/retry-refund"}:         needs(invoiceWrite).withAudit(explicit("creditnote.Service.RetryRefund (LogInTx)")),
-	{"POST", "/v1/credit-notes/{id}/send"}:                 needs(invoiceWrite).withAudit(explicit("creditnote.Handler.sendEmail (Log)")),
-	{"POST", "/v1/credit-notes/{id}/void"}:                 needs(invoiceWrite).withAudit(explicit("creditnote.Service.Void (LogInTx)")),
+	{"GET", "/v1/credit-notes"}:                                 needs(invoiceWrite).withPaging().withQuery("customer_id", "dir", "invoice_id", "refund_status", "sort", "status"),
+	{"GET", "/v1/credit-notes/stats"}:                           needs(invoiceWrite),
+	{"POST", "/v1/credit-notes"}:                                needs(invoiceWrite).withAudit(explicit("creditnote.Service.Create (LogInTx)")),
+	{"GET", "/v1/credit-notes/{id}"}:                            needs(invoiceWrite),
+	{"POST", "/v1/credit-notes/{id}/attach-stripe-refund"}:      needs(invoiceWrite).withAudit(explicit("creditnote.Service.AttachStripeRefund (LogInTx)")),
+	{"POST", "/v1/credit-notes/{id}/issue"}:                     needs(invoiceWrite).withAudit(explicit("creditnote.Service.Issue (LogInTx)")),
+	{"POST", "/v1/credit-notes/{id}/mark-returned-another-way"}: needs(invoiceWrite).withAudit(explicit("creditnote.Service.MarkRefundReturnedAnotherWay (LogInTx)")),
+	{"GET", "/v1/credit-notes/{id}/pdf"}:                        needs(invoiceWrite),
+	{"POST", "/v1/credit-notes/{id}/retry-refund"}:              needs(invoiceWrite).withAudit(explicit("creditnote.Service.RetryRefund (LogInTx)")),
+	{"POST", "/v1/credit-notes/{id}/send"}:                      needs(invoiceWrite).withAudit(explicit("creditnote.Handler.sendEmail (Log)")),
+	{"POST", "/v1/credit-notes/{id}/void"}:                      needs(invoiceWrite).withAudit(explicit("creditnote.Service.Void (LogInTx)")),
 
 	// --- credits ------------------------------------------------------------
 	{"GET", "/v1/credits/balances"}:                   needs(customerWrite).withPaging().withQuery("balance"),

@@ -328,7 +328,7 @@ func TestActivityLines_InvoiceWire(t *testing.T) {
 			tone, prob   string
 			detailPrefix string
 		}{
-			{"commit relief", "commit_relief", domain.RefundSucceeded, nil, "success", "", "CN-1 · Unused prepaid credits refunded"},
+			{"commit relief", "Unused prepaid credit refunded", domain.RefundSucceeded, nil, "success", "", "CN-1 · Unused prepaid credit refunded"},
 			{"operator text kept", "Billing error", domain.RefundSucceeded, nil, "success", "", "CN-1 · Billing error"},
 			{"failed, with the provider's reason", "Billing error", domain.RefundFailed, []domain.AuditEntry{
 				{Action: domain.AuditActionUpdate, Metadata: map[string]any{"action": "refund_status_changed", "refund_status": "failed", "provider_failure_reason": "expired_or_canceled_card"}, CreatedAt: at.Add(time.Minute)},
@@ -352,8 +352,8 @@ func TestActivityLines_InvoiceWire(t *testing.T) {
 				}
 				row := oneRow(t, fetchWire(t, c), "credit_note.issued")
 				wantRow(t, row, "Credit note issued", tc.tone, tc.prob, "*")
-				if !strings.HasPrefix(row.Detail, tc.detailPrefix) || strings.Contains(row.Detail, tc.reason) && tc.reason == "commit_relief" {
-					t.Errorf("detail %q, want it to start %q with no raw code", row.Detail, tc.detailPrefix)
+				if !strings.HasPrefix(row.Detail, tc.detailPrefix) {
+					t.Errorf("detail %q, want it to start %q", row.Detail, tc.detailPrefix)
 				}
 			})
 		}

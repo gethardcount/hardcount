@@ -3,6 +3,7 @@ package domain
 import (
 	"slices"
 	"strings"
+	"time"
 )
 
 // creditDrawAsOfIssueReasons are the billing reasons of the invoices that test
@@ -69,19 +70,61 @@ func CreditDrawOwedExceptSQL(g, exceptInvoice string) string {
 		except = `
 			   AND i.id <> ` + exceptInvoice
 	}
-	reasons := make([]string, len(creditDrawAsOfIssueReasons))
-	for i, r := range creditDrawAsOfIssueReasons {
-		reasons[i] = "'" + string(r) + "'"
-	}
 	return `(EXISTS (
 			SELECT 1 FROM subscriptions s
 			 WHERE s.tenant_id = ` + g + `.tenant_id AND s.customer_id = ` + g + `.customer_id
 			   AND s.status IN ('active','trialing')
 			   AND ` + SubscriptionDueInstantSQL("s") + ` <= ` + g + `.expires_at)
-		OR EXISTS (
+		OR ` + creditDrawPendingSQL(g, except) + `)`
+}
+
+// creditDrawPendingSQL is case (ii) of CreditDrawOwedSQL as one EXISTS.
+func creditDrawPendingSQL(g, except string) string {
+	return `EXISTS (
 			SELECT 1 FROM invoices i
-			 WHERE i.tenant_id = ` + g + `.tenant_id AND i.customer_id = ` + g + `.customer_id
+			 WHERE ` + creditDrawPendingWhereSQL(g, except) + `)`
+}
+
+// PendingCreditDraw is the invoice CreditDrawPendingInvoiceSQL selects: one
+// still to draw on a customer's credit.
+type PendingCreditDraw struct {
+	InvoiceNumber string
+	Status        InvoiceStatus
+	PeriodStart   time.Time
+	PeriodEnd     time.Time
+	Timezone      string
+	// CollectionPaused: its subscription's collection is paused, so no
+	// collection pass draws the credit until it resumes.
+	CollectionPaused bool
+}
+
+// CreditDrawPendingInvoiceSQL selects the oldest invoice that holds case (ii)
+// of CreditDrawOwedSQL for the grant row aliased g, as the columns of
+// PendingCreditDraw in order: its number, status, billing period, time zone,
+// and whether its subscription's collection is paused at `at` (an SQL
+// expression for the instant). No row when none is pending. A grant with no
+// expiry is live for every invoice. Commit relief refuses while there is one:
+// a closed period's usage is no longer unbilled, but the credit its invoice
+// will draw is still in the balance.
+func CreditDrawPendingInvoiceSQL(g, at string) string {
+	return `SELECT i.invoice_number, i.status, i.billing_period_start, i.billing_period_end, i.billing_timezone,
+			NOT ` + NotPausedForCollectionSQL("i", at) + `
+		FROM invoices i
+		WHERE ` + creditDrawPendingWhereSQL(g, "") + `
+		ORDER BY i.created_at, i.id
+		LIMIT 1`
+}
+
+// creditDrawPendingWhereSQL is the rule both forms read: an invoice row
+// aliased i, issued while the grant row aliased g was live, that is a draft or
+// queued for collection, so its collection is still to draw on the grant.
+func creditDrawPendingWhereSQL(g, except string) string {
+	reasons := make([]string, len(creditDrawAsOfIssueReasons))
+	for i, r := range creditDrawAsOfIssueReasons {
+		reasons[i] = "'" + string(r) + "'"
+	}
+	return `i.tenant_id = ` + g + `.tenant_id AND i.customer_id = ` + g + `.customer_id
 			   AND i.billing_reason IN (` + strings.Join(reasons, ",") + `)
-			   AND i.issued_at <= ` + g + `.expires_at` + except + `
-			   AND (i.status = 'draft' OR i.auto_charge_pending)))`
+			   AND (` + g + `.expires_at IS NULL OR i.issued_at <= ` + g + `.expires_at)` + except + `
+			   AND (i.status = 'draft' OR i.auto_charge_pending)`
 }

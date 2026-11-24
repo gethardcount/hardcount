@@ -271,7 +271,8 @@ the price entered; finalized now, it is invoiced at that price.
 - Refunding unused credit through relief (ADR-080) reverses no tax on these
   commits: relief derives its tax from the purchase invoice's own tax, which
   is 0. A commit invoiced before this change carried tax, and relief still
-  reverses its share.
+  reverses its share. *(Amended 2026-11-25: relief is for a top-up, which
+  carries no tax, so relief reverses none.)*
 - Voiding an unpaid commit-only invoice has no tax transaction to reverse.
   A mixed invoice under Stripe Tax still has a transaction for its other
   lines, and voiding reverses it as before.

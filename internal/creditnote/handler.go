@@ -48,7 +48,7 @@ type HandlerDeps struct {
 // EmailSender enqueues the credit-note document email (ADR-082 rider).
 // Satisfied by *email.OutboxSender.
 type EmailSender interface {
-	SendCreditNote(ctx context.Context, tenantID, to string, cc []string, customerName, creditNoteNumber, invoiceNumber string, amountCents int64, currency string, pdfBytes []byte) error
+	SendCreditNote(ctx context.Context, tenantID, to string, cc []string, customerName, creditNoteNumber, invoiceNumber string, amountCents, creditTakenBackCents int64, currency string, pdfBytes []byte) error
 }
 
 type Handler struct {
@@ -95,6 +95,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/{id}/issue", h.issue)
 	r.Post("/{id}/void", h.void)
 	r.Post("/{id}/retry-refund", h.retryRefund)
+	r.Post("/{id}/mark-returned-another-way", h.markReturnedAnotherWay)
 	r.Post("/{id}/attach-stripe-refund", h.attachStripeRefund)
 	r.Post("/{id}/send", h.sendEmail)
 	return r
@@ -119,15 +120,15 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 
 	if req.CommitRelief != nil {
 		if len(req.Lines) > 0 {
-			respond.Validation(w, r, "commit_relief and lines are mutually exclusive — the relief derives its single line from the commit's remaining credits")
+			respond.Validation(w, r, "commit_relief can't be sent with lines, because a refund of unused credit builds its own line; send commit_relief alone.")
 			return
 		}
 		if req.StripeRefundID != "" {
-			respond.ValidationField(w, r, "stripe_refund_id", "stripe_refund_id cannot be used with commit_relief: a refund made in Stripe on an invoice that bought prepaid credit is retired with commit relief allocated out_of_band, then dismissed on the invoice")
+			respond.ValidationField(w, r, "stripe_refund_id", "stripe_refund_id can't be sent with commit_relief; for a refund made in Stripe on a top-up, refund the unused credit with out_of_band_amount_cents inside commit_relief, then dismiss that refund on the invoice.")
 			return
 		}
 		if req.CreditAmountCents > 0 {
-			respond.Validation(w, r, "credit_amount_cents cannot be used with commit_relief — paying relief from the customer's balance would refund the very credits being retired")
+			respond.Validation(w, r, "credit_amount_cents can't be sent with commit_relief, because paying the refund into the credit balance would give back the credit it takes; use refund_amount_cents or out_of_band_amount_cents inside commit_relief.")
 			return
 		}
 		// The relief's split lives inside commit_relief. At the top level it
@@ -142,7 +143,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 			{"refund_type", req.RefundType != ""},
 		} {
 			if f.set {
-				respond.ValidationField(w, r, f.name, f.name+" goes inside commit_relief for a relief, for example {\"commit_relief\": {\"retire_all\": true, \"out_of_band_amount_cents\": 5000}}")
+				respond.ValidationField(w, r, f.name, f.name+" goes inside commit_relief, for example {\"commit_relief\": {\"retire_all\": true, \"out_of_band_amount_cents\": 5000}}.")
 				return
 			}
 		}
@@ -353,6 +354,24 @@ func (h *Handler) issue(w http.ResponseWriter, r *http.Request) {
 		audit.MarkSkip(r.Context())
 	}
 
+	respond.JSON(w, r, http.StatusOK, cn)
+}
+
+// markReturnedAnotherWay ends a failed card refund: the customer has the money
+// by another way than Stripe. The audit row rides the service's transaction.
+func (h *Handler) markReturnedAnotherWay(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
+	cn, err := h.svc.MarkRefundReturnedAnotherWay(r.Context(), auth.TenantID(r.Context()), chi.URLParam(r, "id"))
+	if errors.Is(err, errs.ErrNotFound) {
+		respond.NotFound(w, r, "credit note")
+		return
+	}
+	if err != nil {
+		respond.FromError(w, r, err, "credit_note")
+		return
+	}
 	respond.JSON(w, r, http.StatusOK, cn)
 }
 
@@ -625,7 +644,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.emailSender.SendCreditNote(r.Context(), tenantID, to, cc,
-		bt.Name, cn.CreditNoteNumber, orig.Number, cn.TotalCents, cn.Currency, pdfBytes); err != nil {
+		bt.Name, cn.CreditNoteNumber, orig.Number, cn.TotalCents, cn.CommitRetiredCents, cn.Currency, pdfBytes); err != nil {
 		respond.FromError(w, r, err, "credit_note_email")
 		return
 	}

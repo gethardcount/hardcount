@@ -129,7 +129,7 @@ const (
 	// reassuring "recovery is running" framing is no longer true: the
 	// operator must know the engine has escalated. Charge-on-attach
 	// works only while collection is not paused: the pending-charge
-	// sweep skips paused subscriptions (notPausedForCollection), so after
+	// sweep skips paused subscriptions (NotPausedForCollectionSQL), so after
 	// the default pause action collection must be resumed too. Chargebee/Stripe
 	// parity: the end-of-dunning terminal is an explicit, visible state.
 	AttentionReasonDunningExhausted AttentionReason = "dunning_exhausted"

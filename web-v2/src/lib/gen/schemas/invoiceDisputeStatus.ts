@@ -15,8 +15,13 @@
 /**
  * Stripe's dispute status, as Stripe sends it. The `warning_`
  * statuses are an inquiry, which comes before a chargeback or
- * instead of one. `won`, `lost`, `warning_closed` and `prevented`
- * are closed.
+ * instead of one. Stripe sends the `appeal_` statuses only when
+ * appeals are turned on: `under_review` moves to
+ * `appeal_needs_response` when the bank rejects your response and
+ * you can appeal, then to `appeal_under_review` once you send the
+ * appeal, and the dispute closes `won` or `lost`. Closing it at
+ * `appeal_needs_response` makes it `lost`. `won`, `lost`,
+ * `warning_closed` and `prevented` are closed.
  */
 export type InvoiceDisputeStatus = typeof InvoiceDisputeStatus[keyof typeof InvoiceDisputeStatus];
 
@@ -27,6 +32,8 @@ export const InvoiceDisputeStatus = {
   warning_closed: 'warning_closed',
   needs_response: 'needs_response',
   under_review: 'under_review',
+  appeal_needs_response: 'appeal_needs_response',
+  appeal_under_review: 'appeal_under_review',
   won: 'won',
   lost: 'lost',
   prevented: 'prevented',

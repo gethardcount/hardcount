@@ -42,7 +42,7 @@ type EmailDeliverer interface {
 	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, ask domain.DeclineAsk) error
 	SendDunningEscalation(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
 	SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string, ask domain.DeclineAsk) error
-	SendCreditNote(ctx context.Context, tenantID, to string, cc []string, customerName, creditNoteNumber, invoiceNumber string, amountCents int64, currency string, pdfBytes []byte) error
+	SendCreditNote(ctx context.Context, tenantID, to string, cc []string, customerName, creditNoteNumber, invoiceNumber string, amountCents, creditTakenBackCents int64, currency string, pdfBytes []byte) error
 	SendPaymentSetupRequest(ctx context.Context, tenantID, to, customerName, invoiceNumber string, amountDueCents int64, currency, updateURL string, writtenOff bool, trigger string) error
 	SendPaymentSetupLink(ctx context.Context, tenantID, to, customerName, operatorNote, setupURL string) error
 	SendPasswordReset(ctx context.Context, tenantID, to, displayName, resetURL string) error
@@ -269,7 +269,7 @@ func (d *Dispatcher) handle(ctx context.Context, row OutboxRow) error {
 		return d.sender.SendMemberInvite(ctx, row.TenantID, msg.To, msg.InviterEmail, msg.TenantName, msg.InviteURL, msg.InviteeHasAccount)
 	case TypeCreditNote:
 		return d.sender.SendCreditNote(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName,
-			msg.CreditNoteNumber, msg.InvoiceNumber, msg.AmountCents, msg.Currency, msg.PDF)
+			msg.CreditNoteNumber, msg.InvoiceNumber, msg.AmountCents, msg.CreditTakenBackCents, msg.Currency, msg.PDF)
 	default:
 		// Retryable, not permanent: see ErrUnknownEmailType.
 		slog.WarnContext(ctx, "email outbox: unknown email_type in this binary — retrying so a newer replica can claim it (rolling-deploy skew?)",

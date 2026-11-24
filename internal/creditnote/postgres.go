@@ -48,7 +48,7 @@ const cnReadCols = `id, tenant_id, invoice_id, customer_id, credit_note_number,
 	currency, issued_at, voided_at, refund_status, COALESCE(stripe_refund_id,''),
 	COALESCE(refund_unknown_key,''), recorded_from_stripe,
 	COALESCE(tax_transaction_id,''), issue_pending,
-	tax_reversal_pending, commit_retired_cents,
+	tax_reversal_pending, commit_retired_cents, returned_another_way_at,
 	metadata, created_at, updated_at, recorded_at,
 	bill_to_snapshot, supplier_snapshot`
 
@@ -62,7 +62,7 @@ func (s *PostgresStore) cnScanDest(cn *domain.CreditNote, metaJSON *[]byte) []an
 		&cn.Currency, &cn.IssuedAt, &cn.VoidedAt, &cn.RefundStatus, &cn.StripeRefundID,
 		&cn.RefundUnknownKey, &cn.RecordedFromStripe,
 		&cn.TaxTransactionID, &cn.IssuePending,
-		&cn.TaxReversalPending, &cn.CommitRetiredCents,
+		&cn.TaxReversalPending, &cn.CommitRetiredCents, &cn.ReturnedAnotherWayAt,
 		metaJSON, &cn.CreatedAt, &cn.UpdatedAt, &cn.RecordedAt,
 		domain.SnapshotScanner[domain.DocumentBillTo]{Dst: &cn.BillToSnapshot, Open: func(b domain.DocumentBillTo) (domain.DocumentBillTo, error) {
 			return b.Open(s.enc)
@@ -194,24 +194,31 @@ func (s *PostgresStore) LockInvoicesTx(ctx context.Context, tx *sql.Tx, tenantID
 	return nil
 }
 
-func (s *PostgresStore) createUnderInvoiceLockInTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error) {
+// lockInvoiceForNoteTx takes the per-invoice credit-note lock, then the
+// invoice's row FOR KEY SHARE, before the caller numbers the note. The
+// insert's foreign-key check takes that row lock anyway, but only after the
+// tenant's number row. A cancel or plan swap that voids this invoice holds
+// its row FOR UPDATE and then waits for the number row, so taking the row
+// after the number row deadlocks with it. FOR KEY SHARE does not conflict
+// with the FOR NO KEY UPDATE that Issue, the refund paths and the dispute
+// recorder take (ADR-061 amendment 2026-11-09). A missing row is left to the
+// insert's foreign-key check.
+func lockInvoiceForNoteTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) error {
 	if err := lockInvoiceTx(ctx, tx, tenantID, invoiceID); err != nil {
-		return domain.CreditNote{}, err
+		return err
 	}
-	// Lock the invoice's row FOR KEY SHARE before build numbers the note. The
-	// insert's foreign-key check takes this lock anyway, but only after the
-	// tenant's number row. A cancel or plan swap that voids this invoice holds
-	// its row FOR UPDATE and then waits for the number row, so taking the row
-	// after the number row deadlocks with it. FOR KEY SHARE does not conflict
-	// with the FOR NO KEY UPDATE that Issue and the refund paths take
-	// (ADR-061 amendment 2026-11-09). A missing row is left to the insert's
-	// foreign-key check.
 	if _, err := tx.ExecContext(ctx,
 		`SELECT 1 FROM invoices WHERE id = $1 AND tenant_id = $2 FOR KEY SHARE`, invoiceID, tenantID,
 	); err != nil {
-		return domain.CreditNote{}, fmt.Errorf("lock invoice %s for its credit note: %w", invoiceID, err)
+		return fmt.Errorf("lock invoice %s for its credit note: %w", invoiceID, err)
 	}
+	return nil
+}
 
+func (s *PostgresStore) createUnderInvoiceLockInTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error)) (domain.CreditNote, error) {
+	if err := lockInvoiceForNoteTx(ctx, tx, tenantID, invoiceID); err != nil {
+		return domain.CreditNote{}, err
+	}
 	existing, err := s.listByInvoiceTx(ctx, tx, invoiceID)
 	if err != nil {
 		return domain.CreditNote{}, err
@@ -238,10 +245,11 @@ func (s *PostgresStore) createUnderInvoiceLockInTx(ctx context.Context, tx *sql.
 // inside build (ADR-080 commit relief: the CN's cash amount is derived from
 // the grant's live drawdown state, which is only frozen once build takes
 // the customer advisory + grant row locks — after this method has taken
-// the per-invoice CN lock, preserving the invoice-CN → customer-advisory →
-// ledger-row order). build returns the header AND its lines.
+// the per-invoice CN lock and the invoice row FOR KEY SHARE, preserving the
+// invoice → customer-advisory → ledger-row → number-row order). build
+// returns the header AND its lines.
 func (s *PostgresStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, build func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error)) (domain.CreditNote, error) {
-	if err := lockInvoiceTx(ctx, tx, tenantID, invoiceID); err != nil {
+	if err := lockInvoiceForNoteTx(ctx, tx, tenantID, invoiceID); err != nil {
 		return domain.CreditNote{}, err
 	}
 	existing, err := s.listByInvoiceTx(ctx, tx, invoiceID)

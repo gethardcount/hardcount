@@ -111,8 +111,8 @@ func TestAttention_LostDisputeOnPaidCommitInvoice_ReadsTheGrant(t *testing.T) {
 		if att == nil || att.Reason != domain.AttentionReasonDisputeLost {
 			t.Fatalf("attention %+v, want dispute_lost", att)
 		}
-		if !strings.Contains(att.Message, domain.FormatMoneyMinor(6000, "USD")) || !strings.Contains(att.Message, "commit relief") {
-			t.Errorf("message %q must say the customer can still spend %s and name commit relief",
+		if !strings.Contains(att.Message, domain.FormatMoneyMinor(6000, "USD")) || !strings.Contains(att.Message, "pause the customer's key") {
+			t.Errorf("message %q must say the customer can still spend %s and how to stop it",
 				att.Message, domain.FormatMoneyMinor(6000, "USD"))
 		}
 	})

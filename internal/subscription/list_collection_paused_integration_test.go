@@ -22,7 +22,7 @@ import (
 // explains, so it is left out.
 //
 // "Paused" means in force now, the engine's rule (PauseCollection.InForceAt,
-// notPausedForCollection): a timed pause whose resumes_at has passed no
+// domain.NotPausedForCollectionSQL): a timed pause whose resumes_at has passed no
 // longer holds collection, though the resumer leaves it on the row while a
 // period ending before resumes_at is still open.
 func TestList_CollectionPausedFilter(t *testing.T) {
