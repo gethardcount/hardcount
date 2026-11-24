@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gethardcount/hardcount/internal/credit"
 	"github.com/gethardcount/hardcount/internal/creditnote"
@@ -28,10 +29,10 @@ func (g ledgerGranter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, ten
 	_, err := g.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, g.in(i))
 	return err
 }
-func (g ledgerGranter) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) (int64, int64, int64, bool, error) {
-	return g.svc.LockCommitGrantForReliefTx(ctx, tx, tenantID, invoiceID)
+func (g ledgerGranter) LockCommitGrantForReliefTx(context.Context, *sql.Tx, string, string, time.Time) (creditnote.ReliefGrant, bool, error) {
+	panic("commit relief is not exercised by these tests")
 }
-func (g ledgerGranter) RetireCommitSliceForReliefTx(context.Context, *sql.Tx, string, string, string, int64, int64, int64) (int64, error) {
+func (g ledgerGranter) RetireCommitSliceForReliefTx(context.Context, *sql.Tx, string, string, string, string, int64, int64, int64) (int64, error) {
 	panic("commit relief is not exercised by these tests")
 }
 

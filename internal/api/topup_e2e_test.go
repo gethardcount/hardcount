@@ -300,3 +300,28 @@ func TestTopup_NoDocumentUntilPaid(t *testing.T) {
 	e.call(t, "POST", "/v1/invoices/"+id+"/void", nil).want(t, 200, "withdraw the top-up")
 	check("withdrawn")
 }
+
+// A paid top-up's unused credit is refunded through the real router, as the
+// guide shows: the router wires the unbilled usage relief counts as used, and
+// a relief refuses to run without it. The top-up was paid by bank transfer,
+// so the refund is paid back outside Stripe, and there is no failed card
+// refund to mark as returned another way.
+func TestTopup_RefundUnusedCredit(t *testing.T) {
+	e := newTopupEnv(t, "Topup Refund Co")
+	_, id := e.create(t)
+	e.call(t, "POST", "/v1/invoices/"+id+"/record-payment", map[string]any{"note": "Wire 1042"}).want(t, 200, "record the payment")
+
+	cn := e.call(t, "POST", "/v1/credit-notes", map[string]any{
+		"invoice_id": id, "commit_relief": map[string]any{"retire_all": true},
+	}).want(t, 201, "refund the unused credit").body
+	if flowStr(cn, "status") != "issued" || flowInt(cn, "total_cents") != 9000 || flowInt(cn, "commit_retired_cents") != 10000 ||
+		flowInt(cn, "refund_amount_cents") != 0 || flowInt(cn, "out_of_band_amount_cents") != 9000 ||
+		flowStr(cn, "reason") != "Unused prepaid credit refunded" {
+		t.Errorf("relief %v, want issued, 9000 out of band for 10000 of credit, reason Unused prepaid credit refunded", cn)
+	}
+
+	r := e.call(t, "POST", "/v1/credit-notes/"+flowStr(cn, "id")+"/mark-returned-another-way", nil)
+	if r.status != 409 || r.errCode() != "invalid_state" {
+		t.Errorf("returned another way with no failed refund: %d %.200s, want 409 invalid_state", r.status, r.raw)
+	}
+}

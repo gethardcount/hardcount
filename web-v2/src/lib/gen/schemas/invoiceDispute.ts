@@ -35,8 +35,9 @@ export interface InvoiceDispute {
   /**
      * Stripe's dispute status, as Stripe sends it. The `warning_`
      * statuses are an inquiry, which comes before a chargeback or
-     * instead of one. `won`, `lost`, `warning_closed` and `prevented`
-     * are closed.
+     * instead of one. The `appeal_` statuses reopen a lost dispute
+     * while you appeal it. `won`, `lost`, `warning_closed` and
+     * `prevented` are closed.
      */
   status: InvoiceDisputeStatus;
   /** The reason the cardholder gave, for example `fraudulent`. Absent when Stripe gave none. */

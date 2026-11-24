@@ -25,9 +25,14 @@ original text.
 
 - **Top-ups sell prepaid credit, issued when paid.** An invoice created with one `commit_granted_cents` line and nothing else is a top-up (`billing_reason` `topup`): an unnumbered draft with a pay link. Charging the saved card (`collect`), the hosted page or `record-payment` numbers it, issues it and grants the credit, valid for the new `topup_credit_valid_days` setting (unset: never expires). Void withdraws it.
 - **Sell credit from the dashboard.** The customer page's Credits section and the Credits page have **Sell credit**: the price, the credit, how long it lasts and how the customer pays. It creates the top-up and opens its page with that payment's confirm. New invoice no longer sells credit. Set the validity in Settings → Invoicing.
+- **A failed card refund can be marked as returned another way.** `POST /v1/credit-notes/{id}/mark-returned-another-way` moves a credit note's failed card refund to `out_of_band_amount_cents`, once you have paid the customer back outside Stripe, and records it in the audit log. Retry refund now names it, not a void Hardcount refuses.
+- **`hardcount-doctor` checks card refunds against what was paid.** `card_refunds_exceed_paid` lists an invoice whose credit notes' card refunds and refunds made in Stripe add up to more than the card paid.
 
 ### Changed
 
+- **Refunding a top-up's credit is refused while the customer's bank disputes the payment.** Commit relief answers `409` while the bank holds a chargeback, an appeal included, and after it won one. An inquiry does not stop it.
+- **A top-up's refund says what it refunded.** Its credit note's default reason is "Unused prepaid credit refunded", and its line "… — $60.00 of credit". Its email says "Refunded" and "Credit taken back", and its ledger entry "Refunded by credit note CN-… — $60.00 of bought credit".
+- **Dispute appeals are recorded.** Disputes take Stripe's `appeal_needs_response` and `appeal_under_review` statuses; their webhooks failed before.
 - **A top-up has no PDF until it is paid, and shows its history before.** The PDF routes answer `409` `invalid_state` for an unpaid or withdrawn top-up. `GET /v1/invoices/{id}/payment-timeline` and the customer's Sent emails now include an unpaid top-up's charges and emails, such as its link.
 - **A paid top-up's history shows the credit it added.** Its payment timeline has a `credit.added` row with the credit and its expiry, and lists `credit` in `degraded` when that read fails; its `invoice.finalized` row is titled "Invoice issued". The ledger entry its payment writes reads "Top-up — invoice HC-…", not "Prepaid commit — invoice HC-…".
 - **A prepaid commit's line has no expiry date, and it is the only line on its invoice.** `commit_expires_at` is removed from invoice lines: a request that sends it is refused with `422`. Creating an invoice, or adding a line, refuses a commit line beside any other line with `422`; put other charges on a separate invoice. To sell credit that expires, set `topup_credit_valid_days` (see Added).
@@ -48,6 +53,7 @@ original text.
 ### Fixed
 
 - **The `stripe listen` command in Settings → Payments starts on the current Stripe CLI.** The CLI now refuses to start without a choice of events ("must specify events to forward"), so connecting Stripe on your own computer stopped at step 2. The command names the 12 events Hardcount handles, as the guide does.
+- **Refunding a top-up's credit refunded too much.** Commit relief took expired credit not yet written off, and credit the customer had already used on usage not invoiced yet. It now takes the unused credit only; `retire_cents` above it answers `422`. Its card refund also counts refunds made in Stripe, which it left out.
 - **Revenue on Home and the revenue chart count what customers paid, once.** They added the credit applied to each paid invoice to its payment, so the money behind credit was counted again: a $10,000 prepaid commit counted $10,000 when it was paid and $10,000 more as its credit paid later invoices. Credit from a credit note and promotional credit counted too, though no new money came in. Revenue is now the card and offline payments on the invoices paid in the period ([#1906](https://github.com/gethardcount/hardcount/pull/1906)).
 
 ## [0.10.0] - 2026-11-23

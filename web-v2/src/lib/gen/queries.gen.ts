@@ -3060,15 +3060,20 @@ export const getCreateCreditNoteUrl = () => {
  * - The note is a `draft` until you issue it, unless `auto_issue` is
  *   true. Issuing applies it (see `POST /v1/credit-notes/{id}/issue`).
  *
- * Commit relief, for paid invoices that bought prepaid credit only.
- * Commit relief takes back unused credit from a prepaid commit (credit
- * the customer paid for up front) and gives back its cash. Send
- * `commit_relief` and no `lines`. Hardcount retires that many
- * credits from the commit and works out the cash to give back at the
- * price the customer paid per credit, so a discounted commit is
- * refunded at the discounted rate, never at face value. The note is
- * created and issued in one step. Its cash goes to the card or out of
- * band, never to the credit balance. An unpaid top-up granted no
+ * Commit relief, for paid top-ups only (`billing_reason` `topup`).
+ * Commit relief takes back the credit a customer has not used and gives
+ * back its cash. Send `commit_relief` and no `lines`. Unused credit is
+ * what is left of the top-up's credit now (usable up to its expiry
+ * instant), but no more than the customer's balance in its currency
+ * less the usage not invoiced yet. Hardcount retires the credit and
+ * works out the cash to give back at the price the customer paid for
+ * it, so a discounted top-up is refunded at the discounted rate, never
+ * at face value. The note is created and issued in one step. Its cash
+ * goes to the card or out of band, never to the credit balance; the
+ * card gets at most what it paid less every refund of that payment,
+ * refunds made in Stripe included. Relief is refused while the
+ * customer's bank holds a chargeback on the payment (an appeal
+ * included) and after the bank won it. An unpaid top-up granted no
  * credit: void it to withdraw it.
  *
  * A note with `stripe_refund_id` records a refund already made in
@@ -10586,6 +10591,85 @@ export const useRetryCreditNoteRefund = <TError = InvalidBodyResponse | Unauthor
         TContext
       > => {
       return useMutation(getRetryCreditNoteRefundMutationOptions(options), queryClient);
+    }
+
+export const getMarkCreditNoteReturnedAnotherWayUrl = (id: string,) => {
+
+
+
+
+  return `/v1/credit-notes/${id}/mark-returned-another-way`
+}
+
+/**
+ * Records that you paid the customer back outside Stripe for the refund
+ * part of an `issued` credit note whose `refund_status` is `failed`,
+ * for example after Stripe refused it because the payment was
+ * disputed. The refund part moves to `out_of_band_amount_cents`, the
+ * refund is no longer `failed`, and nothing retries it. An issued
+ * credit note cannot be voided, so this is how a failed refund ends.
+ * The note keeps `stripe_refund_id`, the refund that failed. The action
+ * is recorded in the audit log. The route takes no body.
+ * @summary Mark a failed refund as returned another way
+ */
+export const markCreditNoteReturnedAnotherWay = async (id: string, options?: RequestInit): Promise<CreditNote> => {
+
+  return orvalClient<CreditNote>(getMarkCreditNoteReturnedAnotherWayUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getMarkCreditNoteReturnedAnotherWayMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markCreditNoteReturnedAnotherWay>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof markCreditNoteReturnedAnotherWay>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['markCreditNoteReturnedAnotherWay'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof markCreditNoteReturnedAnotherWay>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  markCreditNoteReturnedAnotherWay(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type MarkCreditNoteReturnedAnotherWayMutationResult = NonNullable<Awaited<ReturnType<typeof markCreditNoteReturnedAnotherWay>>>
+
+    export type MarkCreditNoteReturnedAnotherWayMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
+
+    /**
+ * @summary Mark a failed refund as returned another way
+ */
+export const useMarkCreditNoteReturnedAnotherWay = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markCreditNoteReturnedAnotherWay>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof markCreditNoteReturnedAnotherWay>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getMarkCreditNoteReturnedAnotherWayMutationOptions(options), queryClient);
     }
 
 export const getVoidCreditNoteUrl = (id: string,) => {

@@ -48,7 +48,7 @@ type HandlerDeps struct {
 // EmailSender enqueues the credit-note document email (ADR-082 rider).
 // Satisfied by *email.OutboxSender.
 type EmailSender interface {
-	SendCreditNote(ctx context.Context, tenantID, to string, cc []string, customerName, creditNoteNumber, invoiceNumber string, amountCents int64, currency string, pdfBytes []byte) error
+	SendCreditNote(ctx context.Context, tenantID, to string, cc []string, customerName, creditNoteNumber, invoiceNumber string, amountCents, creditTakenBackCents int64, currency string, pdfBytes []byte) error
 }
 
 type Handler struct {
@@ -95,6 +95,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/{id}/issue", h.issue)
 	r.Post("/{id}/void", h.void)
 	r.Post("/{id}/retry-refund", h.retryRefund)
+	r.Post("/{id}/mark-returned-another-way", h.markReturnedAnotherWay)
 	r.Post("/{id}/attach-stripe-refund", h.attachStripeRefund)
 	r.Post("/{id}/send", h.sendEmail)
 	return r
@@ -361,6 +362,24 @@ func (h *Handler) issue(w http.ResponseWriter, r *http.Request) {
 // dashboard when the CN was issued during a Stripe outage / before Stripe was
 // connected. Svc.RetryRefund looks for the refund at Stripe before any
 // create, so retries converge (see its contract).
+// markReturnedAnotherWay ends a failed card refund: the operator paid the
+// customer back outside Stripe. The audit row rides the service's transaction.
+func (h *Handler) markReturnedAnotherWay(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
+	cn, err := h.svc.MarkRefundReturnedAnotherWay(r.Context(), auth.TenantID(r.Context()), chi.URLParam(r, "id"))
+	if errors.Is(err, errs.ErrNotFound) {
+		respond.NotFound(w, r, "credit note")
+		return
+	}
+	if err != nil {
+		respond.FromError(w, r, err, "credit_note")
+		return
+	}
+	respond.JSON(w, r, http.StatusOK, cn)
+}
+
 func (h *Handler) retryRefund(w http.ResponseWriter, r *http.Request) {
 	if !respond.NoBody(w, r) {
 		return
@@ -625,7 +644,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.emailSender.SendCreditNote(r.Context(), tenantID, to, cc,
-		bt.Name, cn.CreditNoteNumber, orig.Number, cn.TotalCents, cn.Currency, pdfBytes); err != nil {
+		bt.Name, cn.CreditNoteNumber, orig.Number, cn.TotalCents, cn.CommitRetiredCents, cn.Currency, pdfBytes); err != nil {
 		respond.FromError(w, r, err, "credit_note_email")
 		return
 	}

@@ -9,7 +9,7 @@ adversarial judge; the cap arithmetic was mechanically verified against
 
 ## Summary
 
-A paid prepaid-commit invoice (credits bought up front, sometimes at a discount) can be refunded partly or fully with a relief credit note: a `commit_relief` block on `POST /v1/credit-notes`. The operator names how many credits to retire, and the cash follows the price paid per credit, so a $9,000 commit worth $10,000 refunds $5,400 for $6,000 unused. One function, `commitReliefCash`, computes that cash cumulatively, so any series of partial refunds adds up to no more than was paid. The note is created and issued, and the credits retired, in one transaction; only the Stripe refund and the tax reversal run after commit, with retry. Status: active; ordinary credit notes on a commit invoice are refused and point to relief, and relief never pays into the credit balance.
+A paid prepaid-commit invoice (credits bought up front, sometimes at a discount) can be refunded partly or fully with a relief credit note: a `commit_relief` block on `POST /v1/credit-notes`. The operator names how many credits to retire, and the cash follows the price paid per credit, so a $9,000 commit worth $10,000 refunds $5,400 for $6,000 unused. One function, `commitReliefCash`, computes that cash cumulatively, so any series of partial refunds adds up to no more than was paid. The note is created and issued, and the credits retired, in one transaction; only the Stripe refund and the tax reversal run after commit, with retry. Status: active; ordinary credit notes on a commit invoice are refused and point to relief, and relief never pays into the credit balance. Amended 2026-11-25: relief takes only unused credit, is refused on a disputed payment, and its card cap counts refunds made in Stripe.
 
 ## Context
 
@@ -76,6 +76,9 @@ refund at face (over-refund); charging consumption at face under-refunds.
    earned cash; post-expiry goodwill is a promotional grant or
    out-of-band cash, never a cash CN. A zero-cash slice (deep-discount
    rounding) → 409 rather than a silent credit donation.
+   *(Amended 2026-11-25: expiry is judged at the request's instant by the
+   drawdown's liveness rule, live at `expires_at` and expired a moment
+   later, whether or not the sweep has run; see the amendment below.)*
 7. **Cap basis.** `GrossPaid = invoice.TotalAmountCents` — full-settle
    holds because Hardcount has no partial payments and commit invoices cannot
    be credit-paid. If partial capture ever ships, switch to captured cash.
@@ -115,3 +118,30 @@ refund at face (over-refund); charging consumption at face under-refunds.
   an invoice drew. It never goes below `cn_retired_cents`, since relief
   retires only remaining credit, so relief cash stays at most what was paid.
   `amount_cents` still never grows.)*
+
+## Amendment 2026-11-25 — relief takes only unused credit
+
+- **Unused credit.** A relief takes at most the smaller of what is left of
+  the grant at the request's instant and the customer's spendable balance in
+  its currency less the usage not invoiced yet (`unusedCredit`). The grant is
+  live at `expires_at` and expired a moment later, by the predicate
+  `drainPositiveBlocks` uses, read in the grant's `FOR UPDATE` re-read. The
+  spendable balance is read on the relief's transaction under the customer's
+  credit lock; the unbilled usage, billing's figure, before the transaction.
+  `retire_all` takes all of it; a larger `retire_cents` answers 422 with it.
+- **A top-up only.** Relief requires `billing_reason = 'topup'`, which
+  replaces the mixed-invoice gate of decision 6: a top-up has one line.
+- **The card cap counts refunds made in Stripe** of the same payment that
+  moved or may move money and that no note holds, read under the
+  per-invoice credit-note lock (decision 4's PM refund cap).
+- **Disputes.** Relief is refused while a chargeback is recorded (an appeal
+  included) and once the bank won it. When one opens during the relief,
+  Stripe refuses the card refund, and "returned another way"
+  (`POST /v1/credit-notes/{id}/mark-returned-another-way`) ends it. This
+  replaces the 2026-10-19 note's advice to relieve a lost dispute out of
+  band.
+- **Lock order.** The credit-note lock, the invoice row `FOR KEY SHARE`, the
+  customer's credit lock and the grant row, then the tenant's number row.
+  The early `FOR KEY SHARE` keeps the invoice row before the number row. The
+  dispute recorder takes the invoice row `FOR NO KEY UPDATE`, so neither
+  waits for the other.

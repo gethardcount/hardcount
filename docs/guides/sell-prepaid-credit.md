@@ -4,9 +4,10 @@ This guide sells a customer prepaid credit with the API: they pay up front,
 and later invoices in the same currency draw the credit down. It walks
 through the calls: create the top-up (`POST /v1/invoices`), then take the
 payment by charging the saved card (`collect`), sending the payment link
-(`send`) or recording a payment (`record-payment`), or withdraw it (`void`).
-Then what the customer sees, and how to top up a customer's credit
-automatically from your own code.
+(`send`) or recording a payment (`record-payment`), or withdraw it (`void`),
+and how to refund the credit the customer has not used. Then what the
+customer sees, and how to top up a customer's credit automatically from your
+own code.
 
 Think of a gift card: the customer buys it once, and each purchase after
 that spends from it.
@@ -184,6 +185,45 @@ arrives is recorded as a payment on a voided invoice, which raises the
 `payment.received_on_voided_invoice` event and grants no credit. Refund that
 payment in Stripe: the customer paid for an offer you withdrew.
 
+## Refund unused credit
+
+A credit note with a `commit_relief` block takes back the credit a customer
+has not used on a paid top-up, and refunds what they paid for it, at the
+price they paid. $60.00 of credit from a $90 top-up of $100 refunds $54.00.
+
+```bash
+curl -s -X POST "$HARDCOUNT/v1/credit-notes" \
+  -H "Authorization: Bearer $HARDCOUNT_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"invoice_id\": \"$TOPUP_ID\", \"commit_relief\": {\"retire_all\": true}}" \
+  | jq -c '{status, total_cents, commit_retired_cents, refund_amount_cents, out_of_band_amount_cents}'
+```
+
+**You see** (the top-up paid by bank transfer in step 2, with no credit used):
+`{"status":"issued","total_cents":9000,"commit_retired_cents":10000,"refund_amount_cents":0,"out_of_band_amount_cents":9000}`
+
+- **Unused credit** is what is left of the top-up's credit now, but no more
+  than the customer's balance less the usage not invoiced yet, which has
+  already used credit. Credit is usable up to its expiry instant, and expired
+  after it, even before Hardcount writes the expiry off. Tax, a fee billed
+  at the end of the period and what unpaid invoices owe are not taken off:
+  an invoice bills them.
+- **How much:** `retire_all` takes all the unused credit. `retire_cents`
+  takes part of it; more than is unused answers `422` with the figure.
+- **Where the money goes:** to the card that paid. The card gets at most
+  what it paid less every refund of that payment, including refunds made in
+  the Stripe dashboard; put the rest in `out_of_band_amount_cents`. For a
+  top-up paid another way, the refund is `out_of_band_amount_cents`: you pay
+  the customer back, and Hardcount records it.
+- **Refused** with `409` while the customer's bank disputes the payment (a
+  chargeback, or your appeal of one), and after the bank won: "This payment
+  was reversed by the customer's bank in a dispute, so there is nothing left
+  to refund." An inquiry, before any chargeback, does not stop a refund.
+- **A card refund that fails** leaves the credit note's `refund_status`
+  `failed`, for example when a chargeback opened during the refund. Pay the
+  customer back another way, then record it:
+  `POST /v1/credit-notes/{id}/mark-returned-another-way`.
+
 ## What the customer sees
 
 **The email** (step 2, send): the subject "Buy prepaid credit from Acme
@@ -352,8 +392,9 @@ ask a lawyer where you sell:
   shortest allowed period. Whether unclaimed-property, escheat or gift-card
   rules apply to credit that is not spent.
 - **Refunds:** whether a customer may claim back unspent credit, and on
-  what terms. Taking credit back with a credit note is your decision in
-  Hardcount, for each top-up.
+  what terms. Refunding unused credit
+  ([above](#refund-unused-credit)) is your decision in Hardcount, for each
+  top-up.
 - **What your terms and your invoices must say** about the credit, its
   validity and refunds.
 

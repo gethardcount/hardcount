@@ -33,7 +33,10 @@ func scanDisputeDest(d *domain.InvoiceDispute) []any {
 //     charge attempts, then the invoice's own payment and anomaly columns).
 //     No invoice holds it: errs.ErrNotFound, the charge was not Hardcount's;
 //   - the invoice row is locked first, then the dispute row (lock order,
-//     playbook item 8), so two events for one dispute serialize;
+//     playbook item 8), so two events for one dispute serialize. The
+//     invoice lock is FOR NO KEY UPDATE, which never waits for the FOR KEY
+//     SHARE a commit relief holds on it (creditnote.CreateAndIssueCommitRelief);
+//     this transaction writes no invoice column;
 //   - the snapshot is written only when it is newer than the row
 //     (InvoiceDispute.SupersededBy), so a redelivery or an older event that
 //     arrives late changes nothing and queues nothing;
@@ -66,7 +69,7 @@ func (s *PostgresStore) RecordStripeDispute(ctx context.Context, tenantID string
 	// The whole row: the events below carry the invoice (ADR-131).
 	var inv domain.Invoice
 	if err := tx.QueryRowContext(ctx,
-		`SELECT `+invCols+` FROM invoices WHERE id = $1 FOR UPDATE`, invoiceID,
+		`SELECT `+invCols+` FROM invoices WHERE id = $1 FOR NO KEY UPDATE`, invoiceID,
 	).Scan(s.scanInvDest(&inv)...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.DisputeRecordResult{}, errs.ErrNotFound
@@ -218,6 +221,26 @@ func invoiceForPaymentIntentTx(ctx context.Context, tx *sql.Tx, paymentIntentID 
 		return "", fmt.Errorf("find invoice for payment intent %s: %w", paymentIntentID, err)
 	}
 	return id, nil
+}
+
+// DisputeStatusesTx returns the status of every dispute recorded on the
+// invoice, on the caller's tx, with no lock. Commit relief reads it under its
+// credit-note lock to refuse a payment the bank has taken or holds.
+func (s *PostgresStore) DisputeStatusesTx(ctx context.Context, tx *sql.Tx, invoiceID string) ([]domain.DisputeStatus, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT status FROM invoice_disputes WHERE invoice_id = $1`, invoiceID)
+	if err != nil {
+		return nil, fmt.Errorf("read disputes of invoice %s: %w", invoiceID, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []domain.DisputeStatus
+	for rows.Next() {
+		var st domain.DisputeStatus
+		if err := rows.Scan((*string)(&st)); err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
 }
 
 // ListDisputesByInvoice returns the invoice's disputes, oldest first.

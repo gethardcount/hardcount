@@ -51,6 +51,8 @@ type Store interface {
 	// grants already past their expiry at `at` that the expiry sweep has not
 	// written off: the amount a draw at that instant could use.
 	GetSpendableBalance(ctx context.Context, tenantID, customerID string, at time.Time) (map[string]int64, error)
+	// GetSpendableBalanceTx is GetSpendableBalance on the caller's tx.
+	GetSpendableBalanceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID string, at time.Time) (map[string]int64, error)
 	// ListBalances returns one page of the (customer, currency) balances and
 	// how many there are.
 	ListBalances(ctx context.Context, tenantID string, limit, offset int) ([]domain.CreditBalance, int, error)
@@ -92,10 +94,11 @@ type Store interface {
 
 	// LockCommitGrantTx + RetireCommitSliceForReliefTx are the ADR-080
 	// relief pair: read the funded grant's frozen state under the relief
-	// locks, then retire an explicit slice (bumping the telescoping anchor
-	// cn_retired_cents) with a loud error on a missing grant.
-	LockCommitGrantTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) (commitGrantState, bool, error)
-	RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID string, slice, refundedGrossCents, grossPaidCents int64) (commitGrantState, error)
+	// locks, live or not at `at`, then retire an explicit slice (bumping the
+	// telescoping anchor cn_retired_cents) with a loud error on a missing
+	// grant.
+	LockCommitGrantTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (commitGrantState, bool, error)
+	RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64) (commitGrantState, error)
 }
 
 type ListFilter struct {

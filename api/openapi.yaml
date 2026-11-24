@@ -6254,14 +6254,17 @@ components:
             - warning_closed
             - needs_response
             - under_review
+            - appeal_needs_response
+            - appeal_under_review
             - won
             - lost
             - prevented
           description: |
             Stripe's dispute status, as Stripe sends it. The `warning_`
             statuses are an inquiry, which comes before a chargeback or
-            instead of one. `won`, `lost`, `warning_closed` and `prevented`
-            are closed.
+            instead of one. The `appeal_` statuses reopen a lost dispute
+            while you appeal it. `won`, `lost`, `warning_closed` and
+            `prevented` are closed.
         reason:
           type: string
           description: The reason the cardholder gave, for example `fraudulent`. Absent when Stripe gave none.
@@ -12518,15 +12521,20 @@ paths:
         - The note is a `draft` until you issue it, unless `auto_issue` is
           true. Issuing applies it (see `POST /v1/credit-notes/{id}/issue`).
 
-        Commit relief, for paid invoices that bought prepaid credit only.
-        Commit relief takes back unused credit from a prepaid commit (credit
-        the customer paid for up front) and gives back its cash. Send
-        `commit_relief` and no `lines`. Hardcount retires that many
-        credits from the commit and works out the cash to give back at the
-        price the customer paid per credit, so a discounted commit is
-        refunded at the discounted rate, never at face value. The note is
-        created and issued in one step. Its cash goes to the card or out of
-        band, never to the credit balance. An unpaid top-up granted no
+        Commit relief, for paid top-ups only (`billing_reason` `topup`).
+        Commit relief takes back the credit a customer has not used and gives
+        back its cash. Send `commit_relief` and no `lines`. Unused credit is
+        what is left of the top-up's credit now (usable up to its expiry
+        instant), but no more than the customer's balance in its currency
+        less the usage not invoiced yet. Hardcount retires the credit and
+        works out the cash to give back at the price the customer paid for
+        it, so a discounted top-up is refunded at the discounted rate, never
+        at face value. The note is created and issued in one step. Its cash
+        goes to the card or out of band, never to the credit balance; the
+        card gets at most what it paid less every refund of that payment,
+        refunds made in Stripe included. Relief is refused while the
+        customer's bank holds a chargeback on the payment (an appeal
+        included) and after the bank won it. An unpaid top-up granted no
         credit: void it to withdraw it.
 
         A note with `stripe_refund_id` records a refund already made in
@@ -12612,7 +12620,8 @@ paths:
                     Mutually exclusive with lines and credit_amount_cents. The
                     relief's split goes in here, not at the top level: a top-level
                     `refund_amount_cents`, `out_of_band_amount_cents` or
-                    `refund_type` is a 422. Example after a lost dispute:
+                    `refund_type` is a 422. Example, all the unused credit
+                    refunded outside Stripe:
                     `{"invoice_id": "hc_inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
                   properties:
                     invoice_id:
@@ -12622,13 +12631,13 @@ paths:
                       type: string
                       description: |
                         Optional. Wins over the top-level `reason`. When both
-                        are empty, the note's reason is `commit_relief`.
+                        are empty, the note's reason is `Unused prepaid credit refunded`.
                     retire_cents:
                       type: integer
-                      description: Commit credits to retire, from 1 to what is left of the commit.
+                      description: Credit to retire, in the currency's minor unit (cents for USD), from 1 to the unused credit. More than is unused is a 422 that names the figure.
                     retire_all:
                       type: boolean
-                      description: Retire all the commit credit left at the moment the relief runs, so credit the customer spends meanwhile is not counted. `retire_cents` is then ignored.
+                      description: Retire all the unused credit at the moment the relief runs, so credit the customer spends meanwhile is not counted. `retire_cents` is then ignored.
                     refund_amount_cents:
                       type: integer
                       description: Optional. Part of the cash refunded to the card. With `out_of_band_amount_cents` it must add up to the cash Hardcount works out. When both are left out, the cash goes to the card if the invoice was paid by card, otherwise out of band.
@@ -12696,7 +12705,9 @@ paths:
             invoice is a draft, voided or written off, already fully
             credited, or bought prepaid credit (use commit relief when it is
             paid, void it when it is unpaid); a relief on an unpaid,
-            written-off, voided, mixed-line, zero-total or fully used commit;
+            written-off, voided or zero-total top-up, one with no unused
+            credit, or one whose payment the customer's bank disputes (a
+            chargeback or an appeal) or took back in a lost dispute;
             or a `stripe_refund_id` that a credit note already records, or
             that is still in flight at Stripe. Code `payment_in_flight`: a
             charge on the invoice is unresolved.
@@ -12724,8 +12735,10 @@ paths:
             naming another invoice's line; a note above what the invoice can
             still be credited; amounts that do not add up to the total; a
             refund above what was paid by card; a `stripe_refund_id` that
-            does not qualify; an over-sized or zero-cash relief; or an
-            unknown field (the body must use only the fields listed here).
+            does not qualify; a relief on an invoice that is not a top-up, one
+            above the unused credit, one that rounds to no cash, or one whose
+            card refund is above what the card has left; or an unknown field
+            (the body must use only the fields listed here).
           content:
             application/json:
               schema:
@@ -21586,8 +21599,9 @@ paths:
           description: |
             Code `invalid_state`. The note is not issued, has no refund part,
             the refund already succeeded or is still processing at Stripe,
-            or the invoice was paid outside Stripe (void the note and issue a
-            new one with `out_of_band_amount_cents`). Code `stripe_refund_unresolved`: the
+            or the invoice was paid outside Stripe (once you have paid the
+            customer back another way, record it with
+            `POST /v1/credit-notes/{id}/mark-returned-another-way`). Code `stripe_refund_unresolved`: the
             invoice has a refund made in Stripe that is not recorded yet
             (flagged for review, or still in flight). Record it, attach it to
             this note with `POST /v1/credit-notes/{id}/attach-stripe-refund`
@@ -21637,6 +21651,110 @@ paths:
                   code: provider_error
                   message: Stripe didn't make the refund, so the customer was not refunded. Check the payment in Stripe, then retry the refund.
                   request_id: req_dbjg652q3gpgqfoq5cd0
+
+  /v1/credit-notes/{id}/mark-returned-another-way:
+    post:
+      tags: [CreditNotes]
+      summary: Mark a failed refund as returned another way
+      operationId: markCreditNoteReturnedAnotherWay
+      description: |
+        Records that you paid the customer back outside Stripe for the refund
+        part of an `issued` credit note whose `refund_status` is `failed`,
+        for example after Stripe refused it because the payment was
+        disputed. The refund part moves to `out_of_band_amount_cents`, the
+        refund is no longer `failed`, and nothing retries it. An issued
+        credit note cannot be voided, so this is how a failed refund ends.
+        The note keeps `stripe_refund_id`, the refund that failed. The action
+        is recorded in the audit log. The route takes no body.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          description: The issued credit note's id (`hc_cn_…`).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Credit note with the refund part moved to `out_of_band_amount_cents`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditNote"
+              example:
+                id: hc_cn_dbkrtc2q3gpgqfoq5c5g
+                tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
+                invoice_id: hc_inv_dbj84b2q3gpgqfoq5c40
+                customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
+                credit_note_number: CN-000003
+                status: issued
+                reason: Unused prepaid credit refunded
+                subtotal_cents: 5400
+                tax_amount_cents: 0
+                total_cents: 5400
+                refund_amount_cents: 0
+                credit_amount_cents: 0
+                out_of_band_amount_cents: 5400
+                commit_retired_cents: 6000
+                currency: USD
+                issued_at: "2026-11-03T10:15:00Z"
+                refund_status: none
+                stripe_refund_id: re_3QHk7bLkdIwHu7ix2c3d4e5f
+                recorded_from_stripe: false
+                issue_pending: false
+                tax_reversal_pending: false
+                created_at: "2026-11-03T10:15:00Z"
+                recorded_at: "2026-11-03T10:15:00Z"
+                updated_at: "2026-11-04T09:00:00Z"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No credit note with this id in this account and mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  type: invalid_request_error
+                  code: not_found
+                  message: credit note not found
+                  request_id: req_dbjg652q3gpgqfoq5cd0
+        "409":
+          description: |
+            Code `invalid_state`. The note is not issued, or its refund did
+            not fail: it is pending, succeeded, or there is none.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  type: invalid_request_error
+                  code: invalid_state
+                  message: Only a card refund that failed can be marked as returned another way.
+                  request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          description: The request has a body with a field. This route takes no body (`param` names the field).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  type: invalid_request_error
+                  code: validation_error
+                  message: unknown field "amount_cents"
+                  request_id: req_dbjg652q3gpgqfoq5cd0
+                  param: amount_cents
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/credit-notes/{id}/void:
     post:

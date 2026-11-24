@@ -246,16 +246,34 @@ func (a *creditGrantAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.T
 // the relief pair to credit.Service, on the credit note's coordinator
 // transaction. A relief credit note refunds part or all of a paid prepaid
 // commit by retiring credits the customer has not used (ADR-080).
-func (a *creditGrantAdapter) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) (int64, int64, int64, bool, error) {
-	return a.svc.LockCommitGrantForReliefTx(ctx, tx, tenantID, invoiceID)
+func (a *creditGrantAdapter) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (creditnote.ReliefGrant, bool, error) {
+	g, found, err := a.svc.LockCommitGrantForReliefTx(ctx, tx, tenantID, invoiceID, at)
+	return creditnote.ReliefGrant(g), found, err
 }
 
-func (a *creditGrantAdapter) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID string, slice, refundedGrossCents, grossPaidCents int64) (int64, error) {
-	res, err := a.svc.RetireCommitSliceForReliefTx(ctx, tx, tenantID, invoiceID, creditNoteID, slice, refundedGrossCents, grossPaidCents)
+func (a *creditGrantAdapter) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64) (int64, error) {
+	res, err := a.svc.RetireCommitSliceForReliefTx(ctx, tx, tenantID, invoiceID, creditNoteID, creditNoteNumber, slice, refundedGrossCents, grossPaidCents)
 	if err != nil {
 		return 0, err
 	}
 	return res.RemainingAfterCents, nil
+}
+
+// unbilledUsageAdapter implements creditnote.UnbilledUsageReader over the
+// billing engine's live credit figure: the usage no invoice has billed yet,
+// per currency, which commit relief counts as credit already used.
+type unbilledUsageAdapter struct{ engine *billing.Engine }
+
+func (a unbilledUsageAdapter) UnbilledUsage(ctx context.Context, tenantID, customerID string) (map[string]int64, error) {
+	live, err := a.engine.LiveCreditBalance(ctx, tenantID, customerID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(live.Balances))
+	for _, b := range live.Balances {
+		out[b.Currency] = b.UnbilledUsageCents
+	}
+	return out, nil
 }
 
 // creditNoteListerAdapter implements invoice.CreditNoteLister over

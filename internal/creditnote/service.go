@@ -15,6 +15,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/activity"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/money"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -56,6 +57,17 @@ type InvoiceReader interface {
 	// nothing is left due, unless a charge hold is set; paid reports whether
 	// it did. Not settling is not an error.
 	SettleZeroDueTx(ctx context.Context, tx *sql.Tx, tenantID, id string, paidAt time.Time) (inv domain.Invoice, paid bool, err error)
+	// DisputeStatusesTx returns the status of every dispute recorded on the
+	// invoice, on the caller's tx, with no lock.
+	DisputeStatusesTx(ctx context.Context, tx *sql.Tx, invoiceID string) ([]domain.DisputeStatus, error)
+}
+
+// UnbilledUsageReader reads the usage a customer has used that no invoice has
+// billed yet, per currency (billing.Engine.LiveCreditBalance's
+// UnbilledUsageCents). Declared here so this package does not import billing;
+// internal/api adapts the engine to it.
+type UnbilledUsageReader interface {
+	UnbilledUsage(ctx context.Context, tenantID, customerID string) (map[string]int64, error)
 }
 
 // DunningResolver closes the invoice's dunning run, active or escalated, after
@@ -179,12 +191,28 @@ type CreditGranter interface {
 	// The 0093 dedup index still backs it, but the CAS makes it unreachable: a
 	// dedup conflict here would mean a second CAS winner, which cannot happen.
 	GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, creditNoteID string, input CreditGrantInput) error
-	// ADR-080 relief pair. Lock reads the funded commit grant's frozen
-	// state (granted G, consumed C, cn_retired K) under the relief locks
-	// on the caller's tx; Retire retires an explicit slice, bumps K, and
-	// enqueues credit.commit_retired in the same tx.
-	LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) (granted, consumed, cnRetired int64, found bool, err error)
-	RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID string, slice, refundedGrossCents, grossPaidCents int64) (remainingAfter int64, err error)
+	// ADR-080 relief pair. Lock reads the funded commit grant under the
+	// relief locks on the caller's tx, with what is left of it and the
+	// customer's spendable balance at `at`; Retire retires an explicit
+	// slice, bumps K, names the note in the ledger entry, and enqueues
+	// credit.commit_retired in the same tx.
+	LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (g ReliefGrant, found bool, err error)
+	RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64) (remainingAfter int64, err error)
+}
+
+// ReliefGrant is a top-up's grant as a relief reads it under its locks, at the
+// relief's instant (credit.ReliefGrant).
+type ReliefGrant struct {
+	GrantID        string
+	GrantedCents   int64 // G
+	ConsumedCents  int64 // C
+	CNRetiredCents int64 // K, credit retired by earlier reliefs
+	// LiveRemainingCents is what is left of the grant, 0 once past its
+	// expires_at, swept or not.
+	LiveRemainingCents int64
+	// SpendableCents is the customer's spendable balance in the grant's
+	// currency.
+	SpendableCents int64
 }
 
 // TaxReverser issues a reversal of the invoice's committed tax transaction.
@@ -254,6 +282,7 @@ type Service struct {
 	piInvoices   PaymentIntentInvoiceFinder
 	outbox       OutboxEnqueuer
 	refundReader RefundReader
+	unbilled     UnbilledUsageReader
 }
 
 // AuditEmitter is the narrow in-tx audit seam (ADR-090). Issue() emits the
@@ -289,6 +318,11 @@ func (s *Service) SetDunningResolver(r DunningResolver) { s.dunning = r }
 // what an unpaid invoice asks for expires the customer's open Checkout page.
 // A setter until this service takes its dependencies at construction.
 func (s *Service) SetCheckoutExpirer(e CheckoutExpirer) { s.checkoutExpirer = e }
+
+// SetUnbilledUsageReader wires the unbilled usage commit relief counts as
+// used. A setter because the billing engine that reads it is built with this
+// service. Relief refuses to run without it.
+func (s *Service) SetUnbilledUsageReader(r UnbilledUsageReader) { s.unbilled = r }
 
 // SetNumberGenerator sets the sequential number generator (breaks circular dep).
 func (s *Service) SetNumberGenerator(ng NumberGenerator) {
@@ -1057,8 +1091,8 @@ func (s *Service) buildCreditNote(ctx context.Context, tx *sql.Tx, tenantID stri
 // server-derived from the telescoping anchor — never operator-supplied.
 type CommitReliefInput struct {
 	InvoiceID string `json:"invoice_id"`
-	// RetireCents: how many commit credits to retire (1..remaining).
-	// Ignored when RetireAll — which resolves to the LIVE remaining inside
+	// RetireCents: how much credit to retire, at most the unused credit.
+	// Ignored when RetireAll — which resolves to the unused credit inside
 	// the tx, so a racing drawdown shrinks the relief instead of failing it.
 	RetireCents int64  `json:"retire_cents"`
 	RetireAll   bool   `json:"retire_all"`
@@ -1097,16 +1131,42 @@ func commitReliefCash(grossPaid, granted, k, r int64) int64 {
 	return f(k+r) - f(k)
 }
 
-// CreateAndIssueCommitRelief refunds a PAID commit invoice by retiring
-// commit credits (ADR-080 — the ADR-078 phase-2 relief leg). ONE
-// coordinator tx creates the credit note, flips it issued, and retires the
-// credits: a crash pre-commit leaves nothing; post-commit only the
-// external legs (Stripe refund / tax reversal) are outstanding and both
-// self-heal — credits are always retired at-or-before cash leaves, never
-// refunded-but-drawable. Deliberately create-and-issue (no draft window):
-// operator-initiated, idempotency-keyed at the HTTP layer, and a draft
-// would neither reserve the cap nor survive Issue()'s credit-channel
-// re-derive default — the exact hazards the panel rejected.
+// reliefReason is a relief note's reason when the operator gives none, and the
+// start of its one line.
+const reliefReason = "Unused prepaid credit refunded"
+
+// unusedCredit is the credit a top-up still has to refund: what is left of its
+// grant at the relief's instant, but no more than the customer's spendable
+// balance less the usage no invoice has billed yet, since that usage has used
+// credit already. It leaves out tax, a fee billed in arrears and amounts due
+// on unpaid invoices. Those are what the period's invoice bills, not credit
+// already used.
+func unusedCredit(g ReliefGrant, unbilledCents int64) int64 {
+	return min(g.LiveRemainingCents, max(g.SpendableCents-unbilledCents, 0))
+}
+
+// CreateAndIssueCommitRelief refunds a paid top-up's unused credit (ADR-080):
+// it retires credit and refunds the cash paid for it, at the price paid per
+// credit. ONE coordinator tx creates the credit note, issues it and retires
+// the credit, so a crash leaves nothing or all of it, and credit is retired
+// before cash leaves. Only the Stripe refund and the tax reversal run after
+// the commit, idempotency-keyed and swept. Deliberately create-and-issue (no
+// draft): a draft would neither reserve the cap nor survive Issue()'s
+// re-derived allocation.
+//
+// Unused credit is unusedCredit at the request's instant. The unbilled usage
+// is read before the transaction, as a decided input; the grant and the
+// spendable balance under the customer's credit lock.
+//
+// Relief is refused when a chargeback is recorded. When one opens during the
+// relief, Stripe refuses the card refund, and "returned another way" ends it.
+// No lock can close that race, because Stripe opens the dispute before its
+// webhook reaches Hardcount.
+//
+// Lock order: the per-invoice credit-note lock, the invoice row FOR KEY
+// SHARE, the customer's credit lock and the grant row, then the tenant's
+// number row. FOR KEY SHARE comes early to keep the invoice row before the
+// number row: the note's insert takes it again for its foreign key.
 func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID string, input CommitReliefInput) (domain.CreditNote, error) {
 	if input.InvoiceID == "" {
 		return domain.CreditNote{}, errs.Required("invoice_id")
@@ -1114,40 +1174,20 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 	if !input.RetireAll && input.RetireCents <= 0 {
 		return domain.CreditNote{}, errs.Invalid("retire_cents", "must be a positive number of credits, or set retire_all")
 	}
-	if s.numbers == nil {
-		return domain.CreditNote{}, fmt.Errorf("credit-note number generator not wired (call SetNumberGenerator)")
+	if s.numbers == nil || s.credits == nil || s.unbilled == nil {
+		return domain.CreditNote{}, fmt.Errorf("commit relief is not wired: it needs the number generator, the credit granter and the unbilled usage reader")
 	}
-	if s.credits == nil {
-		return domain.CreditNote{}, fmt.Errorf("credit granter not wired (pass it to NewService)")
-	}
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
+	at := clock.Now(ctx)
 
 	inv, err := s.invoices.Get(ctx, tenantID, input.InvoiceID)
 	if err != nil {
 		return domain.CreditNote{}, err
 	}
-
-	// Shape gate first: a relief request against a non-commit invoice is
-	// wrong regardless of status — route to the regular CN flow.
-	invLines, err := s.invoices.ListLineItems(ctx, tenantID, input.InvoiceID)
-	if err != nil {
-		return domain.CreditNote{}, fmt.Errorf("list invoice line items: %w", err)
+	// A top-up's one line sells the credit (ADR-078 amendment 2026-11-24).
+	if inv.BillingReason != domain.BillingReasonTopup {
+		return domain.CreditNote{}, errs.Invalid("invoice_id", "this invoice is not a top-up, so it has no prepaid credit to refund — use a regular credit note")
 	}
-	commitLines := 0
-	for _, li := range invLines {
-		if li.IsCommitLine() {
-			commitLines++
-		}
-	}
-	if commitLines == 0 {
-		return domain.CreditNote{}, errs.Invalid("invoice_id", "not a commit invoice — use a regular credit note")
-	}
-	if commitLines != len(invLines) || commitLines != 1 {
-		// Mixed commit+other invoices: relief semantics for the non-commit
-		// share are undefined in phase 2 — gate loudly. Trigger: first DP
-		// mixed-invoice refund ask.
-		return domain.CreditNote{}, errs.InvalidState("commit relief supports single-line commit invoices only — this invoice mixes commit and non-commit lines")
-	}
-
 	// Status gates. Paid is terminal for commit invoices (void-of-paid is
 	// blocked), so these pre-tx reads cannot regress under us; the money
 	// inputs are frozen later by the grant row lock. An unpaid top-up is a
@@ -1174,6 +1214,12 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 	if inv.TaxAmountCents != 0 {
 		return domain.CreditNote{}, errs.InvalidState("commit relief does not reverse tax, and a top-up carries none — this invoice has tax, so it cannot be relieved")
 	}
+	unbilledByCurrency, err := s.unbilled.UnbilledUsage(ctx, tenantID, inv.CustomerID)
+	if err != nil {
+		return domain.CreditNote{}, fmt.Errorf("read unbilled usage for commit relief: %w", err)
+	}
+	unbilled := unbilledByCurrency[strings.ToUpper(inv.Currency)]
+	amount := func(cents int64) string { return domain.FormatMoneyMinor(cents, inv.Currency) }
 
 	tx, err := s.store.BeginTx(ctx, tenantID)
 	if err != nil {
@@ -1183,33 +1229,38 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 
 	// Captured by the build closure for the post-insert retire.
 	var retireSlice, reliefCash int64
+	var grantID string
 
 	cn, err := s.store.CreateUnderInvoiceLockDynamicTx(ctx, tx, tenantID, input.InvoiceID, func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error) {
-		// Grant lock AFTER the per-invoice CN lock — the ADR-080 order
-		// (invoice-CN → customer advisory → ledger rows). G, C, K are
-		// frozen from here to commit.
-		granted, consumed, k, found, gerr := s.credits.LockCommitGrantForReliefTx(ctx, tx, tenantID, input.InvoiceID)
-		if gerr != nil {
-			return domain.CreditNote{}, nil, gerr
+		if err := s.refuseDisputedTx(ctx, tx, input.InvoiceID); err != nil {
+			return domain.CreditNote{}, nil, err
+		}
+		stripeRefunded, err := s.store.StripeRefundedOutsideNotesTx(ctx, tx, input.InvoiceID, inv.StripePaymentIntentID)
+		if err != nil {
+			return domain.CreditNote{}, nil, err
+		}
+		g, found, err := s.credits.LockCommitGrantForReliefTx(ctx, tx, tenantID, input.InvoiceID, at)
+		if err != nil {
+			return domain.CreditNote{}, nil, err
 		}
 		if !found {
-			return domain.CreditNote{}, nil, fmt.Errorf("invoice %s has a commit line but no funded grant — its payment funds the grant in the same tx, so this is corrupted state; refusing to move cash", input.InvoiceID)
+			return domain.CreditNote{}, nil, fmt.Errorf("invoice %s is a paid top-up with no funded grant — its payment funds the grant in the same tx, so this is corrupted state; refusing to move cash", input.InvoiceID)
 		}
-		remaining := granted - consumed
-		if remaining <= 0 {
-			return domain.CreditNote{}, nil, errs.InvalidState("commit fully consumed (or lapsed per its term) — nothing refundable")
+		unused := unusedCredit(g, unbilled)
+		if unused <= 0 {
+			return domain.CreditNote{}, nil, errs.InvalidState("No unused credit: it is used, expired, or already refunded.")
 		}
 		r := input.RetireCents
 		if input.RetireAll {
-			r = remaining
+			r = unused
 		}
-		if r > remaining {
+		if r > unused {
 			return domain.CreditNote{}, nil, errs.Invalid("retire_cents", fmt.Sprintf(
-				"%d credits requested but only %d remain on the commit (max refundable now: %.2f) — a drawdown may have landed since you looked; re-check and retry",
-				r, remaining, float64(commitReliefCash(grossPaid, granted, k, remaining))/100))
+				"%s of credit was asked for, but only %s is unused (usage not invoiced yet counts as used), refundable now for %s. Retry with retire_all or a smaller amount.",
+				amount(r), amount(unused), amount(commitReliefCash(grossPaid, g.GrantedCents, g.CNRetiredCents, unused))))
 		}
 
-		x := commitReliefCash(grossPaid, granted, k, r)
+		x := commitReliefCash(grossPaid, g.GrantedCents, g.CNRetiredCents, r)
 		if x == 0 {
 			// Deep-discount degenerate slice: the credits round to zero
 			// cash. A zero-total CN would silently donate the credits —
@@ -1269,21 +1320,25 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 					float64(x)/100, float64(refundAmount)/100, float64(outOfBand)/100, float64(allocated)/100))
 			}
 		}
-		// PM refund cap: never push more cash to the card than was paid
-		// minus prior refunds — an out-of-band Stripe-dashboard refund may
-		// have drained the PI. Zero when no card backs the payment at all, so
-		// an EXPLICIT refund allocation on an offline-paid invoice is refused
-		// here rather than reaching Stripe with no PaymentIntent.
-		pmRefundable := inv.CardRefundableCents(existingRefunds)
-		if refundAmount > pmRefundable {
+		// PM refund cap: the card refund fits what the card paid less every
+		// refund of that payment, the earlier notes' (failed ones too, which a
+		// retry may send) and those made in Stripe. Zero when no card backs the
+		// payment at all, so an EXPLICIT refund allocation on an offline-paid
+		// invoice is refused here rather than reaching Stripe with no
+		// PaymentIntent.
+		priorRefunds, serr := domain.SumCents(existingRefunds, stripeRefunded)
+		if serr != nil {
+			return domain.CreditNote{}, nil, fmt.Errorf("refunds on invoice %s: %w", input.InvoiceID, serr)
+		}
+		if pmRefundable := inv.CardRefundableCents(priorRefunds); refundAmount > pmRefundable {
 			if !inv.HasCardPayment() {
 				return domain.CreditNote{}, nil, errs.Invalid("refund_amount_cents", fmt.Sprintf(
-					"this invoice was not paid by card, so there is no card to refund (%.2f requested) — route the amount to out_of_band_amount_cents.",
-					float64(refundAmount)/100))
+					"this invoice was not paid by card, so there is no card to refund (%s requested) — route the amount to out_of_band_amount_cents.",
+					amount(refundAmount)))
 			}
 			return domain.CreditNote{}, nil, errs.Invalid("refund_amount_cents", fmt.Sprintf(
-				"refund amount (%.2f) exceeds payment-method refundable (%.2f) — route the rest to out_of_band_amount_cents",
-				float64(refundAmount)/100, float64(pmRefundable)/100))
+				"the card has %s left to refund after earlier refunds, including refunds made in Stripe, so %s can't go to it — route the rest to out_of_band_amount_cents",
+				amount(pmRefundable), amount(refundAmount)))
 		}
 
 		cnNumber, nerr := s.numbers.NextCreditNoteNumberTx(ctx, tx, tenantID)
@@ -1296,9 +1351,9 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 
 		reason := strings.TrimSpace(input.Reason)
 		if reason == "" {
-			reason = "commit_relief"
+			reason = reliefReason
 		}
-		retireSlice, reliefCash = r, x
+		retireSlice, reliefCash, grantID = r, x, g.GrantID
 
 		// A top-up carries no tax (decided when it is created), so the note
 		// reverses none: its subtotal is its total.
@@ -1318,7 +1373,7 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 			RefundStatus:         domain.RefundNone,
 		}
 		line := domain.CreditNoteLineItem{
-			Description:     fmt.Sprintf("Commit relief — retired %d of %d commit credits", r, granted),
+			Description:     reliefReason + " — " + activity.FormatMoney(activity.Money{Cents: r, Currency: inv.Currency}) + " of credit",
 			Quantity:        1,
 			UnitAmountCents: x,
 			AmountCents:     x,
@@ -1341,12 +1396,12 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 
 	// Retire the credits IN the tx (the internal money effect). The grant
 	// row is already locked by this tx, so the re-read is consistent.
-	if _, err := s.credits.RetireCommitSliceForReliefTx(ctx, tx, tenantID, input.InvoiceID, cn.ID, retireSlice, reliefCash, grossPaid); err != nil {
+	if _, err := s.credits.RetireCommitSliceForReliefTx(ctx, tx, tenantID, input.InvoiceID, cn.ID, cn.CreditNoteNumber, retireSlice, reliefCash, grossPaid); err != nil {
 		return domain.CreditNote{}, fmt.Errorf("retire commit slice: %w", err)
 	}
 
 	// ADR-090 in-tx emission — mirrors Issue()'s row so relief CNs are as
-	// visible as ordinary issues.
+	// visible as ordinary issues, with the credit taken back and its grant.
 	if s.audit != nil {
 		if auditErr := s.audit.LogInTx(ctx, tx, audit.Entry{
 			Action:        "credit_note.issued",
@@ -1361,6 +1416,8 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 				"refund_amount_cents":      cn.RefundAmountCents,
 				"credit_amount_cents":      cn.CreditAmountCents,
 				"out_of_band_amount_cents": cn.OutOfBandAmountCents,
+				"credit_taken_back_cents":  retireSlice,
+				"grant_id":                 grantID,
 				"reason":                   cn.Reason,
 				"currency":                 cn.Currency,
 			},
@@ -1376,6 +1433,28 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 	// External legs (Stripe refund / tax reversal) — shared with Issue(),
 	// idempotency-keyed and self-healing.
 	return s.runPostIssueExternalLegs(ctx, tenantID, cn.ID, cn, inv)
+}
+
+// refuseDisputedTx refuses a relief while the customer's bank holds a
+// chargeback on the payment, an appeal included, or once it won one. An
+// inquiry is not a chargeback: a refund ends it.
+func (s *Service) refuseDisputedTx(ctx context.Context, tx *sql.Tx, invoiceID string) error {
+	statuses, err := s.invoices.DisputeStatusesTx(ctx, tx, invoiceID)
+	if err != nil {
+		return err
+	}
+	var open, lost bool
+	for _, st := range statuses {
+		open = open || (!st.Inquiry() && !st.Closed())
+		lost = lost || st == domain.DisputeLost
+	}
+	switch {
+	case open:
+		return errs.InvalidState("The customer's bank is disputing this payment, so it can't be refunded while the dispute is open. Answer the dispute in Stripe; if you win it, you can refund the unused credit then.")
+	case lost:
+		return errs.InvalidState("This payment was reversed by the customer's bank in a dispute, so there is nothing left to refund.")
+	}
+	return nil
 }
 
 // RefundInput describes a direct refund against a paid invoice. It bypasses
@@ -2112,8 +2191,9 @@ func (s *Service) runPostIssueExternalLegs(ctx context.Context, tenantID, id str
 			// there is no card, so this leg can never execute. "pending" would
 			// claim a refund is in progress that cannot start, and would reach
 			// the needs-attention queue only via the >72h rule. Say failed, and
-			// say it loudly — RetryRefund answers with the void-and-re-issue
-			// instruction rather than another doomed Stripe call.
+			// say it loudly — RetryRefund names "returned another way"
+			// (MarkRefundReturnedAnotherWay) rather than another doomed Stripe
+			// call.
 			slog.Warn("credit note allocates a card refund on an invoice not paid by card; refund leg cannot execute",
 				"credit_note_id", cn.ID, "invoice_id", inv.ID, "paid_out_of_band", inv.PaidOutOfBand)
 			cn.RefundStatus = domain.RefundFailed
@@ -2296,18 +2376,16 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 	if err := s.refundBlockedByStripeRefund(ctx, tenantID, cn.InvoiceID); err != nil {
 		return domain.CreditNote{}, err
 	}
-	// The operator-facing dead end this closes: a refund leg written against an
-	// offline-paid invoice can NEVER succeed, because no Stripe payment backs
-	// it. Before this guard the retry failed at Stripe and surfaced as an
-	// opaque 500 — leaving the row in the "refunds needing attention" queue
-	// with no way out. Answer it as the un-retryable state it is, so the
-	// operator voids the note and re-issues against out_of_band instead of
-	// clicking forever.
+	// A refund leg written against an offline-paid invoice can never succeed,
+	// because no Stripe payment backs it. Answer it as the state it is, so the
+	// operator pays the customer back another way and marks the refund
+	// returned another way (MarkRefundReturnedAnotherWay), which ends it; an
+	// issued note cannot be voided.
 	if !inv.HasCardPayment() {
 		if !inv.PaidOutOfBand {
 			return domain.CreditNote{}, errs.InvalidState("invoice has no PaymentIntent — refund cannot be processed via Stripe")
 		}
-		return domain.CreditNote{}, errs.InvalidState("invoice was paid outside Stripe — this refund can never succeed; void this credit note and re-issue it allocated to out-of-band instead")
+		return domain.CreditNote{}, errs.InvalidState("This invoice was paid outside Stripe, so this card refund can never succeed. Once you have paid the customer back another way, mark the refund as returned another way.")
 	}
 
 	// ADR-090 in-tx emission for the operator retry. Emitted UNCONDITIONALLY —
@@ -2654,4 +2732,59 @@ func (s *Service) Void(ctx context.Context, tenantID, id string) (domain.CreditN
 		}
 	}
 	return s.store.Get(ctx, tenantID, id)
+}
+
+// MarkRefundReturnedAnotherWay records that the customer was paid back
+// outside Stripe for a card refund that failed: the refund moves to
+// out_of_band, where nothing retries it, and the note's refund is no longer
+// failed. It is the end of a failed refund for a relief and an ordinary note
+// alike, since an issued note cannot be voided. Allowed only while the
+// refund is failed. It runs under the per-invoice credit-note lock, so a cap
+// read on the invoice sees the note before or after, and its audit row is
+// written on its transaction.
+func (s *Service) MarkRefundReturnedAnotherWay(ctx context.Context, tenantID, id string) (domain.CreditNote, error) {
+	cn, err := s.store.Get(ctx, tenantID, id)
+	if err != nil {
+		return domain.CreditNote{}, err
+	}
+	if cn.Status != domain.CreditNoteIssued || cn.RefundStatus != domain.RefundFailed || cn.RefundAmountCents <= 0 {
+		return domain.CreditNote{}, errs.InvalidState("Only a card refund that failed can be marked as returned another way.")
+	}
+	tx, err := s.store.BeginTx(ctx, tenantID)
+	if err != nil {
+		return domain.CreditNote{}, err
+	}
+	defer postgres.Rollback(tx)
+	if err := s.store.LockInvoicesTx(ctx, tx, tenantID, []string{cn.InvoiceID}); err != nil {
+		return domain.CreditNote{}, err
+	}
+	moved, err := s.store.ReturnRefundAnotherWayTx(ctx, tx, cn.ID, cn.RefundAmountCents)
+	if err != nil {
+		return domain.CreditNote{}, err
+	}
+	if !moved {
+		return domain.CreditNote{}, errs.InvalidState("The credit note's refund changed since it was read. Reload it and try again.")
+	}
+	if s.audit != nil {
+		if err := s.audit.LogInTx(ctx, tx, audit.Entry{
+			Action:        domain.AuditActionUpdate,
+			ResourceType:  "credit_note",
+			ResourceID:    cn.ID,
+			ResourceLabel: cn.CreditNoteNumber,
+			Metadata: withoutEmpty(map[string]any{
+				"action":              "refund_returned_another_way",
+				"refund_amount_cents": cn.RefundAmountCents,
+				"stripe_refund_id":    cn.StripeRefundID,
+				"invoice_id":          cn.InvoiceID,
+				"customer_id":         cn.CustomerID,
+				"currency":            cn.Currency,
+			}),
+		}); err != nil {
+			return domain.CreditNote{}, fmt.Errorf("audit emission: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.CreditNote{}, err
+	}
+	return s.store.Get(ctx, tenantID, cn.ID)
 }

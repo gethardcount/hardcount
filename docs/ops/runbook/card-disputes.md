@@ -56,6 +56,8 @@ The status tells you where the dispute is:
 | `warning_under_review`, `under_review` | You responded; the bank is deciding |
 | `won` | Closed in your favor; the money comes back |
 | `lost` | Closed in the customer's favor; the bank keeps the money |
+| `appeal_needs_response` | You appealed the loss; waiting for your response to the appeal |
+| `appeal_under_review` | You sent your appeal evidence; the network is deciding |
 | `warning_closed` | The inquiry closed without a chargeback |
 | `prevented` | Stripe stopped it before it became a chargeback |
 
@@ -66,6 +68,17 @@ The status tells you where the dispute is:
    this for you. Do not refund the payment through a credit note meanwhile:
    Stripe refuses refunds on a payment under a chargeback, so the card
    refund fails. An inquiry can be resolved with a full refund.
+
+   **On an invoice that bought prepaid credit** (a top-up), Hardcount refuses
+   the refund of its unused credit (commit relief) with `409` while the
+   chargeback or an appeal is open. Relief is refused when a chargeback is
+   recorded. When one opens during the relief, Stripe refuses the card
+   refund, and "returned another way" ends it. Until then the credit note
+   shows `refund_status` `failed`. Once you have paid the customer back
+   another way, record it with
+   `POST /v1/credit-notes/{id}/mark-returned-another-way`. No stronger lock
+   in Hardcount would close that gap: Stripe opens the dispute before
+   Hardcount hears of it.
 2. **If it is won, do nothing.** The invoice is still paid and Stripe
    returns the money.
 3. **If it is lost, decide what the invoice should say.** The bank already
@@ -78,25 +91,14 @@ The status tells you where the dispute is:
      uncollectible.
 
    **If the invoice bought prepaid credit**, the customer can still spend
-   that credit, and Hardcount refuses an ordinary credit note on the invoice.
-   Retire (remove) the unspent credit with commit relief instead. Commit
-   relief is the part of a credit note that retires prepaid credit the
-   customer bought up front. The relief amount goes inside `commit_relief`,
-   as `out_of_band_amount_cents`:
-
-   ```http
-   POST /v1/credit-notes
-   {
-     "invoice_id": "inv_…",
-     "reason": "Lost card dispute",
-     "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}
-   }
-   ```
-
-   Sent at the top level, the amount is refused with a 422. If the amount
-   you send is wrong, the answer names the right one. Relief pays back at
-   most what the customer paid for the unspent credit, so record the rest
-   of the loss in your own books. If the credit is all spent, there is nothing to retire: bill
+   that credit, and Hardcount refuses both an ordinary credit note and
+   commit relief on the invoice. Relief answers `409` "This payment was
+   reversed by the customer's bank in a dispute, so there is nothing left to
+   refund.": the bank already returned the money. Hardcount does not take
+   that credit back. To stop the customer spending it, pause their key at
+   your gateway. Do not remove it with `POST /v1/credits/adjust`: a removal
+   draws promotional credit first, not the credit this invoice bought.
+   Record the loss in your own books. If the credit is all spent, bill
    again or write it off.
 
    **If the invoice also shows "Payment needs review"** (for example, a

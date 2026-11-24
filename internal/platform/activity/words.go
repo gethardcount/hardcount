@@ -11,7 +11,6 @@ var creditNoteReasons = map[string]string{
 	"subscription_item_removed":      "Item removed",
 	"subscription_cancellation":      "Cancellation",
 	"subscription_plan_change":       "Plan change",
-	"commit_relief":                  "Unused prepaid credits refunded",
 	// The refund form's reasons (Stripe's refund reasons, plus other).
 	"duplicate":             "Duplicate",
 	"fraudulent":            "Fraudulent",

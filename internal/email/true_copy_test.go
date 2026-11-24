@@ -154,6 +154,31 @@ func TestTopupEmails_SayWhatIsBought(t *testing.T) {
 	}
 }
 
+// A relief credit note refunds cash for credit taken back, and its email says
+// both. "Amount credited" would tell the customer they hold credit they no
+// longer have. An ordinary note's email is unchanged.
+func TestCreditNoteEmail_ReliefSaysRefundedAndCreditTakenBack(t *testing.T) {
+	_, rawHTML := renderCreditNoteHTML("Ada", "CN-0007", "INV-0042", 5400, 6000, "usd", "Acme")
+	text := creditNoteTextBody("Ada", "CN-0007", "INV-0042", 5400, 6000, "usd")
+	if !strings.Contains(text, "Refunded: USD 54.00\nCredit taken back: USD 60.00\n") {
+		t.Errorf("relief text part:\n%s", text)
+	}
+	html := stdhtml.UnescapeString(rawHTML)
+	for _, want := range []string{">Refunded<", ">USD 54.00<", ">Credit taken back<", ">USD 60.00<"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("relief HTML part has no %q:\n%s", want, html)
+		}
+	}
+	for part, body := range map[string]string{"html": html, "text": text} {
+		if strings.Contains(body, "Amount credited") {
+			t.Errorf("relief %s part says Amount credited:\n%s", part, body)
+		}
+	}
+	if text := creditNoteTextBody("Ada", "CN-0008", "INV-0042", 5000, 0, "usd"); !strings.Contains(text, "Amount credited: USD 50.00\n") || strings.Contains(text, "taken back") {
+		t.Errorf("ordinary text part:\n%s", text)
+	}
+}
+
 // The same, through the real sender and an SMTP exchange: the HTML part a
 // customer sees carries the "View invoice" button, never "View & pay".
 func TestSendInvoice_WrittenOffHTMLPartOffersViewNotPay(t *testing.T) {

@@ -3797,55 +3797,6 @@
     ]
   },
   {
-    "case": "credit_note/reason/commit_relief",
-    "line": {
-      "id": "credit_note/reason/commit_relief",
-      "kind": "credit_note.issued",
-      "title": "Credit note issued",
-      "amount": {
-        "cents": 1000,
-        "currency": "USD"
-      },
-      "detail": [
-        [
-          {
-            "link": {
-              "kind": "credit_note",
-              "id": "hc_cn_1",
-              "label": "CN-000012"
-            }
-          }
-        ],
-        [
-          {
-            "text": "Unused prepaid credits refunded"
-          }
-        ],
-        [
-          {
-            "money": {
-              "cents": 1000,
-              "currency": "USD"
-            }
-          },
-          {
-            "text": " to credit balance"
-          }
-        ]
-      ],
-      "actor": {
-        "kind": "automatic"
-      },
-      "tone": "success",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Credit note issued · $10.00",
-      "meta: CN-000012 · Unused prepaid credits refunded · $10.00 to credit balance · Automatic",
-      "tone: success"
-    ]
-  },
-  {
     "case": "credit_note/reason/duplicate",
     "line": {
       "id": "credit_note/reason/duplicate",
@@ -8992,6 +8943,84 @@
       "Payment recovery ended",
       "meta: Invoice voided · by alice@example.com",
       "tone: neutral"
+    ]
+  },
+  {
+    "case": "dispute/appeal_needs_response/opened",
+    "line": {
+      "id": "dispute/appeal_needs_response/opened",
+      "kind": "dispute.opened",
+      "title": "Payment disputed",
+      "amount": {
+        "cents": 4500,
+        "currency": "USD"
+      },
+      "detail": [
+        [
+          {
+            "text": "Stripe dispute du_1"
+          }
+        ],
+        [
+          {
+            "text": "Reason: Product not received"
+          }
+        ],
+        [
+          {
+            "text": "Respond in Stripe by "
+          },
+          {
+            "time": "2027-02-15T04:30:00Z"
+          }
+        ]
+      ],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Payment disputed · $45.00",
+      "meta: Stripe dispute du_1 · Reason: Product not received · Respond in Stripe by Feb 15, 2027 04:30 UTC",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "dispute/appeal_under_review/opened",
+    "line": {
+      "id": "dispute/appeal_under_review/opened",
+      "kind": "dispute.opened",
+      "title": "Payment disputed",
+      "amount": {
+        "cents": 4500,
+        "currency": "USD"
+      },
+      "detail": [
+        [
+          {
+            "text": "Stripe dispute du_1"
+          }
+        ],
+        [
+          {
+            "text": "Reason: Product not received"
+          }
+        ],
+        [
+          {
+            "text": "Respond in Stripe by "
+          },
+          {
+            "time": "2027-02-15T04:30:00Z"
+          }
+        ]
+      ],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Payment disputed · $45.00",
+      "meta: Stripe dispute du_1 · Reason: Product not received · Respond in Stripe by Feb 15, 2027 04:30 UTC",
+      "tone: warning"
     ]
   },
   {

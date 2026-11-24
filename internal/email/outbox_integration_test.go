@@ -317,9 +317,9 @@ func TestEmailOutbox_OutboxSender_RoundTrip(t *testing.T) {
 }
 
 // TestEmailOutbox_CreditNote_RoundTrip: the new credit_note type (ADR-082
-// rider) round-trips — number, applied invoice, amount, PDF, and cc all
-// reach the deliverer; legacy rows WITHOUT a cc key dispatch with nil cc
-// (binary-skew / rollback compat).
+// rider) round-trips — number, applied invoice, amount, the credit a
+// top-up's refund took back, PDF, and cc all reach the deliverer; legacy rows
+// WITHOUT a cc key dispatch with nil cc (binary-skew / rollback compat).
 func TestEmailOutbox_CreditNote_RoundTrip(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx, cancel := context.WithTimeout(leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleEmailOutbox), 15*time.Second)
@@ -331,7 +331,7 @@ func TestEmailOutbox_CreditNote_RoundTrip(t *testing.T) {
 
 	pdf := []byte("%PDF-cn")
 	if err := sender.SendCreditNote(ctx, tenantID, "ada@example.com", []string{"finance@example.com"},
-		"Ada", "CN-0001", "HC-7", 5_400, "USD", pdf); err != nil {
+		"Ada", "CN-0001", "HC-7", 5_400, 6_000, "USD", pdf); err != nil {
 		t.Fatalf("enqueue SendCreditNote: %v", err)
 	}
 	// Legacy-shape row: no cc key at all (written by an older binary).
@@ -344,11 +344,12 @@ func TestEmailOutbox_CreditNote_RoundTrip(t *testing.T) {
 
 	fake := &fakeDeliverer{}
 	seen := map[string][]string{}
+	takenBack := map[string]int64{}
 	n, err := store.ProcessBatch(ctx, 10, func(c context.Context, row email.OutboxRow) error {
 		if err := callDeliverer(c, fake, row); err != nil {
 			return err
 		}
-		seen[fake.lastTo] = fake.lastCc
+		seen[fake.lastTo], takenBack[fake.lastTo] = fake.lastCc, fake.lastTakenBack
 		return nil
 	})
 	if err != nil {
@@ -365,6 +366,9 @@ func TestEmailOutbox_CreditNote_RoundTrip(t *testing.T) {
 	}
 	if cc := seen["old@example.com"]; cc != nil {
 		t.Errorf("legacy row without cc key must dispatch with nil cc, got %v", cc)
+	}
+	if takenBack["ada@example.com"] != 6_000 || takenBack["old@example.com"] != 0 {
+		t.Errorf("credit taken back round trip: got %v, want 6000 on the relief note and 0 on the other", takenBack)
 	}
 }
 
@@ -412,6 +416,7 @@ type fakeDeliverer struct {
 	lastName          string
 	lastInvoice       string
 	lastAmount        int64
+	lastTakenBack     int64
 	lastCurrency      string
 	lastAttemptN      int
 	lastMaxN          int
@@ -500,9 +505,9 @@ func (f *fakeDeliverer) SendMemberInvite(_ context.Context, tenantID, to, invite
 	f.lastUpdateURL = url
 	return nil
 }
-func (f *fakeDeliverer) SendCreditNote(_ context.Context, tenantID, to string, cc []string, name, cnNumber, inv string, amount int64, cur string, pdf []byte) error {
+func (f *fakeDeliverer) SendCreditNote(_ context.Context, tenantID, to string, cc []string, name, cnNumber, inv string, amount, takenBack int64, cur string, pdf []byte) error {
 	f.calls++
-	f.lastCc = cc
+	f.lastCc, f.lastTakenBack = cc, takenBack
 	f.lastType, f.lastTenant, f.lastTo, f.lastName, f.lastInvoice = email.TypeCreditNote, tenantID, to, name, inv
 	f.lastAmount, f.lastCurrency, f.lastPDF = amount, cur, pdf
 	return nil
@@ -518,18 +523,19 @@ func callDeliverer(ctx context.Context, d email.EmailDeliverer, row email.Outbox
 		return err
 	}
 	var m struct {
-		To               string   `json:"to"`
-		Cc               []string `json:"cc"`
-		CreditNoteNumber string   `json:"credit_note_number"`
-		CustomerName     string   `json:"customer_name"`
-		InvoiceNumber    string   `json:"invoice_number"`
-		AmountCents      int64    `json:"amount_cents"`
-		Currency         string   `json:"currency"`
-		AttemptNumber    int      `json:"attempt_number"`
-		Trigger          string   `json:"trigger"`
-		MaxAttempts      int      `json:"max_attempts"`
-		NextRetryDate    string   `json:"next_retry_date"`
-		Reason           string   `json:"reason"`
+		To                   string   `json:"to"`
+		Cc                   []string `json:"cc"`
+		CreditNoteNumber     string   `json:"credit_note_number"`
+		CustomerName         string   `json:"customer_name"`
+		InvoiceNumber        string   `json:"invoice_number"`
+		AmountCents          int64    `json:"amount_cents"`
+		CreditTakenBackCents int64    `json:"credit_taken_back_cents"`
+		Currency             string   `json:"currency"`
+		AttemptNumber        int      `json:"attempt_number"`
+		Trigger              string   `json:"trigger"`
+		MaxAttempts          int      `json:"max_attempts"`
+		NextRetryDate        string   `json:"next_retry_date"`
+		Reason               string   `json:"reason"`
 		// Mirrors outboxMessage.EscalationOutcome. This struct is a
 		// hand-maintained twin of the production payload, so a field added
 		// there and not here decodes to zero and the assertion silently
@@ -560,7 +566,7 @@ func callDeliverer(ctx context.Context, d email.EmailDeliverer, row email.Outbox
 	case email.TypePaymentSetupRequest:
 		return d.SendPaymentSetupRequest(ctx, row.TenantID, m.To, m.CustomerName, m.InvoiceNumber, m.AmountCents, m.Currency, m.UpdateURL, m.InvoiceWrittenOff, m.Trigger)
 	case email.TypeCreditNote:
-		return d.SendCreditNote(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.CreditNoteNumber, m.InvoiceNumber, m.AmountCents, m.Currency, m.PDF)
+		return d.SendCreditNote(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.CreditNoteNumber, m.InvoiceNumber, m.AmountCents, m.CreditTakenBackCents, m.Currency, m.PDF)
 	default:
 		return fmt.Errorf("unknown email_type %q", row.EmailType)
 	}

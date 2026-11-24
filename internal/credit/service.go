@@ -272,26 +272,52 @@ type CommitReliefResult struct {
 
 // RetireCommitSliceForReliefTx retires `slice` credits from the commit
 // grant funded by invoiceID on the caller's CN coordinator tx (ADR-080
-// relief leg). Loud on a missing grant; bumps the telescoping anchor K.
-func (s *Service) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID string, slice, refundedGrossCents, grossPaidCents int64) (CommitReliefResult, error) {
-	g, err := s.store.RetireCommitSliceForReliefTx(ctx, tx, tenantID, invoiceID, creditNoteID, slice, refundedGrossCents, grossPaidCents)
+// relief leg). Loud on a missing grant; bumps the telescoping anchor K. The
+// ledger entry names the credit note by its number.
+func (s *Service) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64) (CommitReliefResult, error) {
+	g, err := s.store.RetireCommitSliceForReliefTx(ctx, tx, tenantID, invoiceID, creditNoteID, creditNoteNumber, slice, refundedGrossCents, grossPaidCents)
 	if err != nil {
 		return CommitReliefResult{}, err
 	}
 	return CommitReliefResult{GrantID: g.GrantID, RemainingAfterCents: g.Remaining(), CNRetiredCents: g.CNRetiredCents}, nil
 }
 
-// LockCommitGrantForReliefTx reads the funded grant's live state under the
-// relief locks (customer advisory + grant FOR UPDATE) on the caller's tx —
-// the read half of the relief: the cap formula's inputs (G, C, K) come from
-// here and stay frozen until the tx commits. found=false when the invoice
+// ReliefGrant is a top-up's grant as a relief reads it under its locks, at
+// the relief's instant.
+type ReliefGrant struct {
+	GrantID        string
+	GrantedCents   int64 // G
+	ConsumedCents  int64 // C
+	CNRetiredCents int64 // K
+	// LiveRemainingCents is what is left of the grant at the instant, 0 once
+	// it is past its expires_at, swept or not.
+	LiveRemainingCents int64
+	// SpendableCents is the customer's spendable balance in the grant's
+	// currency at the instant (SpendableBalance), read under the same lock.
+	SpendableCents int64
+}
+
+// LockCommitGrantForReliefTx reads the funded grant under the relief locks
+// (customer advisory + grant FOR UPDATE) on the caller's tx, and the
+// customer's spendable balance in its currency, both at `at`: the read half
+// of the relief. Its figures stay frozen until the tx commits, because every
+// balance writer takes the customer lock first. found=false when the invoice
 // funded no grant.
-func (s *Service) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) (granted, consumed, cnRetired int64, found bool, err error) {
-	g, found, err := s.store.LockCommitGrantTx(ctx, tx, tenantID, invoiceID)
+func (s *Service) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (ReliefGrant, bool, error) {
+	g, found, err := s.store.LockCommitGrantTx(ctx, tx, tenantID, invoiceID, at)
 	if err != nil || !found {
-		return 0, 0, 0, found, err
+		return ReliefGrant{}, found, err
 	}
-	return g.AmountCents, g.ConsumedCents, g.CNRetiredCents, true, nil
+	spendable, err := s.store.GetSpendableBalanceTx(ctx, tx, tenantID, g.CustomerID, at)
+	if err != nil {
+		return ReliefGrant{}, false, fmt.Errorf("read the spendable balance for relief: %w", err)
+	}
+	out := ReliefGrant{GrantID: g.GrantID, GrantedCents: g.AmountCents, ConsumedCents: g.ConsumedCents,
+		CNRetiredCents: g.CNRetiredCents, SpendableCents: spendable[g.Currency]}
+	if g.Live {
+		out.LiveRemainingCents = g.Remaining()
+	}
+	return out, true, nil
 }
 
 // GrantTx is the in-transaction variant used by the subscription

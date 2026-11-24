@@ -59,16 +59,16 @@ func (m *memStore) ListGrantSummaries(_ context.Context, tenantID, customerID st
 
 // Relief-pair stubs: the in-tx relief path is proven against real
 // Postgres (commit_cn_relief tests); unit fakes don't model row locks.
-func (m *memStore) LockCommitGrantTx(_ context.Context, _ *sql.Tx, tenantID, invoiceID string) (commitGrantState, bool, error) {
+func (m *memStore) LockCommitGrantTx(_ context.Context, _ *sql.Tx, tenantID, invoiceID string, _ time.Time) (commitGrantState, bool, error) {
 	for _, e := range m.entries {
 		if e.TenantID == tenantID && e.SourceInvoiceID == invoiceID && e.GrantKind == domain.GrantKindCommit {
-			return commitGrantState{GrantID: e.ID, CustomerID: e.CustomerID, AmountCents: e.AmountCents, ConsumedCents: e.ConsumedCents}, true, nil
+			return commitGrantState{GrantID: e.ID, CustomerID: e.CustomerID, AmountCents: e.AmountCents, ConsumedCents: e.ConsumedCents, Live: true}, true, nil
 		}
 	}
 	return commitGrantState{}, false, nil
 }
 
-func (m *memStore) RetireCommitSliceForReliefTx(_ context.Context, _ *sql.Tx, tenantID, invoiceID, _ string, slice, _, _ int64) (commitGrantState, error) {
+func (m *memStore) RetireCommitSliceForReliefTx(_ context.Context, _ *sql.Tx, tenantID, invoiceID, _, _ string, slice, _, _ int64) (commitGrantState, error) {
 	for id, e := range m.entries {
 		if e.TenantID == tenantID && e.SourceInvoiceID == invoiceID && e.GrantKind == domain.GrantKindCommit {
 			if e.ConsumedCents+slice > e.AmountCents {
@@ -162,6 +162,10 @@ func (m *memStore) AppendEntry(ctx context.Context, tenantID string, entry domai
 	}
 	m.entries = append(m.entries, entry)
 	return entry, nil
+}
+
+func (m *memStore) GetSpendableBalanceTx(ctx context.Context, _ *sql.Tx, tenantID, customerID string, at time.Time) (map[string]int64, error) {
+	return m.GetSpendableBalance(ctx, tenantID, customerID, at)
 }
 
 func (m *memStore) GetSpendableBalance(_ context.Context, _, customerID string, at time.Time) (map[string]int64, error) {

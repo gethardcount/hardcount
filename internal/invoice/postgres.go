@@ -1436,8 +1436,12 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 // returns credit (the customer lock) before it takes numbers; the credit store
 // takes the invoice row before the customer lock. The grant takes the
 // customer lock again, which is free: it is a transaction-scoped advisory
-// lock, re-entrant within the transaction. No writer takes the number row and
-// then an invoice row.
+// lock, re-entrant within the transaction. Invoice and credit-note numbers
+// share the tenant's number row, and a credit note's insert takes FOR KEY
+// SHARE on its invoice (its foreign-key check) after that row. Every
+// credit-note create therefore takes that FOR KEY SHARE before it numbers the
+// note, so the insert re-takes a lock it already holds. A commit refund holds
+// it only on a paid top-up, and this takes FOR UPDATE only on an unpaid one.
 func (s *PostgresStore) issueAndPayTopupLockedTx(ctx context.Context, tx *sql.Tx, tenantID, id, stripePaymentIntentID string, paidAt time.Time, kind settleKind) (domain.Invoice, error) {
 	if s.numberer == nil || s.commitFunder == nil {
 		return domain.Invoice{}, fmt.Errorf("pay top-up %s: no invoice numberer or commit funder is wired", id)

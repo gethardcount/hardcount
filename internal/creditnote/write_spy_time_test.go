@@ -49,10 +49,10 @@ type instantSender struct {
 	at []time.Time
 }
 
-func (s *instantSender) SendCreditNote(ctx context.Context, tenantID, to string, cc []string, name, number, invoiceNumber string, amount int64, currency string, pdf []byte) error {
+func (s *instantSender) SendCreditNote(ctx context.Context, tenantID, to string, cc []string, name, number, invoiceNumber string, amount, takenBack int64, currency string, pdf []byte) error {
 	at, _ := clock.EffectiveNow(ctx)
 	s.at = append(s.at, at)
-	return s.cnCapturingSender.SendCreditNote(ctx, tenantID, to, cc, name, number, invoiceNumber, amount, currency, pdf)
+	return s.cnCapturingSender.SendCreditNote(ctx, tenantID, to, cc, name, number, invoiceNumber, amount, takenBack, currency, pdf)
 }
 
 // spiedWrite is a credit-note entry point whose action's time is seen

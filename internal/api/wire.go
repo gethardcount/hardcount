@@ -439,6 +439,8 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	engine.SetInvoiceVoider(invoiceSvc)
 	engine.SetCreditNoteAdjuster(creditNoteSvc)
 	engine.SetCreditHeadroomReader(creditNoteSvc)
+	// Commit relief counts usage not invoiced yet as credit already used.
+	creditNoteSvc.SetUnbilledUsageReader(unbilledUsageAdapter{engine: engine})
 	invoiceSvc.SetCustomerReader(customerStore)
 	invoiceSvc.SetDunningRunReader(dunningStore)
 	invoiceSvc.SetSubscriptionPauseReader(subStore)

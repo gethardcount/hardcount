@@ -4,17 +4,22 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/credit"
 	"github.com/gethardcount/hardcount/internal/creditnote"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tenant"
+	"github.com/gethardcount/hardcount/internal/webhook"
 )
 
 // reliefGranterAdapter mirrors the api-package creditGrantAdapter for the
@@ -25,11 +30,12 @@ func (a reliefGranterAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.
 	_, err := a.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, credit.CreditNoteReturnInput{Currency: in.Currency, CustomerID: in.CustomerID, AmountCents: in.AmountCents, Description: in.Description, InvoiceID: in.InvoiceID, InvoicePaid: in.InvoicePaid, InvoiceTotalCents: in.InvoiceTotalCents})
 	return err
 }
-func (a reliefGranterAdapter) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) (int64, int64, int64, bool, error) {
-	return a.svc.LockCommitGrantForReliefTx(ctx, tx, tenantID, invoiceID)
+func (a reliefGranterAdapter) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (creditnote.ReliefGrant, bool, error) {
+	g, found, err := a.svc.LockCommitGrantForReliefTx(ctx, tx, tenantID, invoiceID, at)
+	return creditnote.ReliefGrant(g), found, err
 }
-func (a reliefGranterAdapter) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, cnID string, slice, refundedGross, grossPaid int64) (int64, error) {
-	res, err := a.svc.RetireCommitSliceForReliefTx(ctx, tx, tenantID, invoiceID, cnID, slice, refundedGross, grossPaid)
+func (a reliefGranterAdapter) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, cnID, cnNumber string, slice, refundedGross, grossPaid int64) (int64, error) {
+	res, err := a.svc.RetireCommitSliceForReliefTx(ctx, tx, tenantID, invoiceID, cnID, cnNumber, slice, refundedGross, grossPaid)
 	if err != nil {
 		return 0, err
 	}
@@ -42,9 +48,91 @@ func (a reliefGranterAdapter) RetireCommitSliceForReliefTx(ctx context.Context, 
 // migration-month commits are offline-paid, so the out_of_band channel is
 // the default and no external refund leg fires).
 func newReliefCNService(h *commitHarness) *creditnote.Service {
-	cnSvc := creditnote.NewService(creditnote.NewPostgresStore(h.db), h.invStore, nil, reliefGranterAdapter{h.creditSvc})
+	return newCardReliefService(h, nil)
+}
+
+// newCardReliefService is newReliefCNService with Stripe's refund call, the
+// recording of refunds made in Stripe and the read of one, for a top-up paid
+// by card. No unbilled usage until a test sets some.
+func newCardReliefService(h *commitHarness, refunds creditnote.Refunder) *creditnote.Service {
+	cnStore := creditnote.NewPostgresStore(h.db)
+	cnSvc := creditnote.NewService(cnStore, h.invStore, refunds, reliefGranterAdapter{h.creditSvc})
 	cnSvc.SetNumberGenerator(tenant.NewSettingsStore(h.db))
+	cnSvc.SetUnbilledUsageReader(fixedUnbilled{})
+	cnSvc.SetStripeRefundRecording(cnStore, h.invStore, webhook.NewOutboxStore(h.db))
 	return cnSvc
+}
+
+// fixedUnbilled is the usage billing has not invoiced yet, per currency:
+// billing's figure, behind the reader creditnote declares.
+type fixedUnbilled map[string]int64
+
+func (f fixedUnbilled) UnbilledUsage(context.Context, string, string) (map[string]int64, error) {
+	return f, nil
+}
+
+// stripeRefunds is Stripe's refund call: each refund succeeds, unless refuse
+// is set, when the next one is refused with that Stripe error.
+type stripeRefunds struct {
+	n      atomic.Int64
+	status domain.RefundStatus // zero: succeeded
+	refuse atomic.Pointer[string]
+}
+
+// refundRefused is a refund Stripe answered with a clear no.
+type refundRefused string
+
+func (e refundRefused) Error() string      { return string(e) }
+func (refundRefused) OutcomeUnknown() bool { return false }
+
+func (r *stripeRefunds) CreateRefund(context.Context, string, int64, string, string) (string, domain.RefundStatus, error) {
+	if code := r.refuse.Swap(nil); code != nil {
+		return "", "", refundRefused(*code)
+	}
+	if r.status != "" {
+		return fmt.Sprintf("re_relief_%d", r.n.Add(1)), r.status, nil
+	}
+	return fmt.Sprintf("re_relief_%d", r.n.Add(1)), domain.RefundSucceeded, nil
+}
+
+func (r *stripeRefunds) GetRefund(context.Context, string) (domain.RefundStatus, string, error) {
+	return domain.RefundFailed, "charge_disputed", nil
+}
+
+func (r *stripeRefunds) FindRefundForCreditNote(context.Context, string, string) (string, domain.RefundStatus, error) {
+	return "", "", nil
+}
+
+func (r *stripeRefunds) refuseNext(code string) { r.refuse.Store(&code) }
+
+// payByCard pays the top-up by card, as the card settle does.
+func payByCard(t *testing.T, h *commitHarness, ctx context.Context, invoiceID, pi string) {
+	t.Helper()
+	if _, err := h.invStore.MarkPaid(ctx, h.tenantID, invoiceID, pi, time.Now().UTC()); err != nil {
+		t.Fatalf("pay by card: %v", err)
+	}
+}
+
+// recordStripeRefund records a refund made in Stripe of payment pi, as its
+// webhook does, first seen just after it was made.
+func recordStripeRefund(t *testing.T, ctx context.Context, svc *creditnote.Service, tenantID, refundID, pi string, cents int64, status domain.StripeRefundStatus, at time.Time) {
+	t.Helper()
+	if _, err := svc.RecordStripeRefund(ctx, tenantID, domain.StripeRefundSnapshot{
+		StripeEventID: "evt_" + refundID + "_" + string(status), EventAt: at, StripeRefundID: refundID,
+		StripePaymentIntentID: pi, AmountCents: cents, Currency: "usd", Status: status, CreatedAt: at,
+	}); err != nil {
+		t.Fatalf("record refund %s (%s): %v", refundID, status, err)
+	}
+}
+
+// reliefNotes counts the credit notes on the invoice.
+func reliefNotes(t *testing.T, ctx context.Context, svc *creditnote.Service, tenantID, invoiceID string) []domain.CreditNote {
+	t.Helper()
+	cns, err := svc.List(ctx, creditnote.ListFilter{TenantID: tenantID, InvoiceID: invoiceID})
+	if err != nil {
+		t.Fatalf("list credit notes: %v", err)
+	}
+	return cns
 }
 
 // payOffline marks the top-up paid out-of-band, as Record offline payment
@@ -120,8 +208,8 @@ func TestCommitRelief_WorkedExample(t *testing.T) {
 	// Second relief: nothing refundable.
 	if _, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{
 		InvoiceID: inv.ID, RetireAll: true,
-	}); err == nil || !strings.Contains(err.Error(), "fully consumed") {
-		t.Fatalf("repeat relief: err = %v, want fully-consumed 409", err)
+	}); !errors.Is(err, errs.ErrInvalidState) {
+		t.Fatalf("repeat relief: err = %v, want 409: no unused credit", err)
 	}
 }
 
@@ -185,12 +273,12 @@ func TestCommitRelief_Gates(t *testing.T) {
 		t.Fatalf("line CN on paid commit: err = %v, want route-to-relief", err)
 	}
 
-	// Explicit r beyond remaining → typed 409 with live numbers; no CN row.
+	// Explicit r beyond what is unused → 422 with the live figure; no CN row.
 	drain(t, h, ctx, 9500, 3)
 	if _, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{
 		InvoiceID: inv.ID, RetireCents: 1000,
-	}); err == nil || !strings.Contains(err.Error(), "only 500 remain") {
-		t.Fatalf("over-retire: err = %v, want live-remaining 409", err)
+	}); !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), "only 5.00 USD is unused") {
+		t.Fatalf("over-retire: err = %v, want 422 naming the 5.00 USD unused", err)
 	}
 	cns, err := cnSvc.List(ctx, creditnote.ListFilter{TenantID: h.tenantID, InvoiceID: inv.ID})
 	if err != nil {
@@ -221,12 +309,22 @@ func TestCommitRelief_Gates(t *testing.T) {
 		t.Fatalf("relief on a taxed top-up: err = %v, want refused for its tax", err)
 	}
 
-	// Non-commit invoice with a commit_relief request → 400.
+	// Relief is for a top-up. An invoice that is not one is refused before
+	// its lines are looked at: a plain invoice, and a commit line on an
+	// invoice of another billing reason. No writer makes the second, so the
+	// reason is changed on a paid top-up.
 	plain := h.seedPayable(t, ctx, h.custID, 1000, 4)
-	if _, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{
-		InvoiceID: plain, RetireAll: true,
-	}); err == nil || !strings.Contains(err.Error(), "not a commit invoice") {
-		t.Fatalf("relief on plain invoice: err = %v, want not-a-commit 400", err)
+	notTopup := h.createTopup(t, ctx, "USD", 9000, 10000)
+	payOffline(t, h, ctx, notTopup.ID)
+	execBypassStamp(t, h.db, `UPDATE invoices SET billing_reason = 'manual' WHERE id = $1`, notTopup.ID)
+	for name, id := range map[string]string{"plain invoice": plain, "commit line, not a top-up": notTopup.ID} {
+		_, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: id, RetireAll: true})
+		if !errors.Is(err, errs.ErrValidation) || errs.Field(err) != "invoice_id" {
+			t.Errorf("%s: err = %v, want 422 on invoice_id: relief is for a top-up", name, err)
+		}
+		if n := len(reliefNotes(t, ctx, cnSvc, h.tenantID, id)); n != 0 {
+			t.Errorf("%s: %d credit notes, want none", name, n)
+		}
 	}
 }
 
@@ -279,35 +377,438 @@ func TestCommitRelief_ConcurrentDrawdown(t *testing.T) {
 	}
 }
 
-// TestCommitRelief_ExpiredGrant: term lapse is contractual breakage — the
-// swept grant has nothing refundable. The expiry is set on the ledger here,
-// in the past, so the sweep retires the grant at once.
+// TestCommitRelief_ExpiredGrant: credit is live at its expires_at, judged at
+// the request's instant, whether or not the expiry sweep has run. At that
+// instant the relief takes the unused credit; a microsecond later it takes
+// none, swept or not: term lapse is contractual breakage. The expiry is set on
+// the ledger an hour ahead, since a top-up's own is days away.
 func TestCommitRelief_ExpiredGrant(t *testing.T) {
-	h, ctx := newCommitHarness(t, "Relief Expired")
+	for _, tc := range []struct {
+		name     string
+		after    time.Duration
+		sweep    bool
+		wantCash int64
+	}{
+		{"at expires_at", 0, false, 5400},
+		{"a microsecond after, before the sweep", time.Microsecond, false, 0},
+		{"after the sweep", time.Microsecond, true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, ctx := newCommitHarness(t, "Relief Expired")
+			inv := h.createTopup(t, ctx, "USD", 9000, 10000)
+			payOffline(t, h, ctx, inv.ID)
+			drain(t, h, ctx, 4000, 1)
+			expires := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
+			execBypassStamp(t, h.db, `UPDATE customer_credit_ledger SET expires_at = $2 WHERE grant_kind = 'commit' AND source_invoice_id = $1`, inv.ID, expires)
+			if tc.sweep {
+				execBypassStamp(t, h.db, `UPDATE customer_credit_ledger SET expires_at = NOW() - INTERVAL '1 hour' WHERE grant_kind = 'commit' AND source_invoice_id = $1`, inv.ID)
+				if _, errsList := h.creditSvc.ExpireCredits(ctx); len(errsList) > 0 {
+					t.Fatalf("expiry sweep: %v", errsList)
+				}
+			}
+
+			cnSvc := newReliefCNService(h)
+			at := clock.WithEffectiveNow(ctx, expires.Add(tc.after))
+			cn, err := cnSvc.CreateAndIssueCommitRelief(at, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireAll: true})
+			if tc.wantCash > 0 {
+				if err != nil || cn.TotalCents != tc.wantCash || cn.CommitRetiredCents != 6000 {
+					t.Fatalf("relief: cash %d for %d credit, err %v; want %d for 6000", cn.TotalCents, cn.CommitRetiredCents, err, tc.wantCash)
+				}
+				return
+			}
+			if !errors.Is(err, errs.ErrInvalidState) {
+				t.Fatalf("relief of expired credit: cash %d for %d credit, err %v; want 409", cn.TotalCents, cn.CommitRetiredCents, err)
+			}
+			if n := len(reliefNotes(t, ctx, cnSvc, h.tenantID, inv.ID)); n != 0 {
+				t.Errorf("%d credit notes after a refused relief, want none", n)
+			}
+		})
+	}
+}
+
+// TestCommitRelief_UnusedAgainstLiveBalance: usage not yet invoiced is credit
+// already used, so unused credit is the smaller of what is left of the grant
+// and the spendable balance less that usage.
+func TestCommitRelief_UnusedAgainstLiveBalance(t *testing.T) {
+	h, ctx := newCommitHarness(t, "Relief Unused Credit")
 	inv := h.createTopup(t, ctx, "USD", 9000, 10000)
 	payOffline(t, h, ctx, inv.ID)
-
-	// Force-expire: backdate expires_at, then run the expiry sweep.
-	tx, err := h.db.BeginTx(ctx, postgres.TxTenant, h.tenantID)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE customer_credit_ledger SET expires_at = NOW() - INTERVAL '1 hour' WHERE grant_kind = 'commit' AND source_invoice_id = $1`, inv.ID); err != nil {
-		t.Fatalf("backdate: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	if _, errsList := h.creditSvc.ExpireCredits(ctx); len(errsList) > 0 {
-		t.Fatalf("expiry sweep: %v", errsList)
-	}
-
 	cnSvc := newReliefCNService(h)
-	_, err = cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{
-		InvoiceID: inv.ID, RetireAll: true,
+	cnSvc.SetUnbilledUsageReader(fixedUnbilled{"USD": 7000})
+
+	_, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireCents: 5000})
+	if !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), "30.00") {
+		t.Fatalf("retire 50.00 with 30.00 unused: err = %v, want 422 naming the 30.00 unused", err)
+	}
+	cn, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireAll: true})
+	if err != nil || cn.CommitRetiredCents != 3000 || cn.TotalCents != 2700 {
+		t.Fatalf("retire_all: %d credit for %d cash, err %v; want 3000 for 2700", cn.CommitRetiredCents, cn.TotalCents, err)
+	}
+
+	cnSvc.SetUnbilledUsageReader(fixedUnbilled{"USD": 8000})
+	if _, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireAll: true}); !errors.Is(err, errs.ErrInvalidState) {
+		t.Fatalf("unbilled usage above the balance: err = %v, want 409", err)
+	}
+}
+
+// TestCommitRelief_CardCapCountsStripeRefunds: the card refund of a relief fits
+// what the card paid less every refund of that payment, made by a note or in
+// Stripe. A refund made in Stripe counts while it moved or may move money,
+// whatever the operator decided about it, and never when it failed, when it is
+// of another payment, or a second time when a note holds it. Each row is a
+// 90.00 top-up of 100.00 credit, paid by card, that relieves 60.00 of credit
+// (54.00) after a 50.00 refund made in Stripe: only 40.00 is left on the card.
+func TestCommitRelief_CardCapCountsStripeRefunds(t *testing.T) {
+	h, ctx := newCommitHarness(t, "Relief Card Cap")
+	refunds := &stripeRefunds{}
+	cnSvc := newCardReliefService(h, refunds)
+	at := time.Now().UTC().Truncate(time.Second)
+
+	for i, tc := range []struct {
+		name    string
+		refund  func(pi, refundID string, invoiceID string)
+		allowed bool
+	}{
+		{"succeeded", func(pi, re, _ string) {
+			recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, pi, 5000, domain.StripeRefundSucceeded, at)
+		}, false},
+		{"pending", func(pi, re, _ string) {
+			recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, pi, 5000, domain.StripeRefundPending, at)
+		}, false},
+		{"requires action", func(pi, re, _ string) {
+			recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, pi, 5000, domain.StripeRefundRequiresAction, at)
+		}, false},
+		{"dismissed by the operator", func(pi, re, inv string) {
+			recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, pi, 5000, domain.StripeRefundSucceeded, at)
+			if _, err := cnSvc.DismissStripeRefund(ctx, h.tenantID, inv, re, "handled by hand"); err != nil {
+				t.Fatalf("dismiss: %v", err)
+			}
+		}, false},
+		{"failed", func(pi, re, _ string) {
+			recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, pi, 5000, domain.StripeRefundFailed, at)
+		}, true},
+		{"failed after it succeeded", func(pi, re, _ string) {
+			recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, pi, 5000, domain.StripeRefundSucceeded, at)
+			recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, pi, 5000, domain.StripeRefundFailed, at.Add(time.Hour))
+		}, true},
+		{"of another payment", func(_, re, inv string) {
+			other := "pi_cap_other_" + inv
+			if err := h.invStore.RecordChargeAttempt(ctx, h.tenantID, domain.InvoiceChargeAttempt{
+				InvoiceID: inv, StripePaymentIntentID: other, Trigger: domain.ChargeTriggerExternal,
+				Outcome: domain.ChargeAttemptSucceeded, AmountCents: 9000, OccurredAt: at,
+			}); err != nil {
+				t.Fatalf("second charge: %v", err)
+			}
+			recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, other, 5000, domain.StripeRefundSucceeded, at)
+		}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inv := h.createTopup(t, ctx, "USD", 9000, 10000)
+			pi := fmt.Sprintf("pi_cap_%d", i)
+			payByCard(t, h, ctx, inv.ID, pi)
+			tc.refund(pi, fmt.Sprintf("re_cap_%d", i), inv.ID)
+
+			cn, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireCents: 6000})
+			if tc.allowed {
+				if err != nil || cn.RefundAmountCents != 5400 {
+					t.Fatalf("relief: card refund %d, err %v; want 5400 to the card", cn.RefundAmountCents, err)
+				}
+				return
+			}
+			if !errors.Is(err, errs.ErrValidation) || errs.Field(err) != "refund_amount_cents" {
+				t.Fatalf("relief of 54.00 by card with 40.00 left: card refund %d, err %v; want 422 on refund_amount_cents", cn.RefundAmountCents, err)
+			}
+			if n := len(reliefNotes(t, ctx, cnSvc, h.tenantID, inv.ID)); n != 0 {
+				t.Errorf("%d credit notes after a refused relief, want none", n)
+			}
+		})
+	}
+
+	// A refund made in Stripe that a note holds counts once, as the note's
+	// card refund: a relief whose card refund failed, then the operator
+	// attached the refund they made in Stripe to it.
+	t.Run("held by a note", func(t *testing.T) {
+		inv := h.createTopup(t, ctx, "USD", 9000, 10000)
+		const pi, re = "pi_cap_held", "re_cap_held"
+		payByCard(t, h, ctx, inv.ID, pi)
+		refunds.refuseNext("charge_disputed")
+		first, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireCents: 2000})
+		if err != nil || first.RefundStatus != domain.RefundFailed {
+			t.Fatalf("first relief: refund status %s, err %v; want failed", first.RefundStatus, err)
+		}
+		recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, pi, 1800, domain.StripeRefundSucceeded, at)
+		cnSvc.SetRefundReader(fixedRefund{domain.StripeRefundFacts{ID: re, PaymentIntentID: pi, AmountCents: 1800, Currency: "usd", Status: domain.StripeRefundSucceeded}})
+		if _, err := cnSvc.AttachStripeRefund(ctx, h.tenantID, first.ID, re); err != nil {
+			t.Fatalf("attach: %v", err)
+		}
+		// 72.00 left on the card: 90.00 less the 18.00 the note holds.
+		cn, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireAll: true})
+		if err != nil || cn.RefundAmountCents != 7200 {
+			t.Fatalf("second relief: card refund %d, err %v; want 7200", cn.RefundAmountCents, err)
+		}
 	})
-	if err == nil || !errors.Is(err, errs.ErrInvalidState) && !strings.Contains(err.Error(), "fully consumed") {
-		t.Fatalf("expired-grant relief: err = %v, want fully-consumed/lapsed 409", err)
+}
+
+// fixedRefund is Stripe's read of one refund.
+type fixedRefund struct{ facts domain.StripeRefundFacts }
+
+func (r fixedRefund) ReadRefund(context.Context, string) (domain.StripeRefundFacts, error) {
+	return r.facts, nil
+}
+
+// TestCommitRelief_DisputeGuard: relief is refused while the customer's bank
+// holds a chargeback on the payment, appeals included, and after the bank won
+// it. An inquiry is not a chargeback: its relief may refund the card, which
+// ends the inquiry. A dispute that closed for the merchant leaves the money
+// paid.
+func TestCommitRelief_DisputeGuard(t *testing.T) {
+	h, ctx := newCommitHarness(t, "Relief Dispute Guard")
+	cnSvc := newCardReliefService(h, &stripeRefunds{})
+	at := time.Now().UTC().Truncate(time.Second)
+	const lostMessage = "This payment was reversed by the customer's bank in a dispute, so there is nothing left to refund."
+
+	for i, tc := range []struct {
+		status  domain.DisputeStatus
+		allowed bool
+	}{
+		{domain.DisputeNeedsResponse, false},
+		{domain.DisputeUnderReview, false},
+		{domain.DisputeAppealNeedsResponse, false},
+		{domain.DisputeAppealUnderReview, false},
+		{domain.DisputeLost, false},
+		{domain.DisputeWarningNeedsResponse, true},
+		{domain.DisputeWarningUnderReview, true},
+		{domain.DisputeWarningClosed, true},
+		{domain.DisputeWon, true},
+		{domain.DisputePrevented, true},
+	} {
+		t.Run(string(tc.status), func(t *testing.T) {
+			inv := h.createTopup(t, ctx, "USD", 9000, 10000)
+			pi := fmt.Sprintf("pi_guard_%d", i)
+			payByCard(t, h, ctx, inv.ID, pi)
+			if _, err := h.invStore.RecordStripeDispute(ctx, h.tenantID, domain.DisputeSnapshot{
+				StripeEventID: fmt.Sprintf("evt_guard_%d", i), EventAt: at, StripeDisputeID: fmt.Sprintf("du_guard_%d", i),
+				StripePaymentIntentID: pi, Status: tc.status, AmountCents: 9000, Currency: "usd", OpenedAt: at,
+			}); err != nil {
+				t.Fatalf("record dispute: %v", err)
+			}
+
+			cn, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireCents: 6000})
+			if tc.allowed {
+				if err != nil || cn.RefundAmountCents != 5400 {
+					t.Fatalf("relief: card refund %d, err %v; want 5400 to the card", cn.RefundAmountCents, err)
+				}
+				return
+			}
+			if !errors.Is(err, errs.ErrInvalidState) {
+				t.Fatalf("relief with a %s dispute: card refund %d, err %v; want 409", tc.status, cn.RefundAmountCents, err)
+			}
+			var de *errs.DomainError
+			if tc.status == domain.DisputeLost && (!errors.As(err, &de) || de.Message != lostMessage) {
+				t.Errorf("lost: message %q, want %q", err, lostMessage)
+			}
+			if n := len(reliefNotes(t, ctx, cnSvc, h.tenantID, inv.ID)); n != 0 {
+				t.Errorf("%d credit notes after a refused relief, want none", n)
+			}
+		})
+	}
+}
+
+// auditRows records the audit rows written on a transaction.
+type auditRows struct {
+	mu   sync.Mutex
+	rows []audit.Entry
+}
+
+func (a *auditRows) LogInTx(_ context.Context, _ *sql.Tx, e audit.Entry) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.rows = append(a.rows, e)
+	return nil
+}
+
+func (a *auditRows) action(resourceID, action string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, e := range a.rows {
+		if e.ResourceID == resourceID && e.Metadata["action"] == action {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCommitRelief_FailedCardRefundReachesAnEnd: a card refund Stripe refused
+// (charge_disputed, when a chargeback opened during the relief) is a dead end
+// unless the operator says the money was returned another way. That moves
+// the refund to out_of_band, audited, and the refund is no longer failed. It
+// is refused while the refund is pending, succeeded or never ran. An ordinary
+// credit note has the same dead end and the same way out, and Retry refund
+// names it where the refund can never succeed.
+func TestCommitRelief_FailedCardRefundReachesAnEnd(t *testing.T) {
+	h, ctx := newCommitHarness(t, "Relief Refund Dead End")
+	refunds := &stripeRefunds{}
+	cnSvc := newCardReliefService(h, refunds)
+	rows := &auditRows{}
+	cnSvc.SetAuditLogger(rows)
+
+	relief := func(t *testing.T, pi string) domain.CreditNote {
+		t.Helper()
+		inv := h.createTopup(t, ctx, "USD", 9000, 10000)
+		if pi == "" {
+			payOffline(t, h, ctx, inv.ID)
+		} else {
+			payByCard(t, h, ctx, inv.ID, pi)
+		}
+		cn, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireCents: 6000})
+		if err != nil {
+			t.Fatalf("relief: %v", err)
+		}
+		return cn
+	}
+	ordinary := func(t *testing.T, pi string) domain.CreditNote {
+		t.Helper()
+		invID := h.seedPayable(t, ctx, h.custID, 5000, int(refunds.n.Load())+100)
+		if _, err := h.invStore.MarkPaid(ctx, h.tenantID, invID, pi, time.Now().UTC()); err != nil {
+			t.Fatalf("pay: %v", err)
+		}
+		cn, err := cnSvc.Create(ctx, h.tenantID, creditnote.CreateInput{
+			InvoiceID: invID, Reason: "requested_by_customer", RefundAmountCents: 5000,
+			Lines: []creditnote.CreditLineInput{{Description: "refund", Quantity: 1, UnitAmountCents: 5000}},
+		})
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if cn, err = cnSvc.Issue(ctx, h.tenantID, cn.ID); err != nil {
+			t.Fatalf("issue: %v", err)
+		}
+		return cn
+	}
+
+	for _, kind := range []struct {
+		name string
+		note func(*testing.T, string) domain.CreditNote
+	}{{"relief", relief}, {"ordinary note", ordinary}} {
+		t.Run(kind.name, func(t *testing.T) {
+			refunds.refuseNext("charge_disputed")
+			cn := kind.note(t, "pi_end_failed_"+kind.name)
+			if cn.RefundStatus != domain.RefundFailed || cn.RefundAmountCents == 0 {
+				t.Fatalf("refund status %s of %d, want failed", cn.RefundStatus, cn.RefundAmountCents)
+			}
+			total := cn.RefundAmountCents + cn.OutOfBandAmountCents
+			got, err := cnSvc.MarkRefundReturnedAnotherWay(ctx, h.tenantID, cn.ID)
+			if err != nil {
+				t.Fatalf("returned another way: %v", err)
+			}
+			if got.RefundAmountCents != 0 || got.OutOfBandAmountCents != total || got.RefundStatus == domain.RefundFailed {
+				t.Errorf("after: refund %d (%s), out_of_band %d; want 0, not failed, out_of_band %d",
+					got.RefundAmountCents, got.RefundStatus, got.OutOfBandAmountCents, total)
+			}
+			if !rows.action(cn.ID, "refund_returned_another_way") {
+				t.Error("no audit row for returned another way")
+			}
+			if _, err := cnSvc.MarkRefundReturnedAnotherWay(ctx, h.tenantID, cn.ID); !errors.Is(err, errs.ErrInvalidState) {
+				t.Errorf("second time: err = %v, want 409", err)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name   string
+		status domain.RefundStatus
+		note   func(*testing.T) domain.CreditNote
+	}{
+		{"pending", domain.RefundPending, func(t *testing.T) domain.CreditNote {
+			refunds.status = domain.RefundPending
+			defer func() { refunds.status = "" }()
+			return relief(t, "pi_end_pending")
+		}},
+		{"succeeded", domain.RefundSucceeded, func(t *testing.T) domain.CreditNote { return relief(t, "pi_end_ok") }},
+		{"never ran: paid offline", domain.RefundNone, func(t *testing.T) domain.CreditNote { return relief(t, "") }},
+	} {
+		t.Run("refused while "+tc.name, func(t *testing.T) {
+			cn := tc.note(t)
+			if cn.RefundStatus != tc.status {
+				t.Fatalf("refund status %s, want %s", cn.RefundStatus, tc.status)
+			}
+			if _, err := cnSvc.MarkRefundReturnedAnotherWay(ctx, h.tenantID, cn.ID); !errors.Is(err, errs.ErrInvalidState) {
+				t.Errorf("err = %v, want 409", err)
+			}
+			if after, _ := cnSvc.Get(ctx, h.tenantID, cn.ID); after.RefundAmountCents != cn.RefundAmountCents || after.OutOfBandAmountCents != cn.OutOfBandAmountCents {
+				t.Errorf("split changed: %d/%d, was %d/%d", after.RefundAmountCents, after.OutOfBandAmountCents, cn.RefundAmountCents, cn.OutOfBandAmountCents)
+			}
+		})
+	}
+
+	// A refund Stripe failed after taking it has an id, and Stripe may still
+	// deliver an older event for it. Once returned another way, the note
+	// has no card refund for that event to move.
+	t.Run("a late event for the failed refund changes nothing", func(t *testing.T) {
+		refunds.status = domain.RefundPending
+		cn := relief(t, "pi_end_late_event")
+		refunds.status = ""
+		if err := cnSvc.ApplyRefundWebhook(ctx, h.tenantID, cn.StripeRefundID, domain.RefundFailed, "expired_or_canceled_card"); err != nil {
+			t.Fatalf("refund failed: %v", err)
+		}
+		if _, err := cnSvc.MarkRefundReturnedAnotherWay(ctx, h.tenantID, cn.ID); err != nil {
+			t.Fatalf("returned another way: %v", err)
+		}
+		if err := cnSvc.ApplyRefundWebhook(ctx, h.tenantID, cn.StripeRefundID, domain.RefundPending, ""); err != nil {
+			t.Fatalf("late event: %v", err)
+		}
+		if got, _ := cnSvc.Get(ctx, h.tenantID, cn.ID); got.RefundStatus != domain.RefundNone || got.RefundAmountCents != 0 {
+			t.Errorf("after a late pending event: refund %d (%s), want 0 (none)", got.RefundAmountCents, got.RefundStatus)
+		}
+	})
+
+	// A refund on an invoice paid outside Stripe can never succeed. Such a
+	// note predates the card cap, so the row is written directly.
+	t.Run("retry refund names the way out", func(t *testing.T) {
+		cn := relief(t, "")
+		execBypassStamp(t, h.db, `UPDATE credit_notes SET refund_amount_cents = out_of_band_amount_cents, out_of_band_amount_cents = 0, refund_status = 'failed' WHERE id = $1`, cn.ID)
+		_, err := cnSvc.RetryRefund(ctx, h.tenantID, cn.ID)
+		var de *errs.DomainError
+		if !errors.As(err, &de) || !strings.Contains(de.Message, "returned another way") || strings.Contains(de.Message, "void") {
+			t.Errorf("retry refund: %v; want it to name returned another way, never a void", err)
+		}
+	})
+}
+
+// TestCommitRelief_Words: what the customer and the operator read. The note's
+// line and reason say what was refunded in plain words, never a code, and the
+// ledger entry names the note and the credit it took back.
+func TestCommitRelief_Words(t *testing.T) {
+	h, ctx := newCommitHarness(t, "Relief Words")
+	inv := h.createTopup(t, ctx, "USD", 9000, 10000)
+	payOffline(t, h, ctx, inv.ID)
+	drain(t, h, ctx, 4000, 1)
+	cnSvc := newReliefCNService(h)
+
+	cn, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireAll: true})
+	if err != nil {
+		t.Fatalf("relief: %v", err)
+	}
+	if want := "Unused prepaid credit refunded"; cn.Reason != want {
+		t.Errorf("reason %q, want %q", cn.Reason, want)
+	}
+	_, lines, err := cnSvc.GetWithLineItems(ctx, h.tenantID, cn.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(lines) != 1 || lines[0].Description != "Unused prepaid credit refunded — $60.00 of credit" {
+		t.Errorf("lines %+v, want one: Unused prepaid credit refunded — $60.00 of credit", lines)
+	}
+	entries, err := h.creditSvc.ListEntries(ctx, credit.ListFilter{TenantID: h.tenantID, CustomerID: h.custID})
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	want := "Refunded by credit note " + cn.CreditNoteNumber + " — $60.00 of bought credit"
+	found := false
+	for _, e := range entries {
+		found = found || (e.EntryType == domain.CreditAdjustment && e.AmountCents == -6000 && e.Description == want)
+	}
+	if !found {
+		t.Errorf("no ledger entry of -6000 reading %q in %+v", want, entries)
 	}
 }
 
