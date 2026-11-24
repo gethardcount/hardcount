@@ -1,0 +1,20 @@
+# Fields HEAD may stop returning on an invoice that existed before an upgrade.
+# Read by scripts/ci/upgrade-from-previous-tag.sh (the upgrade CI job).
+#
+# The job compares each invoice, as GET /v1/invoices/{id} returns it, before
+# and after the upgrade. A field the previous release returned and HEAD does
+# not fails the job, unless it is listed here, in which case it is dropped
+# from the before side. So a removed field is a reviewed decision.
+#
+# One entry per line: "invoice <field>" or "line_item <field>". The comment
+# line above each entry says what the field was and why its removal does not
+# change what the invoice bills.
+#
+# Never list a field to make a changed amount, line, status, number or tax
+# pass: that is a money finding, and the upgrade is what needs fixing.
+#
+
+# Whether the invoice belonged to a test clock. Test clocks are removed, and
+# 00241 deletes every invoice that was on one, so it was false on every
+# invoice left.
+invoice is_simulated

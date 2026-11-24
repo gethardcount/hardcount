@@ -37,7 +37,6 @@
         "due_at": "2026-05-10T14:30:00Z",
         "id": "<id 8>",
         "invoice_number": "HC-000001",
-        "is_simulated": false,
         "issued_at": "2026-04-10T14:30:00Z",
         "net_payment_term_days": 30,
         "paid_out_of_band": false,

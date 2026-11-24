@@ -471,18 +471,6 @@ type Invoice struct {
 	// is idempotent under retry.
 	BillingReason InvoiceBillingReason `json:"billing_reason,omitempty"`
 
-	// IsSimulated records, at write time, whether this invoice's domain
-	// timestamps (created, issued, due, paid) came from a test clock's
-	// simulated time instead of wall-clock time. It is true when the
-	// creating context was bound to a frozen clock. For the engine, the
-	// subscription carries a test_clock_id. For the manual composer, the
-	// customer is clock-pinned (on a test clock). The activity timeline and
-	// the invoice header read this flag to show the "simulated" badge. They
-	// never use a timestamp-versus-wall-clock heuristic, or re-derive it at
-	// read time from the parent's test_clock_id, which can change. It is
-	// always false in live mode, because test clocks exist only in test mode.
-	IsSimulated bool `json:"is_simulated"`
-
 	// TestClockID is the test clock this invoice's dates follow: the clock
 	// its customer is pinned to. The pin is set when the customer is
 	// created, never changes, and every subscription inherits it (ADR-027).

@@ -745,8 +745,8 @@ func TestImmediateCancel_TestClock_AfterPeriodEnd(t *testing.T) {
 	if usage != 1000 || base != cancelFixtureBaseCents || inv.SubtotalCents != 1000+cancelFixtureBaseCents {
 		t.Errorf("usage=%dc base=%dc subtotal=%dc, want 1000 + %d", usage, base, inv.SubtotalCents, cancelFixtureBaseCents)
 	}
-	if !inv.IsSimulated || !inv.IssuedAtOrZero().Equal(p1) {
-		t.Errorf("is_simulated=%v issued_at=%v, want a simulated invoice issued at the boundary %v", inv.IsSimulated, inv.IssuedAtOrZero(), p1)
+	if !inv.IssuedAtOrZero().Equal(p1) {
+		t.Errorf("issued_at=%v, want the boundary %v", inv.IssuedAtOrZero(), p1)
 	}
 	assertUsageBilledOnce(t, r.base)
 }

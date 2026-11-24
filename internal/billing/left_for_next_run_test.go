@@ -225,7 +225,6 @@ func TestFinalizeOnCreateInvoice_CollectsAtTheCallersInstant(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			inv, applier, _, engine := leftHarness(t)
-			inv.invoices[0].IsSimulated = true
 			engine.SetCustomerReader(&stubCustomerReader{customers: map[string]domain.Customer{
 				"cus_1": {ID: "cus_1", TenantID: "t1", TestClockID: "tc_1"},
 			}})

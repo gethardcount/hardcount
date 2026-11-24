@@ -52,8 +52,8 @@ func TestTaxReversal_CreditedTotalReadErrorFails(t *testing.T) {
 	}
 }
 
-// A customer read error fails a manual Create: is_simulated is durable, and a
-// test-clock invoice stored as real would count as revenue.
+// A customer read error fails a manual Create: the read is what confirms the
+// customer is in the caller's tenant and mode.
 func TestCreate_CustomerReadErrorFails(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store, nil, newMemNumberer())
@@ -66,6 +66,6 @@ func TestCreate_CustomerReadErrorFails(t *testing.T) {
 		t.Fatalf("err = %v, want the customer read error", err)
 	}
 	if len(store.invoices) != 0 {
-		t.Fatalf("%d invoice(s) stored on an unread test-clock pin, want 0", len(store.invoices))
+		t.Fatalf("%d invoice(s) stored for an unread customer, want 0", len(store.invoices))
 	}
 }

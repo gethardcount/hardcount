@@ -129,13 +129,8 @@ type StripeChecker interface {
 }
 
 // CustomerReader reads the full customer record. Two consumers:
-//   - Create stamps invoice.is_simulated authoritatively at write time from
-//     the customer's test-clock pin — the same direct field check the engine
-//     uses for cycle invoices (sub.TestClockID != ""), applied to the customer
-//     for manual one-off invoices. This is the WRITE-time capture, NOT the
-//     read-time snapshot heuristic ADR-030 bans: we record whether the
-//     customer was pinned at the instant the invoice was born, then persist
-//     it, from the pin itself rather than from the ctx's time.
+//   - Create checks the customer is in the caller's tenant and mode
+//     (requireCustomer).
 //   - attachAttention reads the customer's email presence to pick the honest
 //     no_payment_method banner variant (emailed-a-link vs no-address).
 //
@@ -731,38 +726,31 @@ func (s *Service) collectionPausedMany(ctx context.Context, tenantID string, sub
 	return out, nil
 }
 
-// SetCustomerReader wires the customer lookup used to (a) stamp is_simulated
-// from the customer's test-clock pin at Create and (b) pick the no-PM banner
-// variant from email presence at read. Optional — when nil (narrow unit
-// tests), is_simulated defaults false (correct for any non-clock-pinned
-// invoice) and the no-PM banner falls back to the no-email variant; production
-// always wires it.
+// SetCustomerReader wires the customer lookup used to (a) check the customer
+// at Create and (b) pick the no-PM banner variant from email presence at read.
+// Optional — when nil (narrow unit tests), Create skips the check and the no-PM
+// banner falls back to the no-email variant; production always wires it.
 func (s *Service) SetCustomerReader(r CustomerReader) {
 	s.customerReader = r
 }
 
-// customerOnTestClock reports whether the customer is pinned to a test clock —
-// the authoritative write-time signal for invoice.is_simulated on manual
-// invoices (mirrors the engine's sub.TestClockID check for cycle invoices).
-// Unwired reader → false (narrow unit tests; prod always wires it). A lookup
-// error is returned: is_simulated is durable, and a simulated invoice stored
-// as real would count as revenue and go through the real reconcilers.
-func (s *Service) customerOnTestClock(ctx context.Context, tenantID, customerID string) (bool, error) {
-	if s.customerReader == nil || customerID == "" {
-		return false, nil
+// requireCustomer confirms the customer exists in the caller's tenant and
+// mode. The foreign key on invoices.customer_id is on the id alone and
+// foreign-key checks do not apply row-level security, so the insert would
+// accept another tenant's or the other mode's customer. Unwired reader
+// (narrow unit tests) skips the read.
+func (s *Service) requireCustomer(ctx context.Context, tenantID, customerID string) error {
+	if s.customerReader == nil {
+		return nil
 	}
-	cust, err := s.customerReader.Get(ctx, tenantID, customerID)
+	_, err := s.customerReader.Get(ctx, tenantID, customerID)
 	if errors.Is(err, errs.ErrNotFound) {
-		// This read runs in the caller's tenant and mode. The foreign key on
-		// invoices.customer_id is on the id alone and foreign-key checks do
-		// not apply row-level security, so the insert would accept another
-		// tenant's or the other mode's customer.
-		return false, errs.NotFound("customer")
+		return errs.NotFound("customer")
 	}
 	if err != nil {
-		return false, fmt.Errorf("read customer test-clock pin: %w", err)
+		return fmt.Errorf("read customer: %w", err)
 	}
-	return cust.TestClockID != "", nil
+	return nil
 }
 
 // requireSubscription confirms an operator-supplied subscription id exists in
@@ -833,8 +821,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	}
 	// Both references are read in the caller's tenant and mode before
 	// anything is written.
-	onClock, err := s.customerOnTestClock(ctx, tenantID, input.CustomerID)
-	if err != nil {
+	if err := s.requireCustomer(ctx, tenantID, input.CustomerID); err != nil {
 		return domain.Invoice{}, err
 	}
 	if err := s.requireSubscription(ctx, tenantID, input.CustomerID, input.SubscriptionID); err != nil {
@@ -971,11 +958,6 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		// (2) auto-finalize-after-tax-retry skips them so the operator keeps
 		// the explicit finalize step while a draft is still being composed.
 		BillingReason: domain.BillingReasonManual,
-		// Persist whether this draft is born on a frozen test clock, from the
-		// customer's pin (manual invoices have no subscription to look through).
-		// This is the authoritative write-time capture — the same direct field
-		// check the engine uses for cycle invoices (sub.TestClockID).
-		IsSimulated: onClock,
 	}
 
 	// Take the number on the transaction that inserts the invoice. Invoice
@@ -1457,10 +1439,8 @@ func distinct(page []domain.Invoice, key func(domain.Invoice) string) []string {
 func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f attentionFacts, tenantLoc **time.Location) domain.Invoice {
 	// Wall-clock now ages the in-flight payment banner (Info → Warning past the
 	// expected-settle window). Deliberately NOT s.clock.Now(ctx): processing
-	// staleness is a real-world duration (the provider settles in wall-clock),
-	// and the classifier guards on !IsSimulated so a clock-pinned invoice never
-	// escalates on a wall-clock age it can't satisfy.
-	atc := attentionContext{Now: time.Now().UTC()} //nolint:forbidigo // wall-clock: processing-staleness is a real-world duration (provider settles in wall-clock); classifier guards on !IsSimulated
+	// staleness is a real-world duration (the provider settles in wall-clock).
+	atc := attentionContext{Now: time.Now().UTC()} //nolint:forbidigo // wall-clock: processing-staleness is a real-world duration (provider settles in wall-clock)
 	atc.HasPaymentMethod = inv.CustomerID != "" && f.paymentReady[inv.CustomerID]
 	if awaitsPaymentNoCard(inv, atc.HasPaymentMethod) {
 		atc.CustomerHasEmail = f.hasEmail[inv.CustomerID]
@@ -1477,20 +1457,6 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	}
 	if r, ok := f.refundReview[inv.ID]; ok {
 		atc.StripeRefundReview = &r
-	}
-	// A clock-pinned invoice's failure banner dates "since" from its latest
-	// failed charge's simulated instant. Simulated failed invoices only, so a
-	// live list page never pays this read.
-	if inv.IsSimulated && inv.PaymentStatus == domain.PaymentFailed && inv.ID != "" {
-		if attempts, err := s.store.ListChargeAttemptsByInvoice(ctx, inv.TenantID, inv.ID); err == nil {
-			for i := len(attempts) - 1; i >= 0; i-- {
-				if attempts[i].Outcome == domain.ChargeAttemptFailed {
-					at := attempts[i].EffectiveAt
-					atc.LastFailedChargeAt = &at
-					break
-				}
-			}
-		}
 	}
 	// Prepaid-commit exposure: credit this invoice already handed the customer
 	// while the cash never arrived (ADR-078 D3 fast-follow). Read per row, but
@@ -2962,8 +2928,7 @@ func (s *Service) RetryPendingTax(ctx context.Context, batch int) (int, []error)
 // calculation expires (ListPendingTaxCommit). A commit that fails here waits
 // before its next try (deferTaxWork), so it is not retried on every tick.
 //
-// Runs on the wall-clock scheduler tick (clock-pinned invoices are excluded by
-// the store query). Per-row errors collected, not aborted-on.
+// Runs on the scheduler tick. Per-row errors collected, not aborted-on.
 func (s *Service) RetryPendingTaxCommit(ctx context.Context, batch int) (int, []error) {
 	if s.taxCommitter == nil {
 		return 0, nil
@@ -3025,7 +2990,7 @@ func nextTaxWorkAttempt(now, lastWrite time.Time) time.Time {
 // real clock: the sweeps run on it, and the lists compare with now(). A failed
 // write is only logged; the invoice is then retried on the next run.
 func (s *Service) deferTaxWork(ctx context.Context, inv domain.Invoice) {
-	now := time.Now().UTC() //nolint:forbidigo // wall-clock: the tax sweeps exclude clock-pinned invoices and their lists compare with now()
+	now := time.Now().UTC() //nolint:forbidigo // wall-clock: the tax sweeps' lists compare with now()
 	if err := s.store.DeferTaxWork(ctx, inv.TenantID, inv.ID, nextTaxWorkAttempt(now, inv.UpdatedAt)); err != nil {
 		slog.WarnContext(ctx, "could not record the wait before the next tax commit or reversal attempt; it is retried on the next run",
 			"invoice_id", inv.ID, "error", err)
@@ -3042,8 +3007,7 @@ func (s *Service) deferTaxWork(ctx context.Context, inv domain.Invoice) {
 // picked up next tick. A reversal that fails here waits before its next try
 // (deferTaxWork), so it is not retried on every tick.
 //
-// Runs on the wall-clock scheduler tick (clock-pinned invoices excluded by the
-// store query). Per-row errors collected, not aborted-on.
+// Runs on the scheduler tick. Per-row errors collected, not aborted-on.
 func (s *Service) RetryPendingTaxReversal(ctx context.Context, batch int) (int, []error) {
 	if s.taxReverser == nil {
 		return 0, nil

@@ -1,8 +1,8 @@
 // This file is the doctor's invariant catalog: data kept next to the code.
 //
 // Every check here was derived from the domain's writers, then passed a
-// search for legal counterexamples: grandfathered cohorts, deliberate states,
-// simulated rows and best-effort stamps that lag. The PR that added each
+// search for legal counterexamples: grandfathered cohorts, deliberate states
+// and best-effort stamps that lag. The PR that added each
 // check records its full reasoning and the writers it cites. A check that a
 // database constraint already makes impossible was dropped on purpose, so
 // the same rule is not guarded twice.
@@ -150,7 +150,7 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 		Name:   "dunning_active_run_on_terminal_invoice_stale",
 		Domain: "dunning",
 		Why:    "no ACTIVE dunning run may persist on a terminal invoice once the resolve seam has had time to run",
-		SQL:    `SELECT r.id, r.tenant_id, r.invoice_id, r.state, r.resolution, r.next_action_at, r.updated_at AS run_updated_at, i.status AS invoice_status, i.payment_status, i.amount_due_cents, i.currency FROM invoice_dunning_runs r JOIN invoices i ON i.id = r.invoice_id JOIN customers c ON c.id = i.customer_id WHERE r.state = 'active' AND r.paused = false AND i.status IN ('paid','voided','uncollectible') AND i.is_simulated = false AND c.test_clock_id IS NULL AND r.next_action_at IS NOT NULL AND r.next_action_at < now() - interval '48 hours' AND r.updated_at < now() - interval '48 hours' AND i.updated_at < now() - interval '48 hours'`,
+		SQL:    `SELECT r.id, r.tenant_id, r.invoice_id, r.state, r.resolution, r.next_action_at, r.updated_at AS run_updated_at, i.status AS invoice_status, i.payment_status, i.amount_due_cents, i.currency FROM invoice_dunning_runs r JOIN invoices i ON i.id = r.invoice_id WHERE r.state = 'active' AND r.paused = false AND i.status IN ('paid','voided','uncollectible') AND r.next_action_at IS NOT NULL AND r.next_action_at < now() - interval '48 hours' AND r.updated_at < now() - interval '48 hours' AND i.updated_at < now() - interval '48 hours'`,
 	},
 	{
 		Name:   "dunning_resolved_run_missing_resolved_at_or_pending_action",
@@ -317,7 +317,6 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 		SQL: `SELECT id, tenant_id, invoice_number, status, tax_amount_cents, tax_calculation_id, issued_at
 		FROM invoices
 		WHERE id NOT LIKE 'hc_inv_safe%'
-		  AND is_simulated = false
 		  AND tax_provider = 'stripe_tax'
 		  AND tax_status = 'ok'
 		  AND COALESCE(tax_calculation_id, '') <> ''

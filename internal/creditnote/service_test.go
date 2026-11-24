@@ -572,62 +572,6 @@ func (m *memInvoiceReader) SettleZeroDueTx(_ context.Context, _ *sql.Tx, tenantI
 	return inv, true, nil
 }
 
-// TestCreate_IsSimulated locks the per-CN time-domain flag (migration 0117):
-// it is true exactly when the source invoice is simulated, whether the engine
-// or an operator issues the note. The wall-clock recovery sweeps skip notes
-// that carry it, and the invoice timeline shows a CN's Recorded subline by
-// it, so a wrong flag sends the note to the wrong sweep and shows or hides
-// its Recorded line.
-func TestCreate_IsSimulated(t *testing.T) {
-	ctx := context.Background()
-	mk := func(id string, simulated bool) domain.Invoice {
-		return domain.Invoice{
-			ID: id, TenantID: "t1", CustomerID: "cus_1",
-			Status: domain.InvoiceFinalized, Currency: "USD",
-			TotalAmountCents: 10000, AmountDueCents: 10000, IsSimulated: simulated,
-		}
-	}
-	newSvc := func(inv domain.Invoice) *Service {
-		s := NewService(newMemStore(), &memInvoiceReader{invoices: map[string]domain.Invoice{inv.ID: inv}}, nil)
-		s.SetNumberGenerator(&fakeCNNumbers{})
-		return s
-	}
-	line := []CreditLineInput{{Description: "adj", Quantity: 1, UnitAmountCents: 1000}}
-
-	// The rule is one line: the SOURCE INVOICE's pin decides. Corrected
-	// 2026-07-29 — this used to also gate on a CreateInput.IsSimulated flag,
-	// i.e. "operator HTTP issuance is always wall-clock", which contradicted
-	// ADR-030 (audit log is its only always-wall-clock carve-out) and produced
-	// credit notes dated before the invoices they credited. That input field is
-	// now deleted, so the actor cannot influence the flag at all.
-	cases := []struct {
-		name      string
-		invoice   domain.Invoice
-		input     CreateInput
-		wantSimul bool
-	}{
-		{"engine clawback on simulated invoice → simulated",
-			mk("inv_sim", true), CreateInput{InvoiceID: "inv_sim", Reason: "subscription_downgrade", Lines: line}, true},
-		{"operator issue on the SAME simulated invoice → simulated too",
-			mk("inv_sim2", true), CreateInput{InvoiceID: "inv_sim2", Reason: "billing error", Lines: line}, true},
-		{"engine clawback on a non-simulated invoice → wall-clock",
-			mk("inv_real", false), CreateInput{InvoiceID: "inv_real", Reason: "subscription_downgrade", Lines: line}, false},
-		{"operator issue on a non-simulated invoice → wall-clock",
-			mk("inv_real2", false), CreateInput{InvoiceID: "inv_real2", Reason: "billing error", Lines: line}, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			cn, err := newSvc(tc.invoice).Create(ctx, "t1", tc.input)
-			if err != nil {
-				t.Fatalf("create: %v", err)
-			}
-			if cn.IsSimulated != tc.wantSimul {
-				t.Errorf("is_simulated: got %v, want %v", cn.IsSimulated, tc.wantSimul)
-			}
-		})
-	}
-}
-
 func TestCreate_CreditNote(t *testing.T) {
 	store := newMemStore()
 	invoices := &memInvoiceReader{

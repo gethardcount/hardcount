@@ -1061,7 +1061,7 @@ function stubNote(invoiceId: string, customerId: string, over: Record<string, un
     id: 'cn_e2e_stub', invoice_id: invoiceId, customer_id: customerId, credit_note_number: 'CN-E2E-1', status: 'issued',
     reason: 'Refunded in Stripe', subtotal_cents: 4000, total_cents: 4000, refund_amount_cents: 4000, credit_amount_cents: 0,
     out_of_band_amount_cents: 0, refund_status: 'succeeded', currency: 'USD', issued_at: now, created_at: now,
-    is_simulated: false, recorded_from_stripe: false, ...over,
+    recorded_from_stripe: false, ...over,
   }
 }
 

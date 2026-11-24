@@ -68,21 +68,18 @@ type ClawbackRetrier interface {
 }
 
 // TrialExpirer is the narrow hook the scheduler uses to flip
-// non-clock-pinned trialing subs to active at trial_end_at on the
-// wall-clock cron tick. Implemented by *subscription.Service via
-// ProcessExpiredTrials. Bug #8 — without this, status stays
-// 'trialing' until the engine wakes at next_billing_at (~30 days
-// past trial_end_at for calendar billing).
-//
-// ADR-028 disjoint flows: implementation EXCLUDES clock-pinned
-// rows — those flow through the catchup orchestrator's Phase 0.5.
+// trialing subs to active at trial_end_at on the cron tick.
+// Implemented by *subscription.Service via ProcessExpiredTrials.
+// Bug #8 — without this, status stays 'trialing' until the engine
+// wakes at next_billing_at (~30 days past trial_end_at for calendar
+// billing).
 type TrialExpirer interface {
 	ProcessExpiredTrials(ctx context.Context, batch int) (int, []error)
 }
 
 // PauseResumer is the narrow hook the scheduler uses to auto-resume
-// non-clock-pinned subs whose pause_collection_resumes_at has
-// elapsed in wall-clock time. Implemented by *subscription.Service
+// subs whose pause_collection_resumes_at has elapsed. Implemented by
+// *subscription.Service
 // via ProcessExpiredPauseCollections. Stripe-parity: resume happens
 // AT resumes_at, not at the next cycle close. Without this, a
 // production sub whose resumes_at is past but whose next_billing_at
@@ -199,9 +196,8 @@ func (s *Scheduler) SetTrialExpirer(t TrialExpirer) {
 	s.trialExpirer = t
 }
 
-// SetPauseResumer wires the wall-clock pause-resume phase. Without it,
-// non-clock-pinned subs whose pause_collection_resumes_at has elapsed
-// stay paused until a cycle is independently due — diverging from
+// SetPauseResumer wires the pause-resume phase. Without it, subs whose
+// pause_collection_resumes_at has elapsed stay paused until a cycle is independently due — diverging from
 // Stripe's "resume AT resumes_at" semantics.
 func (s *Scheduler) SetPauseResumer(p PauseResumer) {
 	s.pauseResumer = p
@@ -365,14 +361,11 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool, panic
 		}
 	}()
 
-	// 0.9 Trial expiry — flip non-clock-pinned trialing subs to
-	// active at trial_end_at BEFORE the cycle scan reads the sub
-	// list. Without this, calendar-billed trial subs sit at
-	// status='trialing' for up to ~30 days past actual trial-end
-	// (the gap from trial_end_at to next calendar-month boundary).
-	// Clock-pinned subs are EXCLUDED here — they flow through the
-	// catchup orchestrator's Phase 0.5 instead (ADR-028 disjoint
-	// flows).
+	// 0.9 Trial expiry — flip trialing subs to active at
+	// trial_end_at BEFORE the cycle scan reads the sub list. Without
+	// this, calendar-billed trial subs sit at status='trialing' for up
+	// to ~30 days past actual trial-end (the gap from trial_end_at to
+	// next calendar-month boundary).
 	if s.trialExpirer != nil {
 		func() {
 			defer panics.Guard("step", "trial_expiry", "mode", mode)
@@ -426,8 +419,6 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool, panic
 	// draft, and the close reads the pause off the row. The store query
 	// also skips a sub that still owes such a close (a failed or
 	// unfinished run), so the order is the fast path, not the guard.
-	// Wall-clock counterpart to the test-clock catchup's resume phase.
-	// Clock-pinned subs are excluded per ADR-028.
 	if s.pauseResumer != nil {
 		func() {
 			defer panics.Guard("step", "pause_resume", "mode", mode)

@@ -325,9 +325,7 @@ func failureEmailSuppressed(purpose string) bool {
 // off during the charge). Dunning is then started — on every report that
 // records the failure, not only the first: the first reporter's start can
 // fail after its stamp committed, and StartDunning is idempotent by invoice
-// (0085 UNIQUE), so a later report is a free re-drive. Test-clock invoices
-// have no other one: the dunning_backfill reconciler skips simulated
-// invoices.
+// (0085 UNIQUE), so a later report is a free re-drive.
 func (s *Stripe) SettleFailed(ctx context.Context, tenantID string, inv domain.Invoice, f PaymentFailure, source SettlementSource) error {
 	_, _, err := s.settleFailed(ctx, tenantID, inv, f, source)
 	return err

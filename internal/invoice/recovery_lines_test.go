@@ -55,21 +55,21 @@ func TestRecoveryRunLines_SameWordsAsTheInvoicePageWithoutItsFolds(t *testing.T)
 	wall := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
 	run := domain.InvoiceDunningRun{ID: "hc_dr_1", State: domain.DunningEscalated, Resolution: domain.ResolutionRetriesExhausted}
 
-	// A written-off invoice on a test clock: one decline, its retry declined
+	// A written-off invoice: one decline, its retry declined
 	// with a mapped code, then retries ran out, which paused collection and
 	// wrote the invoice off.
 	writtenOff := domain.Invoice{
 		Status: domain.InvoiceUncollectible, PaymentStatus: domain.PaymentFailed, AmountDueCents: 4900, TotalAmountCents: 4900,
-		IssuedAt: &t0, UncollectibleAt: &t2, IsSimulated: true, InvoiceNumber: "HC-000123",
+		IssuedAt: &t0, UncollectibleAt: &t2, InvoiceNumber: "HC-000123",
 	}
 	c := wireCase{
 		inv:  writtenOff,
 		runs: []domain.InvoiceDunningRun{run},
 		events: []domain.InvoiceDunningEvent{
-			{ID: "evt_start", RunID: run.ID, EventType: domain.DunningEventStarted, Reason: string(domain.DunningCausePaymentFailed), CreatedAt: t0, RecordedAt: &wall},
-			{ID: "evt_retry", RunID: run.ID, EventType: domain.DunningEventRetryAttempted, AttemptCount: 1, CreatedAt: t1, RecordedAt: &wall,
+			{ID: "evt_start", RunID: run.ID, EventType: domain.DunningEventStarted, Reason: string(domain.DunningCausePaymentFailed), CreatedAt: t0},
+			{ID: "evt_retry", RunID: run.ID, EventType: domain.DunningEventRetryAttempted, AttemptCount: 1, CreatedAt: t1,
 				Reason: "payment failed: Your card has insufficient funds.", Metadata: map[string]any{"payment_intent_id": "pi_r1"}},
-			{ID: "evt_out", RunID: run.ID, EventType: domain.DunningEventEscalated, AttemptCount: 1, CreatedAt: t2, RecordedAt: &wall,
+			{ID: "evt_out", RunID: run.ID, EventType: domain.DunningEventEscalated, AttemptCount: 1, CreatedAt: t2,
 				Reason: "subscription_paused+invoice_marked_uncollectible"},
 		},
 		attempts: []domain.InvoiceChargeAttempt{{
@@ -109,8 +109,8 @@ func TestRecoveryRunLines_SameWordsAsTheInvoicePageWithoutItsFolds(t *testing.T)
 			t.Errorf("%s: %q %s %q %q %d; want %q %s %q %q %d", id, l.Title, l.Tone, l.Problem, activity.MetaText(l), amount,
 				w.title, w.tone, w.problem, w.meta, w.amount)
 		}
-		if l.ID != "dunning:"+id || !l.OccurredAt.Equal(w.at) || l.RecordedAt == nil || !l.RecordedAt.Equal(wall) {
-			t.Errorf("%s: id %q occurred %v recorded %v; want dunning:%s, %v, Recorded %v", id, l.ID, l.OccurredAt, l.RecordedAt, id, w.at, wall)
+		if l.ID != "dunning:"+id || !l.OccurredAt.Equal(w.at) {
+			t.Errorf("%s: id %q occurred %v; want dunning:%s, %v", id, l.ID, l.OccurredAt, id, w.at)
 		}
 	}
 	// One wording: every line the invoice page shows for these events is the

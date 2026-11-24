@@ -60,12 +60,11 @@ func registerQueueDepthGauges(reg prometheus.Registerer, invoiceGrace time.Durat
 	// subscription in one tick, so on a busy day a tick can run for hours. On
 	// hardcount_leader_last_tick_age_seconds that looks like a wedged tick.
 	// These two gauges tell the cases apart: a draining tick shrinks the count,
-	// and a wedged one does not. The predicate is GetDueBilling's: wall-clock
-	// subscriptions only, because test-clock subscriptions bill on Advance.
+	// and a wedged one does not. The predicate is GetDueBilling's.
 	//
 	// A subscription with a saved billing failure (ADR-119) is left out of both
 	// and counted by hardcount_billing_failing_subscriptions below. So each
-	// owed wall-clock subscription is in exactly one of the two: "due and not
+	// owed subscription is in exactly one of the two: "due and not
 	// failing" or "failing". What still grows the age here is billing that is
 	// behind, and a subscription whose attempts fail without being saved (an
 	// interrupted run, a lost connection). Its id is in the "bill subscription
@@ -81,15 +80,15 @@ func registerQueueDepthGauges(reg prometheus.Registerer, invoiceGrace time.Durat
 	// duePredicate is of the scan's, because this package imports no domain
 	// package. TestBillingGauges_DueAndFailingPartition pins the two copies to
 	// each other on real rows.
-	const billingFailing = `status IN ('active','trialing') AND test_clock_id IS NULL
+	const billingFailing = `status IN ('active','trialing')
 		AND billing_failed_for IS NOT NULL
 		AND billing_failed_for IS NOT DISTINCT FROM LEAST(next_billing_at, CASE WHEN status = 'active' THEN cancel_at END)`
-	dueHelp := "Subscriptions due for billing now whose billing is not failing (wall-clock subs; test-clock subs bill on Advance). A subscription is due once INVOICE_GRACE_PERIOD has passed after its period end or mid-period cancel. Spikes on busy billing days and falls as the scheduler drains it. Subscriptions with a saved billing failure are in hardcount_billing_failing_subscriptions. -1 = metric query failed."
+	dueHelp := "Subscriptions due for billing now whose billing is not failing. A subscription is due once INVOICE_GRACE_PERIOD has passed after its period end or mid-period cancel. Spikes on busy billing days and falls as the scheduler drains it. Subscriptions with a saved billing failure are in hardcount_billing_failing_subscriptions. -1 = metric query failed."
 	ageHelp := "Seconds since the oldest due subscription whose billing is not failing became due (its period end or mid-period cancel plus INVOICE_GRACE_PERIOD); 0 when there is none. Alert when it exceeds 2x the billing interval: billing is behind, or a subscription's attempts are interrupted or hit connection errors on every tick. -1 = metric query failed."
 	// dueBy is now() less the grace, in whole microseconds (Postgres's
 	// timestamp resolution).
 	dueBy := fmt.Sprintf("(now() - interval '%d microseconds')", invoiceGrace.Microseconds())
-	duePredicate := `status IN ('active', 'trialing') AND test_clock_id IS NULL AND livemode = %t
+	duePredicate := `status IN ('active', 'trialing') AND livemode = %t
 		AND (next_billing_at <= ` + dueBy + ` OR (status = 'active' AND cancel_at IS NOT NULL AND cancel_at <= ` + dueBy + `))
 		AND NOT (` + billingFailing + `)`
 	for _, m := range []struct {
@@ -151,7 +150,7 @@ func registerQueueDepthGauges(reg prometheus.Registerer, invoiceGrace time.Durat
 	}{{"live", true}, {"test", false}} {
 		q := fmt.Sprintf(`SELECT COUNT(*) FROM invoices i
 			WHERE i.auto_charge_pending AND i.payment_status = 'pending' AND i.status = 'finalized'
-			  AND i.livemode = %t AND i.is_simulated = false
+			  AND i.livemode = %t
 			  AND NOT EXISTS (SELECT 1 FROM subscriptions ps WHERE ps.id = i.subscription_id AND ps.pause_collection_behavior IS NOT NULL AND (ps.pause_collection_resumes_at IS NULL OR ps.pause_collection_resumes_at > now()))`, m.live)
 		auto.NewGaugeFunc(prometheus.GaugeOpts{
 			Name:        "hardcount_auto_charge_queued_invoices",
@@ -214,8 +213,8 @@ func registerQueueDepthGauges(reg prometheus.Registerer, invoiceGrace time.Durat
 		"Clawback credit-note drafts awaiting issue (issue_pending, status='draft') — includes drafts legitimately deferred behind an in-flight source payment (ADR-059); alert on sustained growth/age, not presence. -1 = metric query failed.",
 		`SELECT COUNT(*) FROM credit_notes WHERE issue_pending AND status = 'draft'`)
 	gauge("hardcount_creditnote_pending_tax_reversals",
-		"Issued credit notes whose upstream tax reversal is owed and can be made now (tax_reversal_pending, and the invoice's tax transaction is recorded). Presence is normal for a tick or two; a row here for >24h means the provider keeps rejecting it — runbook tier-2. A marked note whose invoice has no tax transaction yet waits on the invoice's tax commit and is not counted, nor is a test-clock note, which the sweep does not retry. -1 = metric query failed.",
-		`SELECT COUNT(*) FROM credit_notes cn WHERE cn.tax_reversal_pending AND cn.status = 'issued' AND cn.is_simulated = false AND EXISTS (SELECT 1 FROM invoices i WHERE i.id = cn.invoice_id AND i.tenant_id = cn.tenant_id AND COALESCE(i.tax_transaction_id, '') <> '')`)
+		"Issued credit notes whose upstream tax reversal is owed and can be made now (tax_reversal_pending, and the invoice's tax transaction is recorded). Presence is normal for a tick or two; a row here for >24h means the provider keeps rejecting it — runbook tier-2. A marked note whose invoice has no tax transaction yet waits on the invoice's tax commit and is not counted. -1 = metric query failed.",
+		`SELECT COUNT(*) FROM credit_notes cn WHERE cn.tax_reversal_pending AND cn.status = 'issued' AND EXISTS (SELECT 1 FROM invoices i WHERE i.id = cn.invoice_id AND i.tenant_id = cn.tenant_id AND COALESCE(i.tax_transaction_id, '') <> '')`)
 	gauge("hardcount_invoice_pending_tax_reversals",
 		"Voided stripe_tax invoices with a committed upstream tax transaction and no confirmed reversal (tax_reversed_at IS NULL) — the invoice-side owed reversals the #310 sweep re-drives. Alert on age, not presence. -1 = metric query failed.",
 		`SELECT COUNT(*) FROM invoices WHERE status = 'voided' AND tax_provider = 'stripe_tax' AND COALESCE(tax_transaction_id,'') <> '' AND tax_reversed_at IS NULL`)

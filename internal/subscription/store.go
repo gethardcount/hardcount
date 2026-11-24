@@ -268,18 +268,17 @@ type Store interface {
 	// subscription.
 	ClearBillingThresholds(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 
-	// ListExpiredTrials returns, for the cron tick, non-clock-pinned subs
-	// whose `trial_end_at` has elapsed in wall-clock time but whose status
-	// is still 'trialing'. ADR-028 disjoint flows: this query explicitly
-	// excludes `test_clock_id IS NOT NULL` rows. Scoped per livemode
-	// partition by the caller's ctx (the scheduler fans out per mode).
+	// ListExpiredTrials returns, for the cron tick, subs whose
+	// `trial_end_at` has elapsed but whose status is still 'trialing'.
+	// Scoped per livemode partition by the caller's ctx (the scheduler fans
+	// out per mode).
 	ListExpiredTrials(ctx context.Context, before time.Time, livemode bool, limit int) ([]domain.Subscription, error)
 
-	// ListExpiredPauseCollections returns wall-clock subs whose
+	// ListExpiredPauseCollections returns subs whose
 	// pause_collection_resumes_at has passed. The scheduler tick walks
 	// these and clears the pause + writes audit (triggered_by=schedule).
 	// Skips a sub that still owes a close before resumes_at (see
-	// resumeNotWaitingOnCloseSQL). Excludes clock-pinned rows (ADR-028).
+	// resumeNotWaitingOnCloseSQL).
 	ListExpiredPauseCollections(ctx context.Context, before time.Time, limit int) ([]domain.Subscription, error)
 
 	// ActivateAfterTrialWithBill flips trialing→active AND runs billFn (the day-1

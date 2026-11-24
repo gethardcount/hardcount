@@ -52,21 +52,21 @@ func TestListAndGet_CarryTheCustomersTestClock(t *testing.T) {
 		VALUES ('cus_inv_clk_wall', $1, 'wall', 'Wall', '', now(), now())`, tenantID)
 	mustExec(`INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status, livemode, test_clock_id)
 		VALUES ('sub_inv_clk_pinned', $1, 'pinned', 'pinned', 'cus_inv_clk_pinned', 'active', false, $2)`, tenantID, clockID)
-	seedInv := func(id, custID, subID string, simulated bool) {
+	seedInv := func(id, custID, subID string) {
 		sub := any(nil)
 		if subID != "" {
 			sub = subID
 		}
 		mustExec(`INSERT INTO invoices (id, tenant_id, customer_id, subscription_id, invoice_number,
-			status, payment_status, is_simulated, currency,
+			status, payment_status, currency,
 			subtotal_cents, total_amount_cents, amount_due_cents, tax_status,
 			billing_period_start, billing_period_end, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $1, 'finalized', 'pending', $5, 'USD',
-			2500, 2500, 2500, 'ok', now(), now(), now(), now())`, id, tenantID, custID, sub, simulated)
+		VALUES ($1, $2, $3, $4, $1, 'finalized', 'pending', 'USD',
+			2500, 2500, 2500, 'ok', now(), now(), now(), now())`, id, tenantID, custID, sub)
 	}
-	seedInv("inv_clk_cycle", "cus_inv_clk_pinned", "sub_inv_clk_pinned", true)
-	seedInv("inv_clk_oneoff", "cus_inv_clk_pinned", "", true)
-	seedInv("inv_clk_wall", "cus_inv_clk_wall", "", false)
+	seedInv("inv_clk_cycle", "cus_inv_clk_pinned", "sub_inv_clk_pinned")
+	seedInv("inv_clk_oneoff", "cus_inv_clk_pinned", "")
+	seedInv("inv_clk_wall", "cus_inv_clk_wall", "")
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}

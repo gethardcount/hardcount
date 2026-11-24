@@ -17,7 +17,7 @@ import (
 // seedQueuedSubInvoice is a finalized, owed, queued invoice on a fresh
 // subscription of a fresh customer: what an operator's Finalize of a cycle
 // draft leaves behind.
-func seedQueuedSubInvoice(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, num string) (inv domain.Invoice, subID, custID string) {
+func seedQueuedSubInvoice(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, num string) (inv domain.Invoice, subID string) {
 	t.Helper()
 	cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{ExternalID: "cus_" + num, DisplayName: num})
 	if err != nil {
@@ -55,7 +55,7 @@ func seedQueuedSubInvoice(t *testing.T, db *postgres.DB, ctx context.Context, te
 	if err := store.SetAutoChargePending(ctx, tenantID, inv.ID, true); err != nil {
 		t.Fatalf("queue invoice: %v", err)
 	}
-	return inv, sub.ID, cust.ID
+	return inv, sub.ID
 }
 
 func bypassExec(t *testing.T, db *postgres.DB, query string, args ...any) {
@@ -79,8 +79,7 @@ func bypassExec(t *testing.T, db *postgres.DB, query string, args ...any) {
 // operator's Finalize of a paused subscription's draft charged the card.
 //
 // Mutation: drop notPausedForCollection from ClaimAutoCharge, and the
-// open-ended and future pauses are claimed. Read the pause at now() instead
-// of the invoice's clock, and the pinned customer's lifted pause is refused.
+// open-ended and future pauses are claimed.
 func TestClaimAutoCharge_RefusesWhileCollectionPaused(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -90,7 +89,7 @@ func TestClaimAutoCharge_RefusesWhileCollectionPaused(t *testing.T) {
 	now := time.Now().UTC()
 
 	t.Run("open-ended pause: refused; Charge now still claims", func(t *testing.T) {
-		inv, subID, _ := seedQueuedSubInvoice(t, db, ctx, tenantID, "INV-PAUSE-OPEN")
+		inv, subID := seedQueuedSubInvoice(t, db, ctx, tenantID, "INV-PAUSE-OPEN")
 		if _, err := subs.SetPauseCollection(ctx, tenantID, subID, domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}, nil); err != nil {
 			t.Fatalf("pause: %v", err)
 		}
@@ -105,7 +104,7 @@ func TestClaimAutoCharge_RefusesWhileCollectionPaused(t *testing.T) {
 	})
 
 	t.Run("resumed: claimed", func(t *testing.T) {
-		inv, subID, _ := seedQueuedSubInvoice(t, db, ctx, tenantID, "INV-PAUSE-RESUMED")
+		inv, subID := seedQueuedSubInvoice(t, db, ctx, tenantID, "INV-PAUSE-RESUMED")
 		if _, err := subs.SetPauseCollection(ctx, tenantID, subID, domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}, nil); err != nil {
 			t.Fatalf("pause: %v", err)
 		}
@@ -118,44 +117,17 @@ func TestClaimAutoCharge_RefusesWhileCollectionPaused(t *testing.T) {
 	})
 
 	t.Run("timed pause: holds before resumes_at, not after", func(t *testing.T) {
-		future, subF, _ := seedQueuedSubInvoice(t, db, ctx, tenantID, "INV-PAUSE-FUTURE")
+		future, subF := seedQueuedSubInvoice(t, db, ctx, tenantID, "INV-PAUSE-FUTURE")
 		bypassExec(t, db, `UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft', pause_collection_resumes_at = $1 WHERE id = $2`,
 			now.Add(24*time.Hour), subF)
 		if h, err := store.ClaimAutoCharge(ctx, tenantID, future.ID); err != nil || h.Held() {
 			t.Fatalf("claim under a pause that resumes tomorrow: held=%v err=%v, want refused", h.Held(), err)
 		}
-		past, subP, _ := seedQueuedSubInvoice(t, db, ctx, tenantID, "INV-PAUSE-PAST")
+		past, subP := seedQueuedSubInvoice(t, db, ctx, tenantID, "INV-PAUSE-PAST")
 		bypassExec(t, db, `UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft', pause_collection_resumes_at = $1 WHERE id = $2`,
 			now.Add(-time.Hour), subP)
 		if h, err := store.ClaimAutoCharge(ctx, tenantID, past.ID); err != nil || !h.Held() {
 			t.Fatalf("claim after the pause's resumes_at: held=%v err=%v, want held", h.Held(), err)
-		}
-	})
-
-	// A pinned customer's pause is read at its test clock's frozen time: the
-	// clock is 20 days ahead of the wall, and the pause resumes 10 days from
-	// now.
-	t.Run("test clock: read at the clock's frozen time", func(t *testing.T) {
-		resumesAt := now.Add(10 * 24 * time.Hour)
-		for _, tc := range []struct {
-			name   string
-			frozen time.Time
-			held   bool
-		}{
-			{"clock past resumes_at", now.Add(20 * 24 * time.Hour), true},
-			{"clock before resumes_at", now.Add(5 * 24 * time.Hour), false},
-		} {
-			inv, subID, custID := seedQueuedSubInvoice(t, db, ctx, tenantID, "INV-PAUSE-CLK-"+map[bool]string{true: "A", false: "B"}[tc.held])
-			clockID := postgres.NewID("hc_tclk")
-			bypassExec(t, db, `INSERT INTO test_clocks (id, tenant_id, name, frozen_time, status, livemode) VALUES ($1, $2, 'claim-pause', $3, 'ready', false)`,
-				clockID, tenantID, tc.frozen)
-			bypassExec(t, db, `UPDATE customers SET test_clock_id = $1 WHERE id = $2`, clockID, custID)
-			bypassExec(t, db, `UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft', pause_collection_resumes_at = $1 WHERE id = $2`,
-				resumesAt, subID)
-			h, err := store.ClaimAutoCharge(ctx, tenantID, inv.ID)
-			if err != nil || h.Held() != tc.held {
-				t.Errorf("%s: held=%v err=%v, want held=%v", tc.name, h.Held(), err, tc.held)
-			}
 		}
 	})
 }

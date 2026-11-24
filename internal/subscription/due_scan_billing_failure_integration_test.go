@@ -17,14 +17,13 @@ import (
 
 // bfRow is one subscriptions row for the billing-failure store tests, seeded
 // by raw SQL so a test can put the row in any shape, including shapes no
-// writer produces (a record on a clock-pinned row, a stale record).
+// writer produces (a stale record).
 type bfRow struct {
 	id          string
 	status      string // default active
 	nextBilling time.Time
 	cancelAt    *time.Time
 	trialEnd    *time.Time
-	clockID     any // nil = wall clock
 
 	// The saved record. failedFor nil = no record.
 	failedFor   *time.Time
@@ -32,8 +31,7 @@ type bfRow struct {
 	nextAttempt *time.Time
 }
 
-// bfSeed is the fixture: one test-mode tenant, one customer, one ready test
-// clock frozen ten days ago.
+// bfSeed is the fixture: one test-mode tenant and one customer.
 type bfSeed struct {
 	t        *testing.T
 	db       *postgres.DB
@@ -41,9 +39,7 @@ type bfSeed struct {
 	ctx      context.Context
 	store    *subscription.PostgresStore
 	tenantID string
-	clockID  string
 	now      time.Time
-	frozen   time.Time
 }
 
 func newBFSeed(t *testing.T, suffix string) *bfSeed {
@@ -57,13 +53,9 @@ func newBFSeed(t *testing.T, suffix string) *bfSeed {
 		ctx:      leadertest.Token(t, admin, postgres.WithLivemode(context.Background(), false), leader.RoleBilling),
 		store:    subscription.NewPostgresStore(db),
 		tenantID: "hc_ten_bf" + suffix,
-		clockID:  "hc_tclk_bf" + suffix,
 		now:      time.Now().UTC().Truncate(time.Microsecond),
 	}
-	s.frozen = s.now.Add(-10 * 24 * time.Hour)
 	s.exec(`INSERT INTO tenants (id, name, status) VALUES ($1, 'BillingFailure', 'active')`, s.tenantID)
-	s.exec(`INSERT INTO test_clocks (id, tenant_id, name, frozen_time, status, livemode)
-		VALUES ($1, $2, 'bf', $3, 'ready', false)`, s.clockID, s.tenantID, s.frozen)
 	s.exec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email, created_at, updated_at)
 		VALUES ($1, $2, 'bf', 'BillingFailure', '', $3, $3)`, "cus_bf"+suffix, s.tenantID, s.now)
 	return s
@@ -106,13 +98,13 @@ func (s *bfSeed) sub(r bfRow) string {
 			id, tenant_id, code, display_name, customer_id, status, billing_time,
 			current_billing_period_start, current_billing_period_end, next_billing_at,
 			cancel_at, trial_start_at, trial_end_at,
-			livemode, test_clock_id,
+			livemode,
 			billing_failed_for, billing_failure_count, billing_failed_at, billing_next_attempt_at, billing_last_error,
 			created_at, updated_at
 		) VALUES ($1, $2, $1, $1, (SELECT id FROM customers WHERE tenant_id = $2 LIMIT 1), $3, 'calendar',
-		          $4, $5, $5, $6, $7, $8, false, $9, $10, $11, $12, $13, $14, $4, $4)`,
+		          $4, $5, $5, $6, $7, $8, false, $9, $10, $11, $12, $13, $4, $4)`,
 		r.id, s.tenantID, r.status, r.nextBilling.Add(-30*24*time.Hour), r.nextBilling,
-		postgres.NullableTime(r.cancelAt), trialStart, postgres.NullableTime(r.trialEnd), r.clockID,
+		postgres.NullableTime(r.cancelAt), trialStart, postgres.NullableTime(r.trialEnd),
 		postgres.NullableTime(r.failedFor), r.count, failedAt, postgres.NullableTime(r.nextAttempt), lastErr)
 	return r.id
 }
@@ -160,10 +152,9 @@ func (s *bfSeed) rawRecord(id string) string {
 func ptr(t time.Time) *time.Time { return &t }
 
 // TestDueScans_WaitingAndParkedAreSkippedBeforeLimit locks the billing-failure
-// gate in the three wall-clock scans (ADR-119). The oldest due sub is waiting
+// gate in the three due scans (ADR-119). The oldest due sub is waiting
 // and the second is parked; each scan, asked for ONE row, must return the
-// third. Once the run's instant passes the wait, the first comes back. A
-// clock-pinned row with a parked record reads back no record.
+// third. Once the run's instant passes the wait, the first comes back.
 //
 // Mutation seam: drop domain.SubscriptionBillingGateSQL from any gated scan
 // and its subtest fails.
@@ -181,8 +172,6 @@ func TestDueScans_WaitingAndParkedAreSkippedBeforeLimit(t *testing.T) {
 	// free trial-end cancel is not the work that failed, so the trial scan
 	// must still hand this row to it.
 	s.sub(bfRow{id: "sub_bf_trial_parked_cancel", status: "trialing", nextBilling: old(1), trialEnd: ptr(old(2998)), cancelAt: ptr(old(2998)), failedFor: ptr(old(1)), count: 8})
-
-	s.sub(bfRow{id: "sub_bf_clk_parked", clockID: s.clockID, nextBilling: s.frozen.Add(-time.Hour), failedFor: ptr(s.frozen.Add(-time.Hour)), count: 8})
 
 	// The trialing rows are due for billing too (next_billing_at a day ago),
 	// so the billing scans are asked about the three active rows by name.
@@ -253,12 +242,6 @@ func TestDueScans_WaitingAndParkedAreSkippedBeforeLimit(t *testing.T) {
 		}
 		if s.get("sub_bf_trial_parked_cancel").BillingFailure == nil {
 			t.Fatal("setup: the cancel-scheduled trialing row must still carry its live record")
-		}
-	})
-
-	t.Run("a clock-pinned row reads back no record", func(t *testing.T) {
-		if bf := s.get("sub_bf_clk_parked").BillingFailure; bf != nil {
-			t.Fatalf("a clock-pinned row read back a billing failure: %+v", bf)
 		}
 	})
 }

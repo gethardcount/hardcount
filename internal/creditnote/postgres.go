@@ -40,14 +40,14 @@ func (s *PostgresStore) SetEncryptor(enc *crypto.Encryptor) {
 }
 
 // cnReadCols is the canonical credit-note SELECT/RETURNING column list.
-// Every read site uses it with cnScanDest so a schema change (e.g. adding
-// is_simulated) updates one place and can't drift a positional scan.
+// Every read site uses it with cnScanDest so a schema change updates one
+// place and can't drift a positional scan.
 const cnReadCols = `id, tenant_id, invoice_id, customer_id, credit_note_number,
 	status, reason, subtotal_cents, tax_amount_cents, total_cents,
 	refund_amount_cents, credit_amount_cents, out_of_band_amount_cents,
 	currency, issued_at, voided_at, refund_status, COALESCE(stripe_refund_id,''),
 	COALESCE(refund_unknown_key,''), recorded_from_stripe,
-	COALESCE(tax_transaction_id,''), is_simulated, issue_pending,
+	COALESCE(tax_transaction_id,''), issue_pending,
 	tax_reversal_pending, commit_retired_cents,
 	metadata, created_at, updated_at, recorded_at,
 	bill_to_snapshot, supplier_snapshot`
@@ -61,7 +61,7 @@ func (s *PostgresStore) cnScanDest(cn *domain.CreditNote, metaJSON *[]byte) []an
 		&cn.RefundAmountCents, &cn.CreditAmountCents, &cn.OutOfBandAmountCents,
 		&cn.Currency, &cn.IssuedAt, &cn.VoidedAt, &cn.RefundStatus, &cn.StripeRefundID,
 		&cn.RefundUnknownKey, &cn.RecordedFromStripe,
-		&cn.TaxTransactionID, &cn.IsSimulated, &cn.IssuePending,
+		&cn.TaxTransactionID, &cn.IssuePending,
 		&cn.TaxReversalPending, &cn.CommitRetiredCents,
 		metaJSON, &cn.CreatedAt, &cn.UpdatedAt, &cn.RecordedAt,
 		domain.SnapshotScanner[domain.DocumentBillTo]{Dst: &cn.BillToSnapshot, Open: func(b domain.DocumentBillTo) (domain.DocumentBillTo, error) {
@@ -317,7 +317,6 @@ func (s *PostgresStore) ListPendingClawbackDrafts(ctx context.Context, batch int
 	rows, err := tx.QueryContext(ctx, `SELECT `+cnReadCols+`
 		FROM credit_notes
 		WHERE livemode = $1
-		  AND is_simulated = false
 		  AND issue_pending
 		  AND status = 'draft'
 		  AND NOT EXISTS (
@@ -389,14 +388,14 @@ func (s *PostgresStore) insertCreditNoteTx(ctx context.Context, tx *sql.Tx, tena
 		INSERT INTO credit_notes (id, tenant_id, invoice_id, customer_id, credit_note_number,
 			status, reason, subtotal_cents, tax_amount_cents, total_cents,
 			refund_amount_cents, credit_amount_cents, out_of_band_amount_cents,
-			currency, refund_status, is_simulated, issue_pending, commit_retired_cents, metadata, created_at, updated_at, recorded_at,
+			currency, refund_status, issue_pending, commit_retired_cents, metadata, created_at, updated_at, recorded_at,
 			stripe_refund_id, recorded_from_stripe)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$20,now(),NULLIF($21,''),$22)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$19,now(),NULLIF($20,''),$21)
 		RETURNING `+cnReadCols,
 		id, tenantID, cn.InvoiceID, cn.CustomerID, cn.CreditNoteNumber,
 		cn.Status, cn.Reason, cn.SubtotalCents, cn.TaxAmountCents, cn.TotalCents,
 		cn.RefundAmountCents, cn.CreditAmountCents, cn.OutOfBandAmountCents,
-		cn.Currency, cn.RefundStatus, cn.IsSimulated, cn.IssuePending, cn.CommitRetiredCents, metaJSON, now,
+		cn.Currency, cn.RefundStatus, cn.IssuePending, cn.CommitRetiredCents, metaJSON, now,
 		cn.StripeRefundID, cn.RecordedFromStripe,
 	).Scan(s.cnScanDest(&cn, &metaJSON)...)
 	if err != nil {
@@ -580,8 +579,7 @@ func creditNoteWhere(filter ListFilter) (string, []any) {
 		// OR unknown (Stripe gave no clear answer; only a retry settles it)
 		// OR a 'pending' that's genuinely STUCK (>72h ≈ 3 business days). Fresh
 		// pending is normal async settlement and must NOT alert (it would flood
-		// the dashboard once true-pending is recorded). is_simulated excluded —
-		// test-clock CNs aren't an operator obligation. Literal, no arg → no
+		// the dashboard once true-pending is recorded). Literal, no arg → no
 		// injection surface.
 		clauses = append(clauses, domain.CreditNoteRefundNeedsAttentionSQL)
 	} else if filter.RefundStatus != "" {
@@ -1213,7 +1211,6 @@ func (s *PostgresStore) ListPendingCreditNoteTaxReversal(ctx context.Context, ba
 		FROM credit_notes
 		WHERE livemode = $1
 		  AND status = 'issued'
-		  AND is_simulated = false
 		  AND tax_reversal_pending
 		  AND EXISTS (
 		        SELECT 1 FROM invoices i

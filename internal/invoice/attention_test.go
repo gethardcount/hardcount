@@ -345,32 +345,13 @@ func TestClassifyInvoiceAttention_PaymentScheduled(t *testing.T) {
 	if len(att.Actions) == 0 || att.Actions[0].Code != domain.AttentionActionChargeNow {
 		t.Errorf("expected primary action charge_now, got %+v", att.Actions)
 	}
-	// Wall-clock invoice: the sweep runs on the billing tick, hourly by
-	// default, so the sentence promises "within an hour" and nothing about
-	// the clock.
+	// The sweep runs on the billing tick, hourly by default, so the sentence
+	// promises "within an hour".
 	if !strings.Contains(att.Message, "usually within an hour") {
-		t.Errorf("wall-clock message = %q, want the hourly-schedule promise", att.Message)
-	}
-	if strings.Contains(att.Message, "clock advance") {
-		t.Errorf("wall-clock message = %q must not mention a test clock", att.Message)
+		t.Errorf("message = %q, want the hourly-schedule promise", att.Message)
 	}
 	if !strings.Contains(att.Detail, "hourly") {
-		t.Errorf("wall-clock detail = %q, want the schedule explained", att.Detail)
-	}
-
-	// Simulated (clock-pinned) invoice: the wall-clock sweep excludes it, so
-	// the message must point at advancing the test clock — not "next tick",
-	// which would never fire in real time (ADR-028/029 disjoint flows).
-	inv.IsSimulated = true
-	simAtt := classifyInvoiceAttention(inv, attentionContext{HasPaymentMethod: true})
-	if simAtt == nil || simAtt.Reason != domain.AttentionReasonPaymentScheduled {
-		t.Fatalf("simulated: expected payment_scheduled attention, got %+v", simAtt)
-	}
-	if !strings.Contains(simAtt.Message, "next clock advance") {
-		t.Errorf("simulated message = %q, want it to mention the next clock advance", simAtt.Message)
-	}
-	if strings.Contains(simAtt.Message, "within an hour") {
-		t.Errorf("simulated message = %q must NOT promise a real-time charge", simAtt.Message)
+		t.Errorf("detail = %q, want the schedule explained", att.Detail)
 	}
 }
 
@@ -549,20 +530,19 @@ func TestClassifyInvoiceAttention_EmptyPaymentErrorFallsBackToGeneric(t *testing
 // TestClassify_PaymentProcessing_AgeAware locks ADR-049 Phase 4: a fresh
 // in-flight payment is Info ("resolves automatically"), but a REAL invoice
 // stuck processing past the expected-settle window escalates to Warning and
-// points the operator at Stripe — while a SIMULATED invoice never escalates
-// (its age is sim-time, not a real-world duration) and a zero Now stays Info.
+// points the operator at Stripe, and a zero Now stays Info.
 func TestClassify_PaymentProcessing_AgeAware(t *testing.T) {
 	now := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
-	base := func(updatedAgo time.Duration, simulated bool) domain.Invoice {
+	base := func(updatedAgo time.Duration) domain.Invoice {
 		return domain.Invoice{
 			ID: "hc_inv_test", Status: domain.InvoiceFinalized,
 			PaymentStatus: domain.PaymentProcessing, TaxFacts: domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK},
-			UpdatedAt: now.Add(-updatedAgo), IsSimulated: simulated,
+			UpdatedAt: now.Add(-updatedAgo),
 		}
 	}
 
 	t.Run("fresh real → Info, auto-resolve copy", func(t *testing.T) {
-		att := classifyInvoiceAttention(base(1*time.Hour, false), attentionContext{Now: now})
+		att := classifyInvoiceAttention(base(1*time.Hour), attentionContext{Now: now})
 		if att == nil || att.Severity != domain.AttentionSeverityInfo {
 			t.Fatalf("att = %+v, want Info", att)
 		}
@@ -572,7 +552,7 @@ func TestClassify_PaymentProcessing_AgeAware(t *testing.T) {
 	})
 
 	t.Run("stale real → Warning, points to Stripe", func(t *testing.T) {
-		att := classifyInvoiceAttention(base(7*time.Hour, false), attentionContext{Now: now})
+		att := classifyInvoiceAttention(base(7*time.Hour), attentionContext{Now: now})
 		if att == nil || att.Severity != domain.AttentionSeverityWarning {
 			t.Fatalf("att = %+v, want Warning past the stale window", att)
 		}
@@ -581,15 +561,8 @@ func TestClassify_PaymentProcessing_AgeAware(t *testing.T) {
 		}
 	})
 
-	t.Run("stale but simulated → stays Info", func(t *testing.T) {
-		att := classifyInvoiceAttention(base(7*time.Hour, true), attentionContext{Now: now})
-		if att == nil || att.Severity != domain.AttentionSeverityInfo {
-			t.Errorf("simulated invoice escalated on a wall-clock age: %+v", att)
-		}
-	})
-
 	t.Run("zero Now → stays Info", func(t *testing.T) {
-		att := classifyInvoiceAttention(base(7*time.Hour, false), attentionContext{})
+		att := classifyInvoiceAttention(base(7*time.Hour), attentionContext{})
 		if att == nil || att.Severity != domain.AttentionSeverityInfo {
 			t.Errorf("zero Now must not escalate: %+v", att)
 		}
@@ -679,33 +652,6 @@ func TestClassifyTaxAttention_RetryPolicyTruth(t *testing.T) {
 	})
 }
 
-// TestClassifyInvoiceAttention_NoPaymentMethod_Simulated pins the clock-aware
-// auto-charge reassurance (2026-07-22 payment-surfacing audit, P1-1): the
-// wall-clock pending-charge sweep excludes clock-pinned subs, so on a
-// simulated invoice the banner must promise collection on the next
-// test-clock advance — not "on the next tick", which never comes in real
-// time. classifyPaymentScheduled got this carve-out first;
-// no_payment_method must match. Mutation seam: drop the IsSimulated branch
-// in classifyNoPaymentMethod and both assertions fail.
-func TestClassifyInvoiceAttention_NoPaymentMethod_Simulated(t *testing.T) {
-	inv := draft()
-	inv.Status = domain.InvoiceFinalized
-	inv.PaymentStatus = domain.PaymentPending
-	inv.IsSimulated = true
-	inv.UpdatedAt = time.Now()
-
-	att := classifyInvoiceAttention(inv, attentionContext{HasPaymentMethod: false, CustomerHasEmail: true, StripeConnected: true})
-	if att == nil || att.Reason != domain.AttentionReasonNoPaymentMethod {
-		t.Fatalf("expected no_payment_method, got %+v", att)
-	}
-	if !strings.HasPrefix(att.Message, "This invoice is charged on the next clock advance once the customer adds a card.\n") {
-		t.Errorf("simulated no-PM banner must promise collection on the next clock advance, got %q", att.Message)
-	}
-	if strings.Contains(att.Message, "charged automatically") {
-		t.Errorf("simulated no-PM banner must not promise a real-time charge the wall-clock sweep never makes, got %q", att.Message)
-	}
-}
-
 // TestClassifyInvoiceAttention_DunningExhausted pins the escalated-run state
 // (2026-07-22 audit, P1-4): once the invoice's dunning run has escalated,
 // the banner must stop implying recovery is still running — it names the
@@ -758,40 +704,25 @@ func TestClassifyInvoiceAttention_DunningExhausted(t *testing.T) {
 	}
 }
 
-// TestClassifyInvoiceAttention_SinceIsSimDomainOnSimulatedInvoices pins
-// the 2026-07-26 fix (found live, FLOW I12 fixture NIM-000258): the
-// banner's `since` was sourced from UpdatedAt — a wall-clock DB stamp —
-// while a simulated invoice's page anchors relative time to the sim
-// axis, so a one-off invoice finalized at sim-today rendered "since
-// 70d ago" (the wall→sim distance). Simulated invoices anchor since to
-// IssuedAt (sim-domain); wall-clock invoices keep UpdatedAt.
-func TestClassifyInvoiceAttention_SinceIsSimDomainOnSimulatedInvoices(t *testing.T) {
-	simIssued := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
-	wallUpdated := time.Date(2026, 7, 26, 17, 53, 0, 0, time.UTC)
+// TestClassifyInvoiceAttention_SinceIsUpdatedAt: a banner's `since` is the
+// invoice's last write, not its issue instant.
+func TestClassifyInvoiceAttention_SinceIsUpdatedAt(t *testing.T) {
+	issued := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	updated := time.Date(2026, 7, 26, 17, 53, 0, 0, time.UTC)
 
 	inv := draft()
 	inv.Status = domain.InvoiceFinalized
 	inv.PaymentStatus = domain.PaymentPending
 	inv.AmountDueCents = 4300
-	inv.IsSimulated = true
-	inv.IssuedAt = &simIssued
-	inv.UpdatedAt = wallUpdated
+	inv.IssuedAt = &issued
+	inv.UpdatedAt = updated
 
 	att := classifyInvoiceAttention(inv, attentionContext{})
 	if att == nil || att.Since == nil {
 		t.Fatalf("expected an attention with Since, got %+v", att)
 	}
-	if !att.Since.Equal(simIssued) {
-		t.Errorf("simulated invoice Since = %v, want the sim-domain IssuedAt %v (wall UpdatedAt %v leaks cross-domain deltas)", att.Since, simIssued, wallUpdated)
-	}
-
-	inv.IsSimulated = false
-	att = classifyInvoiceAttention(inv, attentionContext{})
-	if att == nil || att.Since == nil {
-		t.Fatalf("expected an attention with Since on the wall twin")
-	}
-	if !att.Since.Equal(wallUpdated) {
-		t.Errorf("wall-clock invoice Since = %v, want UpdatedAt %v", att.Since, wallUpdated)
+	if !att.Since.Equal(updated) {
+		t.Errorf("Since = %v, want UpdatedAt %v", att.Since, updated)
 	}
 }
 
@@ -822,7 +753,7 @@ func TestClassify_CollectionPaused_BeatsPaymentScheduled(t *testing.T) {
 	if paused.Reason != domain.AttentionReasonCollectionPaused {
 		t.Errorf("paused: reason = %s, want collection_paused", paused.Reason)
 	}
-	if strings.Contains(paused.Message, "within an hour") || strings.Contains(paused.Message, "clock advance") {
+	if strings.Contains(paused.Message, "within an hour") {
 		t.Errorf("paused copy must not promise an automatic charge, got %q", paused.Message)
 	}
 	// Charge now survives: a manual collect is an explicit operator override
@@ -1125,34 +1056,12 @@ func TestClassifyInvoiceAttention_PaymentPageOpen(t *testing.T) {
 	}
 }
 
-// A clock-pinned invoice's failure banner dates "since" from its latest failed
-// charge, not its issue instant: a draft issued Feb 1 and declined Feb 10 read
-// "since 13d ago" on Feb 14 (FLOW TC5 walk, 2026-10-11).
-func TestClassifyInvoiceAttention_SimulatedFailureSinceIsTheCharge(t *testing.T) {
-	issued := time.Date(2028, 2, 1, 0, 0, 0, 0, time.UTC)
-	charged := time.Date(2028, 2, 10, 9, 0, 0, 0, time.UTC)
-	inv := draft()
-	inv.Status = domain.InvoiceFinalized
-	inv.PaymentStatus = domain.PaymentFailed
-	inv.IsSimulated = true
-	inv.IssuedAt = &issued
-
-	att := classifyInvoiceAttention(inv, attentionContext{LastFailedChargeAt: &charged})
-	if att == nil || att.Since == nil || !att.Since.Equal(charged) {
-		t.Fatalf("since = %v, want the failed charge %v", att.Since, charged)
-	}
-	// Without a recorded attempt it keeps the issue instant.
-	if att := classifyInvoiceAttention(inv, attentionContext{}); att == nil || att.Since == nil || !att.Since.Equal(issued) {
-		t.Fatalf("no attempt: since = %v, want the issue instant %v", att.Since, issued)
-	}
-}
-
 // The attention notice's shape (operator-messages work, 2026-10-15): Message
 // is one plain sentence of 25 words or fewer; a notice that must show a
 // second fact up front adds it as a second line after "\n"; the mechanism and
 // longer instructions go in Detail. These tests pin every branch's wording to
 // the real signal it depends on (collection paused, customer email, email
-// sending, simulated time), so a branch that stops branching fails here.
+// sending), so a branch that stops branching fails here.
 
 var sentenceBreak = regexp.MustCompile(`[.!?]\s+[A-Z]`)
 
@@ -1203,21 +1112,20 @@ func sameActions(got []domain.AttentionAction, want ...domain.AttentionAction) b
 	return true
 }
 
-func noPMInvoice(simulated bool) domain.Invoice {
+func noPMInvoice() domain.Invoice {
 	return domain.Invoice{
 		ID: "hc_inv_copy", Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
-		AutoChargePending: true, IsSimulated: simulated, UpdatedAt: time.Now(),
+		AutoChargePending: true, UpdatedAt: time.Now(),
 		TaxFacts: domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK},
 	}
 }
 
-// TestNoPaymentMethodCopy_EveryBranch: line 1 branches on paused, then on
-// simulated; line 2 branches on customer email, then on email sending; the
+// TestNoPaymentMethodCopy_EveryBranch: line 1 branches on paused; line 2
+// branches on customer email, then on email sending; the
 // Resend action exists only when an email can actually be sent.
 func TestNoPaymentMethodCopy_EveryBranch(t *testing.T) {
 	const (
 		wall   = "This invoice is charged automatically once the customer adds a card."
-		sim    = "This invoice is charged on the next clock advance once the customer adds a card."
 		paused = "Collection is paused on the subscription, so adding a card won't charge this invoice until you resume it."
 
 		sent    = "A setup link is emailed to the customer once; use Resend setup link to send it again."
@@ -1226,26 +1134,23 @@ func TestNoPaymentMethodCopy_EveryBranch(t *testing.T) {
 	)
 	cases := []struct {
 		name               string
-		simulated, pause   bool
+		pause              bool
 		hasEmail, emailOff bool
 		line1, line2       string
 		resend             bool
 	}{
-		{"wall, email", false, false, true, false, wall, sent, true},
-		{"wall, no email", false, false, false, false, wall, noEmail, false},
-		{"wall, email off", false, false, true, true, wall, off, false},
-		{"sim, email", true, false, true, false, sim, sent, true},
-		{"sim, no email", true, false, false, false, sim, noEmail, false},
-		{"sim, email off", true, false, true, true, sim, off, false},
-		{"paused, email", false, true, true, false, paused, sent, true},
-		{"paused sim, no email", true, true, false, false, paused, noEmail, false},
-		{"paused, email off", false, true, true, true, paused, off, false},
+		{"email", false, true, false, wall, sent, true},
+		{"no email", false, false, false, wall, noEmail, false},
+		{"email off", false, true, true, wall, off, false},
+		{"paused, email", true, true, false, paused, sent, true},
+		{"paused, no email", true, false, false, paused, noEmail, false},
+		{"paused, email off", true, true, true, paused, off, false},
 		// No email AND email off: the missing address is the first thing to fix.
-		{"no email and email off", false, false, false, true, wall, noEmail, false},
+		{"no email and email off", false, false, true, wall, noEmail, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			att := classifyInvoiceAttention(noPMInvoice(tc.simulated), attentionContext{
+			att := classifyInvoiceAttention(noPMInvoice(), attentionContext{
 				StripeConnected:  true,
 				CustomerHasEmail: tc.hasEmail, SetupLinkEmailOff: tc.emailOff, CollectionPaused: tc.pause,
 			})
@@ -1284,25 +1189,23 @@ func TestRecoveryEndedCopy_EveryBranch(t *testing.T) {
 	)
 	cases := []struct {
 		name               string
-		simulated, pause   bool
+		pause              bool
 		hasEmail, emailOff bool
 		msg                string
 		resend             bool
 	}{
-		{"paused", false, true, true, false,
+		{"paused", true, true, false,
 			"Retries stopped and collection is paused; ask the customer to add a card, then resume collection.", true},
-		{"paused sim, no email", true, true, false, false,
+		{"paused, no email", true, false, false,
 			"Retries stopped and collection is paused; ask the customer to add a card, then resume collection.\n" + noEmailLine, false},
-		{"not paused", false, false, true, false,
+		{"not paused", false, true, false,
 			"Retries stopped; this invoice is charged automatically once the customer adds a card.", true},
-		{"not paused sim", true, false, true, false,
-			"Retries stopped; this invoice is charged on the next clock advance once the customer adds a card.", true},
-		{"not paused, email off", false, false, true, true,
+		{"not paused, email off", false, true, true,
 			"Retries stopped; this invoice is charged automatically once the customer adds a card.\n" + emailOffLine, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			att := classifyInvoiceAttention(noPMInvoice(tc.simulated), attentionContext{
+			att := classifyInvoiceAttention(noPMInvoice(), attentionContext{
 				StripeConnected:  true,
 				DunningEscalated: true, CollectionPaused: tc.pause,
 				CustomerHasEmail: tc.hasEmail, SetupLinkEmailOff: tc.emailOff,
@@ -1332,8 +1235,8 @@ func TestRecoveryEndedCopy_EveryBranch(t *testing.T) {
 func TestPaymentStateCopy_EveryBranch(t *testing.T) {
 	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 	withCard := attentionContext{HasPaymentMethod: true, Now: now}
-	queued := func(sim bool) domain.Invoice {
-		inv := noPMInvoice(sim)
+	queued := func() domain.Invoice {
+		inv := noPMInvoice()
 		inv.UpdatedAt = now
 		return inv
 	}
@@ -1347,30 +1250,27 @@ func TestPaymentStateCopy_EveryBranch(t *testing.T) {
 		detail  string // substring; "" means Detail must be empty
 		actions []domain.AttentionAction
 	}{
-		{"scheduled wall", queued(false), withCard, domain.AttentionReasonPaymentScheduled, domain.AttentionSeverityInfo,
+		{"scheduled", queued(), withCard, domain.AttentionReasonPaymentScheduled, domain.AttentionSeverityInfo,
 			"The card on file is charged automatically, usually within an hour; use Charge now to collect it right away.",
 			"hourly by default", []domain.AttentionAction{domain.AttentionActionChargeNow}},
-		{"scheduled sim", queued(true), withCard, domain.AttentionReasonPaymentScheduled, domain.AttentionSeverityInfo,
-			"The card on file is charged on the next clock advance; use Charge now to collect it right away.",
-			"only when the test clock is advanced", []domain.AttentionAction{domain.AttentionActionChargeNow}},
-		{"collection paused, card on file", queued(false), attentionContext{HasPaymentMethod: true, CollectionPaused: true},
+		{"collection paused, card on file", queued(), attentionContext{HasPaymentMethod: true, CollectionPaused: true},
 			domain.AttentionReasonCollectionPaused, domain.AttentionSeverityInfo,
 			"Collection is paused on the subscription, so this invoice won't be charged automatically; use Charge now to collect it anyway.",
 			"Resume collection", []domain.AttentionAction{domain.AttentionActionChargeNow}},
-		{"awaiting (pre-ADR-116 row)", func() domain.Invoice { i := queued(false); i.AutoChargePending = false; return i }(), withCard,
+		{"awaiting (pre-ADR-116 row)", func() domain.Invoice { i := queued(); i.AutoChargePending = false; return i }(), withCard,
 			domain.AttentionReasonAwaitingPayment, domain.AttentionSeverityInfo,
 			"This invoice hasn't been charged yet; use Charge now, or email the customer a payment link.",
 			"", []domain.AttentionAction{domain.AttentionActionChargeNow, domain.AttentionActionSendReminder}},
-		{"payment page open", queued(false), attentionContext{HasPaymentMethod: true, PaymentPageOpen: true},
+		{"payment page open", queued(), attentionContext{HasPaymentMethod: true, PaymentPageOpen: true},
 			domain.AttentionReasonPaymentProcessing, domain.AttentionSeverityInfo,
 			"The customer has the payment page open or just paid on it, so Hardcount holds charges until that finishes, usually within an hour.",
 			"", nil},
-		{"processing fresh", func() domain.Invoice { i := queued(false); i.PaymentStatus = domain.PaymentProcessing; return i }(), withCard,
+		{"processing fresh", func() domain.Invoice { i := queued(); i.PaymentStatus = domain.PaymentProcessing; return i }(), withCard,
 			domain.AttentionReasonPaymentProcessing, domain.AttentionSeverityInfo,
 			"Stripe is confirming this payment, and this page updates automatically when it's done.",
 			"", nil},
 		{"processing stale", func() domain.Invoice {
-			i := queued(false)
+			i := queued()
 			i.PaymentStatus = domain.PaymentProcessing
 			i.UpdatedAt = now.Add(-7 * time.Hour)
 			return i
@@ -1378,19 +1278,19 @@ func TestPaymentStateCopy_EveryBranch(t *testing.T) {
 			"Stripe still hasn't confirmed this payment after 6 hours, so check it in Stripe.",
 			"usually confirmed within seconds", nil},
 		{"unconfirmed with a payment id", func() domain.Invoice {
-			i := queued(false)
+			i := queued()
 			i.PaymentStatus = domain.PaymentUnknown
 			i.StripePaymentIntentID = "pi_x"
 			return i
 		}(), withCard, domain.AttentionReasonPaymentUnconfirmed, domain.AttentionSeverityInfo,
 			"Stripe hasn't confirmed this charge yet, and Hardcount re-checks automatically until it does.",
 			"3-D Secure", nil},
-		{"parked (no payment id)", func() domain.Invoice { i := queued(false); i.PaymentStatus = domain.PaymentUnknown; return i }(), withCard,
+		{"parked (no payment id)", func() domain.Invoice { i := queued(); i.PaymentStatus = domain.PaymentUnknown; return i }(), withCard,
 			domain.AttentionReasonPaymentUnconfirmed, domain.AttentionSeverityCritical,
 			"An earlier Hardcount version couldn't confirm this charge with Stripe, and Hardcount can't look it up.\nCheck the customer's payments in Stripe.",
 			"paid another way", []domain.AttentionAction{domain.AttentionActionMarkUncollectible}},
 		{"declined", func() domain.Invoice {
-			i := queued(false)
+			i := queued()
 			i.PaymentStatus = domain.PaymentFailed
 			i.LastPaymentError = "Your card was declined."
 			return i
@@ -1399,7 +1299,7 @@ func TestPaymentStateCopy_EveryBranch(t *testing.T) {
 			"The customer's card was declined.",
 			"", []domain.AttentionAction{domain.AttentionActionUpdatePaymentMethod, domain.AttentionActionRetryPayment}},
 		{"recovery charge in flight on a written-off invoice", func() domain.Invoice {
-			i := queued(false)
+			i := queued()
 			i.Status = domain.InvoiceUncollectible
 			i.PaymentStatus = domain.PaymentProcessing
 			return i
@@ -1548,7 +1448,7 @@ func TestCommitExposureCopy(t *testing.T) {
 // email line and the prepaid-credit line, each one sentence, in that order.
 // The public docs promise "up to three lines"; this pins that bound.
 func TestCommitExposureCopy_ThreeLinesOnNoPaymentMethod(t *testing.T) {
-	inv := noPMInvoice(false)
+	inv := noPMInvoice()
 	inv.Currency = "USD"
 	atc := liveGrant(10000000, 0)
 	atc.CustomerHasEmail = true
@@ -1623,7 +1523,7 @@ func TestPausedCollectionCopy_OpenRunKeepsRetrying(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			att := classifyInvoiceAttention(noPMInvoice(false), attentionContext{
+			att := classifyInvoiceAttention(noPMInvoice(), attentionContext{
 				HasPaymentMethod: tc.hasCard, CollectionPaused: true, DunningRetrying: tc.retrying,
 				CustomerHasEmail: true, StripeConnected: true,
 			})
@@ -1713,7 +1613,7 @@ func TestNoPaymentMethodCopy_SetupLinkCopyOff(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			att := classifyInvoiceAttention(noPMInvoice(false), attentionContext{
+			att := classifyInvoiceAttention(noPMInvoice(), attentionContext{
 				StripeConnected: true, CustomerHasEmail: tc.hasEmail, SetupLinkEmailOff: tc.emailOff, SetupLinkCopyOff: true,
 			})
 			if att == nil || att.Reason != domain.AttentionReasonNoPaymentMethod {
@@ -1984,23 +1884,22 @@ func TestNoPaymentMethodCopy_NoStripe(t *testing.T) {
 	)
 	cases := []struct {
 		name                      string
-		simulated, pause          bool
+		pause                     bool
 		hasEmail, emailOff, ended bool
 		reason                    domain.AttentionReason
 		message                   string
 	}{
-		{"email", false, false, true, false, false, domain.AttentionReasonNoPaymentMethod, line1 + "\n" + sent},
-		{"sim, email", true, false, true, false, false, domain.AttentionReasonNoPaymentMethod, line1 + "\n" + sent},
-		{"no email", false, false, false, false, false, domain.AttentionReasonNoPaymentMethod, line1 + "\n" + noEmail},
-		{"email off", false, false, true, true, false, domain.AttentionReasonNoPaymentMethod, line1 + "\n" + off},
-		{"no email and email off", false, false, false, true, false, domain.AttentionReasonNoPaymentMethod, line1 + "\n" + noEmail},
-		{"paused, email", false, true, true, false, false, domain.AttentionReasonNoPaymentMethod, line1 + "\n" + sent},
-		{"recovery ended", false, false, true, false, true, domain.AttentionReasonDunningExhausted, "Retries stopped; " + line1 + "\n" + sent},
-		{"recovery ended, paused", false, true, true, false, true, domain.AttentionReasonDunningExhausted, "Retries stopped and collection is paused; " + line1 + "\n" + sent},
+		{"email", false, true, false, false, domain.AttentionReasonNoPaymentMethod, line1 + "\n" + sent},
+		{"no email", false, false, false, false, domain.AttentionReasonNoPaymentMethod, line1 + "\n" + noEmail},
+		{"email off", false, true, true, false, domain.AttentionReasonNoPaymentMethod, line1 + "\n" + off},
+		{"no email and email off", false, false, true, false, domain.AttentionReasonNoPaymentMethod, line1 + "\n" + noEmail},
+		{"paused, email", true, true, false, false, domain.AttentionReasonNoPaymentMethod, line1 + "\n" + sent},
+		{"recovery ended", false, true, false, true, domain.AttentionReasonDunningExhausted, "Retries stopped; " + line1 + "\n" + sent},
+		{"recovery ended, paused", true, true, false, true, domain.AttentionReasonDunningExhausted, "Retries stopped and collection is paused; " + line1 + "\n" + sent},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			att := classifyInvoiceAttention(noPMInvoice(tc.simulated), attentionContext{
+			att := classifyInvoiceAttention(noPMInvoice(), attentionContext{
 				StripeConnected: false, CustomerHasEmail: tc.hasEmail, InvoiceEmailOff: tc.emailOff,
 				CollectionPaused: tc.pause, DunningEscalated: tc.ended,
 			})
@@ -2026,7 +1925,7 @@ func TestNoPaymentMethodCopy_NoStripe(t *testing.T) {
 	}
 
 	// With Stripe connected the setup-link copy is unchanged.
-	att := classifyInvoiceAttention(noPMInvoice(false), attentionContext{StripeConnected: true, CustomerHasEmail: true})
+	att := classifyInvoiceAttention(noPMInvoice(), attentionContext{StripeConnected: true, CustomerHasEmail: true})
 	if att == nil || !strings.Contains(att.Message, "A setup link is emailed to the customer once") {
 		t.Fatalf("connected: got %+v, want the setup-link copy", att)
 	}

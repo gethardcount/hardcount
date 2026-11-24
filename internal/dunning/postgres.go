@@ -1150,8 +1150,7 @@ func (s *PostgresStore) RecordRetryFailureTx(ctx context.Context, tx *sql.Tx, ru
 	return err
 }
 
-// ListDueRuns — CRON path. ADR-029 Phase 5: dunning runs whose owning
-// invoice's subscription is clock-pinned are excluded.
+// ListDueRuns lists the runs whose next action is due, for the cron path.
 func (s *PostgresStore) ListDueRuns(ctx context.Context, tenantID string, dueBefore time.Time, limit int) ([]domain.InvoiceDunningRun, error) {
 	// Leader-only funnel (ADR-114): see subscription.GetDueBilling.
 	token, err := leader.Fence(ctx, leader.RoleDunning)
@@ -1185,13 +1184,6 @@ func (s *PostgresStore) ListDueRuns(ctx context.Context, tenantID string, dueBef
 			-- would be belt-and-suspenders asserting a guarantee RLS owns.
 			-- The property is pinned by TestListDueRuns_LivemodeIsolation.
 			AND r.state NOT IN ('resolved', 'escalated')
-			-- Exclude runs whose invoice is simulated by the invoice's OWN
-			-- durable is_simulated flag (not a subscriptions join, which
-			-- missed customer-pinned one-offs).
-			AND NOT EXISTS (
-			  SELECT 1 FROM invoices i
-			  WHERE i.id = r.invoice_id AND i.is_simulated = true
-			)
 			-- Payment in flight. ClaimChargeForDunningRetry requires
 			-- payment_status IN ('pending','failed'), so while the payment is
 			-- 'processing' or 'unknown' the claim CANNOT succeed: the adapter

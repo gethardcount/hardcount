@@ -145,13 +145,11 @@ export function InvoiceAttention({
         </details>
       ) : undefined}
     >
-      {/* The sentence is SERVER-OWNED, including the clock-aware "charged
-          on the next clock advance" wording; a second hardcoded copy here
-          once drifted from it and repeated the promise twice in one notice
-          (2026-07-22 audit, P1-1/P2-1). Further lines (setup-link email,
-          prepaid credit at risk; up to three in all) come after newlines and
-          are shown, never folded into Details: they carry money or the next
-          step. */}
+      {/* The sentence is SERVER-OWNED: a second hardcoded copy here would
+          drift from it and repeat the promise twice in one notice. Further
+          lines (setup-link email, prepaid credit at risk; up to three in all)
+          come after newlines and are shown, never folded into Details: they
+          carry money or the next step. */}
       {messageLines(att.message).map((line, i) => (
         <p key={i} className={i === 0 ? 'text-foreground' : undefined}>{line}</p>
       ))}

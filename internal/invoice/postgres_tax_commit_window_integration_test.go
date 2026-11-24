@@ -35,7 +35,7 @@ func pendingCommit(t *testing.T, ctx context.Context, db *postgres.DB, name, cal
 	id := seedSweepInvoice(t, ctx, db, name, `
 		UPDATE invoices SET status = 'paid', tax_provider = 'stripe_tax',
 		       tax_status = 'ok', tax_calculation_id = '`+calc+`',
-		       tax_transaction_id = '', is_simulated = false
+		       tax_transaction_id = ''
 		 WHERE id = $1`)
 	execBypass(t, ctx, db, `UPDATE invoices SET updated_at = now() - make_interval(secs => $2) WHERE id = $1`, id, lastWrite.Seconds())
 	if expiresIn != 0 {
@@ -183,7 +183,7 @@ func TestListPendingTaxReversal_AFailedReversalGivesWay(t *testing.T) {
 		id = seedSweepInvoice(t, ctx, db, name, `
 			UPDATE invoices SET status = 'voided', tax_provider = 'stripe_tax',
 			       tax_status = 'ok', tax_transaction_id = 'tx_`+name[len(name)-1:]+`',
-			       tax_reversed_at = NULL, is_simulated = false
+			       tax_reversed_at = NULL
 			 WHERE id = $1`)
 		execBypass(t, ctx, db, `UPDATE invoices SET updated_at = now() - make_interval(secs => $2) WHERE id = $1`, id, lastWrite.Seconds())
 		tx, err := db.BeginTx(ctx, postgres.TxBypass, "")

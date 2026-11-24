@@ -25,7 +25,6 @@ them to use Hardcount.
   - dunning run: a row in `invoice_dunning_runs`.
   - an invoice's billing timezone: `invoices.billing_timezone`.
   - a test clock's time: `frozen_time`.
-  - clock-pinned invoices and credit notes: `is_simulated` is set.
 
 ### Running Hardcount
 

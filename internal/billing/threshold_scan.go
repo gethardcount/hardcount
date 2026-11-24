@@ -243,7 +243,7 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	// Until that instant is inside the period the window is empty, so the
 	// evaluation would find nothing to count: this skips its reads. (Not a
 	// guard: without it the evaluation crosses nothing.)
-	through := e.thresholdUsageThrough(sub, now)
+	through := e.thresholdUsageThrough(now)
 	if !through.After(periodStart) {
 		return false, nil
 	}
@@ -300,7 +300,7 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 // fire bills the window that ends there, and that end is the watermark every
 // later close bills sum and count usage from.
 //
-// On the wall clock it is now less INVOICE_GRACE_PERIOD, the wait a period's
+// It is now less INVOICE_GRACE_PERIOD, the wait a period's
 // own invoice gives late usage (ADR-120). Usage reaches Hardcount some time
 // after it happens. A fire that read up to now put the watermark at now, so an
 // event stamped just before the fire and stored just after it was before the
@@ -309,13 +309,7 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 // close bills it. The cost is that a crossing is seen, and its invoice built,
 // up to one grace later. Usage that arrives more than the grace after its
 // timestamp is still billed on no invoice, as at a period's end.
-//
-// A subscription on a test clock gets no grace, as the test-clock run gives a
-// period's close none: advancing the clock past a crossing fires at once.
-func (e *Engine) thresholdUsageThrough(sub domain.Subscription, now time.Time) time.Time {
-	if sub.TestClockID != "" {
-		return now
-	}
+func (e *Engine) thresholdUsageThrough(now time.Time) time.Time {
 	return now.Add(-e.invoiceGrace)
 }
 
@@ -817,9 +811,6 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 		CreatedAt:          now,
 		NetPaymentTermDays: netDays,
 		BillingReason:      domain.BillingReasonThreshold,
-		// A clock-pinned sub's invoice is simulated, as every other engine
-		// writer stamps it.
-		IsSimulated: sub.TestClockID != "",
 	}
 
 	// ONE transaction for every fire (ADR-115, extending ADR-066): the period

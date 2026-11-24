@@ -82,64 +82,40 @@ func TestListPendingTaxReversal_FindsOrphanAndSelfClears(t *testing.T) {
 	}
 }
 
-// TestListPendingTaxReversal_ExcludesSimulatedAndIncludesOneOff covers the
-// predicate branches the happy-path test doesn't: a simulated (test-clock)
-// invoice is EXCLUDED via is_simulated (the durable flag that catches both
-// subscription- and customer-pinned one-offs a subscriptions-join would miss),
-// and a one-off invoice (NULL subscription_id) is INCLUDED.
-func TestListPendingTaxReversal_ExcludesSimulatedAndIncludesOneOff(t *testing.T) {
+// TestListPendingTaxReversal_IncludesOneOff: a one-off invoice (NULL
+// subscription_id) owing a reversal is listed, as a cycle invoice is.
+func TestListPendingTaxReversal_IncludesOneOff(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	store := invoice.NewPostgresStore(db)
 
-	// Two tenants: seedDraftInvoice uses a fixed customer external_id, so each
-	// call must land in its own tenant. The sweep scans cross-tenant (TxBypass),
-	// so one scan sees both rows.
-	tenantA := testutil.CreateTestTenant(t, db, "Tax Reversal Predicate A")
-	tenantB := testutil.CreateTestTenant(t, db, "Tax Reversal Predicate B")
-	simID := seedDraftInvoice(t, db, tenantA)
-	oneOffID := seedDraftInvoice(t, db, tenantB)
-
-	mutate := func(tenantID, id, sql string) {
-		t.Helper()
-		tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
-		if err != nil {
-			t.Fatalf("begin seed tx: %v", err)
-		}
-		if _, err := tx.ExecContext(ctx, sql, id); err != nil {
-			t.Fatalf("seed: %v", err)
-		}
-		if err := tx.Commit(); err != nil {
-			t.Fatalf("commit seed tx: %v", err)
-		}
+	tenantID := testutil.CreateTestTenant(t, db, "Tax Reversal One-Off")
+	oneOffID := seedDraftInvoice(t, db, tenantID)
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin seed tx: %v", err)
 	}
-	// (1) A simulated voided stripe_tax invoice — must be EXCLUDED.
-	mutate(tenantA, simID, `
-		UPDATE invoices SET status='voided', voided_at=now(), tax_provider='stripe_tax',
-		       tax_status='ok', tax_transaction_id='tx_sim', total_amount_cents=1000,
-		       amount_due_cents=1000, is_simulated=true, updated_at=now()
-		 WHERE id=$1`)
-	// (2) A one-off (subscription_id NULL) voided stripe_tax invoice — must be INCLUDED.
-	mutate(tenantB, oneOffID, `
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE invoices SET subscription_id=NULL, status='voided', voided_at=now(),
 		       tax_provider='stripe_tax', tax_status='ok', tax_transaction_id='tx_oneoff',
-		       total_amount_cents=1000, amount_due_cents=1000, is_simulated=false, updated_at=now()
-		 WHERE id=$1`)
+		       total_amount_cents=1000, amount_due_cents=1000, updated_at=now()
+		 WHERE id=$1`, oneOffID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit seed tx: %v", err)
+	}
 
 	pending, err := store.ListPendingTaxReversal(ctx, 200, false)
 	if err != nil {
 		t.Fatalf("ListPendingTaxReversal: %v", err)
 	}
-	got := map[string]bool{}
 	for _, inv := range pending {
-		got[inv.ID] = true
+		if inv.ID == oneOffID {
+			return
+		}
 	}
-	if got[simID] {
-		t.Error("a simulated (test-clock) invoice must be excluded from the reversal sweep")
-	}
-	if !got[oneOffID] {
-		t.Error("a one-off invoice (NULL subscription_id) must be included in the reversal sweep")
-	}
+	t.Error("a one-off invoice (NULL subscription_id) must be included in the reversal sweep")
 }
 
 // TestListPendingTaxReversal_AgedOrphanIsNotStranded is the ADR-111 follow-up:

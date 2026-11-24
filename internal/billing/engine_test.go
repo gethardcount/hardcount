@@ -66,65 +66,6 @@ func billingTestClock() clock.Clock {
 	return clock.NewFake(time.Date(2026, 4, 1, 0, 0, 1, 0, time.UTC))
 }
 
-// TestRunCycle_SkipsClockPinnedSubs asserts the disjoint-flow
-// invariant from ADR-028: the wall-clock RunCycle must NOT touch
-// subs that are pinned to a test clock, even if their next_billing_at
-// is past wall-clock now. Operator-driven advance is the sole path
-// for clock-pinned billing; cron must stay in its lane.
-func TestRunCycle_SkipsClockPinnedSubs(t *testing.T) {
-	periodStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	periodEnd := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-	nextBilling := periodEnd
-
-	subs := &mockSubs{
-		subs: map[string]domain.Subscription{
-			// Wall-clock sub — should bill.
-			"sub_wall": {
-				ID: "sub_wall", TenantID: "t1", CustomerID: "cus_1",
-				Items:                     []domain.SubscriptionItem{{PlanID: "pln_1", Quantity: 1}},
-				Status:                    domain.SubscriptionActive,
-				BillingTime:               domain.BillingTimeCalendar,
-				CurrentBillingPeriodStart: &periodStart, CurrentBillingPeriodEnd: &periodEnd,
-				NextBillingAt: &nextBilling,
-			},
-			// Clock-pinned sub — must be skipped by RunCycle.
-			"sub_clock": {
-				ID: "sub_clock", TenantID: "t1", CustomerID: "cus_2",
-				Items:                     []domain.SubscriptionItem{{PlanID: "pln_1", Quantity: 1}},
-				Status:                    domain.SubscriptionActive,
-				BillingTime:               domain.BillingTimeCalendar,
-				CurrentBillingPeriodStart: &periodStart, CurrentBillingPeriodEnd: &periodEnd,
-				NextBillingAt: &nextBilling,
-				TestClockID:   "tc_1",
-			},
-		},
-		cycleUpdated: make(map[string]bool),
-	}
-	pricing := &mockPricing{
-		plans: map[string]domain.Plan{
-			"pln_1": {ID: "pln_1", Currency: "USD", BillingInterval: domain.BillingMonthly, BaseAmountCents: 1000},
-		},
-	}
-	invoices := &mockInvoices{}
-	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
-
-	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
-	}
-
-	// Exactly one invoice — for the wall-clock sub. The clock-pinned
-	// sub stays untouched.
-	if len(invoices.invoices) != 1 {
-		t.Fatalf("expected 1 invoice (wall-clock only), got %d", len(invoices.invoices))
-	}
-	if invoices.invoices[0].SubscriptionID != "sub_wall" {
-		t.Errorf("wrong sub billed: got %q, want sub_wall", invoices.invoices[0].SubscriptionID)
-	}
-	if subs.cycleUpdated["sub_clock"] {
-		t.Error("clock-pinned sub must not have its cycle advanced by wall-clock RunCycle")
-	}
-}
-
 // TestRetryPendingCharges_CardDeclineDoesNotEscalate locks in the
 // expected-vs-fatal classification fix. A Stripe card decline is a
 // routine business outcome handled by dunning (ChargeInvoice fires
@@ -443,9 +384,7 @@ func (m *mockSubs) ClosePeriodTx(_ context.Context, _ *sql.Tx, _, id string, exp
 func (m *mockSubs) GetDueBilling(_ context.Context, _, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
 	var result []domain.Subscription
 	for _, s := range m.subs {
-		// ADR-028 disjoint flows: wall-clock GetDueBilling only
-		// returns NON-clock-pinned subs.
-		if s.TestClockID != "" || slices.Contains(exclude, s.ID) {
+		if slices.Contains(exclude, s.ID) {
 			continue
 		}
 		eligible := s.Status == domain.SubscriptionActive || s.Status == domain.SubscriptionTrialing

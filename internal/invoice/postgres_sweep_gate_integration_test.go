@@ -11,15 +11,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// The wall-clock auto-charge / dunning sweeps must exclude SIMULATED
-// (test-clock) invoices by the invoice's own durable is_simulated flag — the
-// ADR-029 invariant "the wall-clock scheduler never charges/dunns a simulated
-// invoice". The prior subscriptions-join exclusion missed a customer-pinned
-// one-off (NULL subscription_id → nothing to join through), which then leaked
-// into these sweeps and got charged/enrolled against wall-clock time. These
-// are the real-Postgres proofs that the durable-flag gate catches that case
-// while leaving genuine wall-clock invoices eligible.
-
 // seedSweepInvoice mutates a fresh draft invoice into the exact state a sweep
 // scans for, in its own tenant (seedDraftInvoice pins a fixed customer
 // external_id, so each row needs its own tenant; the sweeps scan cross-tenant
@@ -41,56 +32,23 @@ func seedSweepInvoice(t *testing.T, ctx context.Context, db *postgres.DB, name, 
 	return id
 }
 
-func TestListAutoChargePending_ExcludesSimulatedOneOff(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	ctx := postgres.WithLivemode(context.Background(), false)
-	store := invoice.NewPostgresStore(db)
-
-	// A simulated customer-pinned ONE-OFF (NULL subscription_id) — the exact case
-	// the subscriptions-join missed. Must be EXCLUDED from the auto-charge sweep.
-	simOneOff := seedSweepInvoice(t, ctx, db, "AutoCharge Sim One-Off", `
-		UPDATE invoices SET subscription_id = NULL, auto_charge_pending = TRUE,
-		       payment_status = 'pending', status = 'finalized',
-		       amount_due_cents = 1000, is_simulated = true, updated_at = now()
-		 WHERE id = $1`)
-	// A genuine wall-clock invoice — must be INCLUDED.
-	realInv := seedSweepInvoice(t, ctx, db, "AutoCharge Real", `
-		UPDATE invoices SET auto_charge_pending = TRUE, payment_status = 'pending',
-		       status = 'finalized', amount_due_cents = 1000, is_simulated = false,
-		       updated_at = now()
-		 WHERE id = $1`)
-
-	pending, err := store.ListAutoChargePending(ctx, walk.Key{}, 200)
-	if err != nil {
-		t.Fatalf("ListAutoChargePending: %v", err)
-	}
-	got := map[string]bool{}
-	for _, inv := range pending {
-		got[inv.ID] = true
-	}
-	if got[simOneOff] {
-		t.Error("a simulated customer-pinned one-off must be excluded from the auto-charge sweep (ADR-029)")
-	}
-	if !got[realInv] {
-		t.Error("a wall-clock invoice must remain eligible for the auto-charge sweep")
-	}
-}
-
-func TestListFailedWithoutDunningRun_ExcludesSimulatedOneOff(t *testing.T) {
+// A failed invoice with no dunning run, past the cool-off, is listed for the
+// dunning backfill: one-offs (no subscription) included.
+func TestListFailedWithoutDunningRun_ListsFailedInvoicesWithNoRun(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	store := invoice.NewPostgresStore(db)
 
 	// updated_at is set two hours in the past so both rows satisfy the sweep's
 	// `updated_at < olderThan` grace window (olderThan = now, below).
-	simOneOff := seedSweepInvoice(t, ctx, db, "Dunning Enroll Sim One-Off", `
+	oneOff := seedSweepInvoice(t, ctx, db, "Dunning Enroll One-Off", `
 		UPDATE invoices SET subscription_id = NULL, payment_status = 'failed',
-		       status = 'finalized', amount_due_cents = 1000, is_simulated = true,
+		       status = 'finalized', amount_due_cents = 1000,
 		       updated_at = now() - interval '2 hours'
 		 WHERE id = $1`)
-	realInv := seedSweepInvoice(t, ctx, db, "Dunning Enroll Real", `
+	cycle := seedSweepInvoice(t, ctx, db, "Dunning Enroll Cycle", `
 		UPDATE invoices SET payment_status = 'failed', status = 'finalized',
-		       amount_due_cents = 1000, is_simulated = false,
+		       amount_due_cents = 1000,
 		       updated_at = now() - interval '2 hours'
 		 WHERE id = $1`)
 
@@ -102,11 +60,8 @@ func TestListFailedWithoutDunningRun_ExcludesSimulatedOneOff(t *testing.T) {
 	for _, inv := range failed {
 		got[inv.ID] = true
 	}
-	if got[simOneOff] {
-		t.Error("a simulated customer-pinned one-off must be excluded from dunning enrollment (ADR-029)")
-	}
-	if !got[realInv] {
-		t.Error("a wall-clock failed invoice must remain eligible for dunning enrollment")
+	if !got[oneOff] || !got[cycle] {
+		t.Errorf("listed %v, want both the one-off %s and the cycle invoice %s", got, oneOff, cycle)
 	}
 }
 
@@ -127,14 +82,14 @@ func TestListAutoChargePending_ExcludesPausedSubscription(t *testing.T) {
 
 	paused := seedSweepInvoice(t, ctx, db, "AutoCharge Paused Sub", `
 		UPDATE invoices SET auto_charge_pending = TRUE, payment_status = 'pending',
-		       status = 'finalized', amount_due_cents = 1000, is_simulated = false,
+		       status = 'finalized', amount_due_cents = 1000,
 		       updated_at = now()
 		 WHERE id = $1`)
 	pauseSubscriptionOf(t, ctx, db, paused)
 
 	running := seedSweepInvoice(t, ctx, db, "AutoCharge Running Sub", `
 		UPDATE invoices SET auto_charge_pending = TRUE, payment_status = 'pending',
-		       status = 'finalized', amount_due_cents = 1000, is_simulated = false,
+		       status = 'finalized', amount_due_cents = 1000,
 		       updated_at = now()
 		 WHERE id = $1`)
 

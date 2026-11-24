@@ -530,7 +530,7 @@ func (m *memStore) ListPendingTaxReversal(_ context.Context, batch int, _ bool) 
 		if inv.TaxProvider != "stripe_tax" || inv.TaxTransactionID == "" || inv.TaxReversedAt != nil {
 			continue
 		}
-		if inv.IsSimulated || taxWorkDeferred(inv) {
+		if taxWorkDeferred(inv) {
 			continue
 		}
 		out = append(out, inv)

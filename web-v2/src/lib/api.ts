@@ -974,10 +974,6 @@ export interface Invoice {
   // finalized invoices (migrated-in but never rotated) carry empty.
   public_token?: string
   created_at: string
-  // is_simulated: this invoice's domain timestamps were stamped on a test
-  // clock's simulated time (authoritative, set at write time). Live invoices
-  // are always false.
-  is_simulated?: boolean
   // test_clock_id: the clock this invoice's dates follow (its customer's
   // pin). Filled on the list and get reads; absent on wall-clock invoices.
   test_clock_id?: string
@@ -1070,8 +1066,8 @@ export interface TimelineEvent {
   //   wall-clock (audit_log.created_at, per ADR-030 2026-05-28
   //   amendment); when this flag is true the simulated effect time
   //   is in sim_effective_at + test_clock_id below.
-  // - Invoice payment timeline: true when the event's timestamp
-  //   IS in simulated time (engine-driven on a clock-pinned sub).
+  // - Invoice payment timeline: true on an email row caused on a test
+  //   clock, whose timestamp IS in simulated time.
   is_simulated?: boolean
   // RFC3339 simulated effect time. Populated alongside is_simulated
   // on operator-action audit rows for clock-pinned entities. The
@@ -1615,9 +1611,6 @@ export interface CreditNote {
   issued_at?: string
   voided_at?: string
   created_at: string
-  // Domain timestamps (issued_at/created_at) are simulated test-clock
-  // time when true — same contract as Invoice.is_simulated.
-  is_simulated?: boolean
 }
 
 export interface AuditEntry {

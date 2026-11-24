@@ -73,7 +73,6 @@ Under Stripe Tax, `tax_transaction_id` can be recorded after this event;
       "due_at": "2026-10-01T12:00:00Z",
       "id": "hc_inv_golden",
       "invoice_number": "HC-000042",
-      "is_simulated": false,
       "issued_at": "2026-10-01T12:00:00Z",
       "metadata": {
         "order": "A-1"
@@ -137,7 +136,6 @@ moment: 0 when credit or a credit note covered the rest.
       "due_at": "2026-10-01T12:00:00Z",
       "id": "hc_inv_golden",
       "invoice_number": "HC-000042",
-      "is_simulated": false,
       "issued_at": "2026-10-01T12:00:00Z",
       "metadata": {
         "order": "A-1"
@@ -201,7 +199,6 @@ or a cheque. `recovered_from` is the status the invoice was paid from:
       "due_at": "2026-10-01T12:00:00Z",
       "id": "hc_inv_golden",
       "invoice_number": "HC-000042",
-      "is_simulated": false,
       "issued_at": "2026-10-01T12:00:00Z",
       "metadata": {
         "order": "A-1"
@@ -264,7 +261,6 @@ An invoice was written off as bad debt.
       "due_at": "2026-10-01T12:00:00Z",
       "id": "hc_inv_golden",
       "invoice_number": "HC-000042",
-      "is_simulated": false,
       "issued_at": "2026-10-01T12:00:00Z",
       "metadata": {
         "order": "A-1"
@@ -328,7 +324,6 @@ tax just after the void is saved, so the invoice in this event has no
       "due_at": "2026-10-01T12:00:00Z",
       "id": "hc_inv_golden",
       "invoice_number": "HC-000042",
-      "is_simulated": false,
       "issued_at": "2026-10-01T12:00:00Z",
       "metadata": {
         "order": "A-1"
@@ -411,7 +406,6 @@ A charge was collected. The invoice names its PaymentIntent.
       "due_at": "2026-10-01T12:00:00Z",
       "id": "hc_inv_golden",
       "invoice_number": "HC-000042",
-      "is_simulated": false,
       "issued_at": "2026-10-01T12:00:00Z",
       "metadata": {
         "order": "A-1"
@@ -475,7 +469,6 @@ it, because the customer saw it there and can try again.
       "due_at": "2026-10-01T12:00:00Z",
       "id": "hc_inv_golden",
       "invoice_number": "HC-000042",
-      "is_simulated": false,
       "issued_at": "2026-10-01T12:00:00Z",
       "metadata": {
         "order": "A-1"
@@ -544,7 +537,6 @@ Hardcount (`paid_out_of_band` is true).
       "due_at": "2026-10-01T12:00:00Z",
       "id": "hc_inv_golden",
       "invoice_number": "HC-000042",
-      "is_simulated": false,
       "issued_at": "2026-10-01T12:00:00Z",
       "metadata": {
         "order": "A-1"
@@ -613,7 +605,6 @@ saved with the payment, so this invoice, and the invoice in that payment's
       "due_at": "2026-10-01T12:00:00Z",
       "id": "hc_inv_golden",
       "invoice_number": "HC-000042",
-      "is_simulated": false,
       "issued_at": "2026-10-01T12:00:00Z",
       "metadata": {
         "order": "A-1"
@@ -684,7 +675,6 @@ or none.
       "due_at": "2026-10-01T12:00:00Z",
       "id": "hc_inv_golden",
       "invoice_number": "HC-000042",
-      "is_simulated": false,
       "issued_at": "2026-10-01T12:00:00Z",
       "metadata": {
         "order": "A-1"
@@ -750,7 +740,6 @@ an earlier one, or none.
       "due_at": "2026-10-01T12:00:00Z",
       "id": "hc_inv_golden",
       "invoice_number": "HC-000042",
-      "is_simulated": false,
       "issued_at": "2026-10-01T12:00:00Z",
       "metadata": {
         "order": "A-1"
@@ -836,7 +825,6 @@ and how to turn on Stripe's dispute events:
       "due_at": "2026-10-01T12:00:00Z",
       "id": "hc_inv_golden",
       "invoice_number": "HC-000042",
-      "is_simulated": false,
       "issued_at": "2026-10-01T12:00:00Z",
       "metadata": {
         "order": "A-1"
@@ -918,7 +906,6 @@ the closed status, in either order.
       "due_at": "2026-10-01T12:00:00Z",
       "id": "hc_inv_golden",
       "invoice_number": "HC-000042",
-      "is_simulated": false,
       "issued_at": "2026-10-01T12:00:00Z",
       "metadata": {
         "order": "A-1"
@@ -1007,7 +994,6 @@ send no event. Hardcount hears of a refund made in Stripe only with
       "due_at": "2026-10-01T12:00:00Z",
       "id": "hc_inv_golden",
       "invoice_number": "HC-000042",
-      "is_simulated": false,
       "issued_at": "2026-10-01T12:00:00Z",
       "metadata": {
         "order": "A-1"

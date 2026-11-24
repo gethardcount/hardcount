@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,20 +18,24 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
+	"github.com/gethardcount/hardcount/internal/subscription/subscriptiontest"
 	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // scheduleCase is one dunning schedule and what it must produce. The golden
-// half (wantDays) is written as days after the failed payment, in neither the
-// old nor the new policy shape, so the same golden checks the schedule
-// however the policy is written.
+// half (wantDays, wantOutcome) is written as days after the failed payment,
+// in neither the old nor the new policy shape, so the same golden checks the
+// schedule however the policy is written.
 type scheduleCase struct {
 	name   string
 	policy domain.DunningPolicy
 	// wantDays: the day, counted from the failed payment, of each retry.
 	wantDays []int
+	// wantOutcome: the escalated event's reason (what the final actions did).
+	wantOutcome string
 }
 
 // scheduleCases covers the schedules written today: the seeded default, the
@@ -47,37 +52,37 @@ func scheduleCases() []scheduleCase {
 			name: "seeded default",
 			policy: domain.DunningPolicy{RetryDays: []int{3, 4, 7},
 				FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone},
-			wantDays: []int{3, 7, 14},
+			wantDays: []int{3, 7, 14}, wantOutcome: "",
 		},
 		{
 			name: "recipe policy",
 			policy: domain.DunningPolicy{RetryDays: []int{3, 1, 3, 7},
 				FinalSubscriptionAction: domain.SubActionPause, FinalInvoiceAction: domain.InvActionMarkUncollectible},
-			wantDays: []int{3, 4, 7, 14},
+			wantDays: []int{3, 4, 7, 14}, wantOutcome: "subscription_paused+invoice_marked_uncollectible",
 		},
 		{
 			name: "one retry",
 			policy: domain.DunningPolicy{RetryDays: []int{1},
 				FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionNone},
-			wantDays: []int{1},
+			wantDays: []int{1}, wantOutcome: "subscription_canceled",
 		},
 		{
 			name: "entries past the last retry",
 			policy: domain.DunningPolicy{RetryDays: []int{2, 2},
 				FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible},
-			wantDays: []int{2, 4},
+			wantDays: []int{2, 4}, wantOutcome: "invoice_marked_uncollectible",
 		},
 		{
 			name: "fifteen retries",
 			policy: domain.DunningPolicy{RetryDays: []int{30, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
 				FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone},
-			wantDays: []int{30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44},
+			wantDays: []int{30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44}, wantOutcome: "",
 		},
 		{
 			name: "uneven waits",
 			policy: domain.DunningPolicy{RetryDays: []int{5, 5, 1, 10},
 				FinalSubscriptionAction: domain.SubActionPause, FinalInvoiceAction: domain.InvActionNone},
-			wantDays: []int{5, 10, 11, 21},
+			wantDays: []int{5, 10, 11, 21}, wantOutcome: "subscription_paused",
 		},
 	}
 }
@@ -89,8 +94,9 @@ var diffFailedAt = time.Date(2027, 3, 10, 9, 30, 0, 0, time.UTC)
 const diffHorizonDays = 60 // past every case's last retry
 
 // TestSchedule_Differential pins every retry instant, every reminder and
-// escalation email, and the final action, for each schedule in
-// scheduleCases, with the wall clock ticked a day at a time.
+// escalation email, and the final actions on the invoice and its
+// subscription, for each schedule in scheduleCases, with a fake clock ticked
+// a day at a time.
 //
 // The goldens were recorded with today's policy shape. Changing how the
 // schedule is written (#B8) must leave every one of them unchanged.
@@ -115,22 +121,41 @@ func runScheduleCase(t *testing.T, tc scheduleCase) {
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
 	}
+	plan, err := pricing.NewPostgresStore(db).CreatePlan(ctx, tenantID, domain.Plan{
+		Code: "pro", Name: "Pro", Currency: "USD", BillingInterval: domain.BillingMonthly,
+		Status: domain.PlanActive, BaseAmountCents: 4900, BaseBillTiming: domain.BillInAdvance,
+	})
+	if err != nil {
+		t.Fatalf("create plan: %v", err)
+	}
+	// The current period outlasts the horizon, so no final action has a
+	// period end to bill first.
+	periodStart := diffFailedAt.Add(-24 * time.Hour)
+	periodEnd := periodStart.AddDate(0, 3, 0)
+	subStore := subscription.NewPostgresStore(db)
+	sub, err := subStore.Create(ctx, tenantID, domain.Subscription{
+		Code: "sub-sched-diff", DisplayName: "Schedule Differential", CustomerID: cust.ID,
+		Items:  []domain.SubscriptionItem{{PlanID: plan.ID, Quantity: 1}},
+		Status: domain.SubscriptionActive, BillingTime: domain.BillingTimeCalendar,
+		StartedAt: &periodStart, CurrentBillingPeriodStart: &periodStart, CurrentBillingPeriodEnd: &periodEnd,
+	})
+	if err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	subscriptiontest.SetBillingCycle(t, ctx, db, tenantID, sub.ID, periodStart, periodEnd, periodEnd, 0)
 	invoices := invoice.NewPostgresStore(db)
-	draft := domain.Invoice{
-		CustomerID: cust.ID, InvoiceNumber: "INV-SCHED-DIFF",
+	inv, err := invoices.CreateWithLineItems(ctx, tenantID, domain.Invoice{
+		CustomerID: cust.ID, SubscriptionID: sub.ID, InvoiceNumber: "INV-SCHED-DIFF",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, Currency: "USD",
 		SubtotalCents: 4900, TotalAmountCents: 4900, AmountDueCents: 4900,
-		BillingPeriodStart: diffFailedAt.Add(-24 * time.Hour), BillingPeriodEnd: diffFailedAt, IssuedAt: &diffFailedAt,
-	}
-	// The subscription movers date from the real clock, not the fake one, so
-	// the schedule is checked on a one-off invoice: the subscription half of
-	// the outcome is then nothing, by design.
-	subStore := subscription.NewPostgresStore(db)
-	inv, err := invoices.CreateWithLineItems(ctx, tenantID, draft, nil)
+		BillingPeriodStart: periodStart, BillingPeriodEnd: periodEnd, IssuedAt: &diffFailedAt,
+	}, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}
 
+	// Every service runs on the fake clock, so the final actions are dated at
+	// the tick that runs them.
 	runs := dunning.NewPostgresStore(db)
 	retrier := &declinedRetry{invoices: invoices}
 	svc := dunning.NewService(runs, retrier, wall)
@@ -213,6 +238,9 @@ func runScheduleCase(t *testing.T, tc scheduleCase) {
 		case domain.DunningEventEscalated:
 			escalated++
 			wantInstant(t, "escalated event", e.CreatedAt, last)
+			if e.Reason != tc.wantOutcome {
+				t.Errorf("escalated reason %q, want %q", e.Reason, tc.wantOutcome)
+			}
 		}
 	}
 	if fmt.Sprint(instants(retryAt)) != fmt.Sprint(instants(want)) {
@@ -228,18 +256,15 @@ func runScheduleCase(t *testing.T, tc scheduleCase) {
 		Type, NextRetryDate string
 		Attempt, Max        int
 		Outcome             domain.DunningEscalationOutcome
-		SimAt               string
 	}
 	var wantEmails []sent
 	for i := range want[:len(want)-1] {
 		wantEmails = append(wantEmails, sent{Type: email.TypeDunningWarning, Attempt: i + 1, Max: len(want),
 			NextRetryDate: want[i+1].Format("January 2, 2006")})
 	}
-	wantEmails = append(wantEmails, sent{Type: email.TypeDunningEscalation,
-		Outcome: domain.DunningEscalationOutcome{InvoiceWrittenOff: tc.policy.FinalInvoiceAction == domain.InvActionMarkUncollectible}})
+	wantEmails = append(wantEmails, sent{Type: email.TypeDunningEscalation, Outcome: outcomeOf(tc.wantOutcome)})
 
-	rows, err := admin.Query(`SELECT email_type, payload,
-			CASE WHEN test_clock_id IS NOT NULL THEN effective_at END FROM email_outbox
+	rows, err := admin.Query(`SELECT email_type, payload FROM email_outbox
 		WHERE tenant_id = $1 AND email_type IN ($2, $3) ORDER BY created_at, id`,
 		tenantID, email.TypeDunningWarning, email.TypeDunningEscalation)
 	if err != nil {
@@ -250,8 +275,7 @@ func runScheduleCase(t *testing.T, tc scheduleCase) {
 	for rows.Next() {
 		var typ string
 		var payload []byte
-		var simAt *time.Time
-		if err := rows.Scan(&typ, &payload, &simAt); err != nil {
+		if err := rows.Scan(&typ, &payload); err != nil {
 			t.Fatalf("scan email: %v", err)
 		}
 		var p struct {
@@ -263,11 +287,7 @@ func runScheduleCase(t *testing.T, tc scheduleCase) {
 		if err := json.Unmarshal(payload, &p); err != nil {
 			t.Fatalf("decode email payload: %v", err)
 		}
-		s := sent{Type: typ, Attempt: p.AttemptNumber, Max: p.MaxAttempts, NextRetryDate: p.NextRetryDate, Outcome: p.EscalationOutcome}
-		if simAt != nil {
-			s.SimAt = simAt.UTC().Format(time.RFC3339)
-		}
-		gotEmails = append(gotEmails, s)
+		gotEmails = append(gotEmails, sent{Type: typ, Attempt: p.AttemptNumber, Max: p.MaxAttempts, NextRetryDate: p.NextRetryDate, Outcome: p.EscalationOutcome})
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("emails: %v", err)
@@ -285,6 +305,43 @@ func runScheduleCase(t *testing.T, tc scheduleCase) {
 	if (gotInv.Status == domain.InvoiceUncollectible) != wantWrittenOff {
 		t.Errorf("invoice status %s, want written off: %v", gotInv.Status, wantWrittenOff)
 	}
+	if wantWrittenOff && (gotInv.UncollectibleAt == nil || !gotInv.UncollectibleAt.Equal(last)) {
+		t.Errorf("uncollectible_at = %v, want %v", gotInv.UncollectibleAt, last)
+	}
+	gotSub, err := subStore.Get(ctx, tenantID, sub.ID)
+	if err != nil {
+		t.Fatalf("read subscription: %v", err)
+	}
+	switch tc.policy.FinalSubscriptionAction {
+	case domain.SubActionCancel:
+		if gotSub.Status != domain.SubscriptionCanceled || gotSub.CanceledAt == nil || !gotSub.CanceledAt.Equal(last) {
+			t.Errorf("subscription %s canceled_at %v, want canceled at %v", gotSub.Status, gotSub.CanceledAt, last)
+		}
+	case domain.SubActionPause:
+		if gotSub.PauseCollection == nil {
+			t.Errorf("subscription collection not paused")
+		}
+	case domain.SubActionNone:
+		if gotSub.Status != domain.SubscriptionActive || gotSub.PauseCollection != nil {
+			t.Errorf("subscription %s pause=%v, want untouched", gotSub.Status, gotSub.PauseCollection)
+		}
+	}
+}
+
+// outcomeOf is the escalation email's outcome for an escalated reason.
+func outcomeOf(reason string) domain.DunningEscalationOutcome {
+	var o domain.DunningEscalationOutcome
+	for _, part := range strings.Split(reason, "+") {
+		switch part {
+		case "subscription_paused":
+			o.SubscriptionPaused = true
+		case "subscription_canceled":
+			o.SubscriptionCanceled = true
+		case "invoice_marked_uncollectible":
+			o.InvoiceWrittenOff = true
+		}
+	}
+	return o
 }
 
 func instants(ts []time.Time) []string {

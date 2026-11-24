@@ -58,7 +58,6 @@ func TestCreateInvoice_TxAndNonTxPersistIdenticalColumns(t *testing.T) {
 			TaxFacts:           domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK},
 			BillingReason:      domain.BillingReasonSubscriptionCreate,
 			BillingTimezone:    "Asia/Kolkata",
-			IsSimulated:        false,
 		}
 	}
 	line := func() []domain.InvoiceLineItem {

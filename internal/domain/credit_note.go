@@ -81,13 +81,6 @@ type CreditNote struct {
 	// reverse: the provider is manual or none, or the invoice is a legacy one
 	// from before invoice.tax_transaction_id.
 	TaxTransactionID string `json:"tax_transaction_id,omitempty"`
-	// IsSimulated marks a credit note whose issued_at is in simulated
-	// (test-clock) time. It is the source invoice's flag, whoever issues the
-	// note: engine clawbacks and operator issuance both run on the invoice's
-	// clock (ADR-030). The wall-clock recovery sweeps skip notes that carry
-	// it. On the invoice timeline it gates the Recorded subline, which shows
-	// the real insert time (ADR-104).
-	IsSimulated bool `json:"is_simulated"`
 	// IssuePending marks an auto-issue clawback draft. The draft is created
 	// in the same transaction as a subscription downgrade, item removal or
 	// quantity decrease, so the item change and the clawback obligation

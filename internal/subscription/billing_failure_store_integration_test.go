@@ -30,7 +30,6 @@ func (s *bfSeed) record(id string, w subscription.BillingFailureWrite) bool {
 // Mutation seams, each turning one subtest red:
 //   - drop `<due> IS NOT DISTINCT FROM $2` → "due instant moved";
 //   - drop the observed-count CASE         → "two writers, same attempt";
-//   - drop `test_clock_id IS NULL`         → "clock-pinned";
 //   - drop the status IN                   → "canceled".
 func TestRecordBillingFailure_Guards(t *testing.T) {
 	s := newBFSeed(t, "rec")
@@ -107,14 +106,6 @@ func TestRecordBillingFailure_Guards(t *testing.T) {
 		}
 		if bf := s.get(id).BillingFailure; bf == nil || bf.Attempts != 4 {
 			t.Fatalf("got %+v, want attempts 4", bf)
-		}
-	})
-
-	t.Run("clock-pinned", func(t *testing.T) {
-		at := s.frozen.Add(-time.Hour)
-		id := s.sub(bfRow{id: "sub_rec_clock", nextBilling: at, clockID: s.clockID})
-		if s.record(id, write(at, 0)) {
-			t.Fatal("a real-time wait was written on a clock-pinned subscription")
 		}
 	})
 
@@ -378,7 +369,6 @@ func TestClearBillingFailure(t *testing.T) {
 	notFailing := []bfRow{
 		{id: "sub_clr_healthy", nextBilling: due},
 		{id: "sub_clr_stale", nextBilling: due, failedFor: ptr(due.Add(-30 * 24 * time.Hour)), count: 8},
-		{id: "sub_clr_clock", nextBilling: s.frozen.Add(-time.Hour), clockID: s.clockID, failedFor: ptr(s.frozen.Add(-time.Hour)), count: 8},
 		{id: "sub_clr_canceled", status: "canceled", nextBilling: due, failedFor: &due, count: 8},
 	}
 	for _, r := range notFailing {
@@ -410,18 +400,16 @@ func TestClearBillingFailure(t *testing.T) {
 // TestList_BillingFailingFilter: GET /v1/subscriptions?billing=failing returns
 // exactly the subscriptions with a live record, retrying and parked, and its
 // total counts the same set. Rows that only look like failures are left out: a
-// record for a due instant the row no longer has, a record on a clock-pinned
-// row, and the columns a canceled subscription keeps as evidence.
+// record for a due instant the row no longer has, and the columns a canceled
+// subscription keeps as evidence.
 func TestList_BillingFailingFilter(t *testing.T) {
 	s := newBFSeed(t, "list")
 	due := s.now.Add(-48 * time.Hour)
 	next := s.now.Add(time.Hour)
-	onClock := s.frozen.Add(-time.Hour)
 	s.sub(bfRow{id: "sub_ls_healthy", nextBilling: due})
 	s.sub(bfRow{id: "sub_ls_retrying", nextBilling: due, failedFor: &due, count: 2, nextAttempt: &next})
 	s.sub(bfRow{id: "sub_ls_parked", nextBilling: due, failedFor: &due, count: 8})
 	s.sub(bfRow{id: "sub_ls_stale", nextBilling: due, failedFor: ptr(due.Add(-30 * 24 * time.Hour)), count: 8})
-	s.sub(bfRow{id: "sub_ls_clock", nextBilling: onClock, clockID: s.clockID, failedFor: &onClock, count: 8})
 	s.sub(bfRow{id: "sub_ls_canceled", status: "canceled", nextBilling: due, failedFor: &due, count: 8})
 
 	subs, total, err := s.store.List(s.ctx, subscription.ListFilter{
@@ -442,8 +430,8 @@ func TestList_BillingFailingFilter(t *testing.T) {
 	if _, total, err := s.store.List(s.ctx, subscription.ListFilter{TenantID: s.tenantID, Billing: subscription.ListBillingFailing, Status: "trialing"}); err != nil || total != 0 {
 		t.Fatalf("billing=failing&status=trialing: total=%d err=%v, want 0", total, err)
 	}
-	// Control: no filter returns all six.
-	if _, total, err := s.store.List(s.ctx, subscription.ListFilter{TenantID: s.tenantID}); err != nil || total != 6 {
-		t.Fatalf("unfiltered: total=%d err=%v, want 6", total, err)
+	// Control: no filter returns all five.
+	if _, total, err := s.store.List(s.ctx, subscription.ListFilter{TenantID: s.tenantID}); err != nil || total != 5 {
+		t.Fatalf("unfiltered: total=%d err=%v, want 5", total, err)
 	}
 }
