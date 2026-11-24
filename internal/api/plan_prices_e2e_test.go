@@ -537,9 +537,11 @@ func TestE2E_PlanPrices_NeverUsedPlanAppliesAtOnce(t *testing.T) {
 // Mutations in settleNeverUsedTx: do nothing, and the prices keep the
 // versions written while the plan was used; keep each price's oldest version
 // instead of its latest, and the removed price ties with the added price and
-// wins by age, and the edited price bills its old rate. A new subscriber's
-// first period starts after those versions, so they bill it only if the app
-// clock lags the database's.
+// wins by age, and the edited price bills its old rate. Doing nothing fails
+// only the version count here: a subscriber's prices are pinned at its
+// request's arrival, so the kept versions bill only a subscriber that
+// arrived before they were written, such as a create that waited on a lock
+// meanwhile. This subscriber arrives after them.
 func TestE2E_PlanPrices_NeverUsedAgainForgetsVersionsWrittenWhileUsed(t *testing.T) {
 	r := newPPRig(t, "never used again")
 	tokens := r.meter("tokens", "sum")
