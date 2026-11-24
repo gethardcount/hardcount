@@ -88,7 +88,7 @@ type countingDunning struct {
 	n  int
 }
 
-func (c *countingDunning) StartDunning(_ context.Context, _, invoiceID, _ string, _ time.Time, _ domain.DunningStartCause) (domain.InvoiceDunningRun, error) {
+func (c *countingDunning) StartDunning(_ context.Context, _, invoiceID, _ string, _ domain.DunningStartCause) (domain.InvoiceDunningRun, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.n++

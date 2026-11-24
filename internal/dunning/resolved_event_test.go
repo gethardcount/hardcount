@@ -3,7 +3,6 @@ package dunning
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
 )
@@ -54,7 +53,7 @@ func TestResolveRunNow_Idempotent_FiresEventOnce(t *testing.T) {
 	disp := &store.webhooks
 	ctx := context.Background()
 
-	run, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
+	run, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 	if err != nil {
 		t.Fatalf("StartDunning: %v", err)
 	}
@@ -83,7 +82,7 @@ func TestResolveByInvoice_ASecondResolveFiresNoSecondEvent(t *testing.T) {
 	disp := &store.webhooks
 	ctx := context.Background()
 
-	if _, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed); err != nil {
+	if _, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed); err != nil {
 		t.Fatalf("StartDunning: %v", err)
 	}
 
@@ -113,7 +112,7 @@ func TestDunningResolved_EventFires(t *testing.T) {
 		disp := &store.webhooks
 		ctx := context.Background()
 
-		if _, err := svc.StartDunning(ctx, "t1", "inv_2", "cus_2", time.Now(), domain.DunningCausePaymentFailed); err != nil {
+		if _, err := svc.StartDunning(ctx, "t1", "inv_2", "cus_2", domain.DunningCausePaymentFailed); err != nil {
 			t.Fatalf("StartDunning: %v", err)
 		}
 		if err := svc.ResolveByInvoice(ctx, "t1", "inv_2", domain.ResolutionPaymentRecovered); err != nil {

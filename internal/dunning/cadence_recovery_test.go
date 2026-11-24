@@ -26,7 +26,7 @@ func TestProcessDueRuns_WallClockCadenceAfterDowntime(t *testing.T) {
 	svc := NewService(store, &failingRetrier{}, clock.NewFake(recoveryNow))
 	ctx := testutil.AtRealTime() // where the scheduler's tick starts
 
-	run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", recoveryNow.Add(-30*24*time.Hour), domain.DunningCausePaymentFailed)
+	run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 	// Simulate multi-interval scheduler downtime: this run was due 10 days ago
 	// and never fired.
 	stalePast := recoveryNow.Add(-10 * 24 * time.Hour)

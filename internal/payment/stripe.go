@@ -23,7 +23,7 @@ import (
 
 // DunningStarter starts dunning for failed payments.
 type DunningStarter interface {
-	StartDunning(ctx context.Context, tenantID string, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error)
+	StartDunning(ctx context.Context, tenantID string, invoiceID, customerID string, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error)
 }
 
 // DunningResolver closes an active dunning run when a card payment settles —
@@ -124,7 +124,7 @@ type Stripe struct {
 	disputes           DisputeRecorder            // optional; records charge.dispute.* against the invoice (#979)
 	externalRefunds    ExternalRefundRecorder     // optional; records refunds made in Stripe outside Hardcount (ADR-134)
 	resolver           clock.Resolver             // optional; an event decides its time with it (decideFor)
-	clock              clock.Clock                // the server's clock: an event's decision, and a result's time on no clock (clock.AtArrival)
+	clock              clock.Clock                // the server's clock: an event's decision, and a result's time (clock.AtArrival)
 	anomalies          PaymentAnomalyRecorder     // required; writes the anomaly marker (ADR-068) and queues its webhook event (MustHaveAnomalyRecorder)
 	checkoutSessions   *CheckoutSessionStore      // optional; claim-ledger truth-sync + settle-time expire (ADR-068)
 	sessionClients     *StripeClients             // optional; raw mode-keyed clients for session expire calls
@@ -212,8 +212,8 @@ func (s *Stripe) SetResolver(r clock.Resolver) {
 }
 
 // SetClock wires the server's clock. An event's decision binds real time
-// from it (decideFor), and a settle on no clock reads the result's time from
-// it (clock.AtArrival). The router passes the clock the server bills by; the
+// from it (decideFor), and a settle reads the result's time from it
+// (clock.AtArrival). The router passes the clock the server bills by; the
 // default is the machine's.
 func (s *Stripe) SetClock(c clock.Clock) {
 	s.clock = c
@@ -266,19 +266,6 @@ type PaymentIntentResult struct {
 	// the webhook-drop backstop path (the settle skips the truth-check
 	// when capturedCents == 0).
 	AmountReceivedCents int64
-	// AnchorAt is the charge's anchor (the instant the charge was made at on
-	// its clock), read back from the PI's hardcount_anchor_at metadata. It
-	// exists for the same reason the webhook path reads that key: a settle's
-	// decided time is the clock's current frozen time, so a settle that lands
-	// after a wide advance would stamp paid_at at the advance's target rather
-	// than the instant the charge was made at.
-	//
-	// The reconciler is the THIRD settle path and was the only one without
-	// it — which is backwards, because it runs precisely when the webhook
-	// that carries the anchor was dropped. Same charge, same clock, and
-	// paid_at differed by however far the clock had moved, purely on whether
-	// the webhook landed. Zero for wall-clock charges, which carry no anchor.
-	AnchorAt time.Time
 	// DeclineCode and PaymentMethodID are the PaymentIntent's
 	// last_payment_error decline code (declineCodeOf) and payment_method.id,
 	// populated by GetPaymentIntent. The reconciler passes them on when it records a
@@ -800,16 +787,6 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	if purpose != "" {
 		metadata["hardcount_purpose"] = purpose
 	}
-	// hardcount_anchor_at: the CONTRACTED simulated instant this charge fires
-	// at (a dunning retry's next_action_at, a cycle's close boundary).
-	// The settle path — inline OR the wall-side webhook, which cannot see
-	// the caller's ctx — stamps paid_at from this anchor, so a recovery
-	// that happened at sim Mar 7 never records "paid Apr 1" just because
-	// the operator advanced a month in one click (ADR-030
-	// contracted-instant rule). Absent on wall-clock charges.
-	if sim, ok := clock.SimOf(ctx); ok {
-		metadata["hardcount_anchor_at"] = sim.At.UTC().Format(time.RFC3339Nano)
-	}
 	// Per-attempt idempotency key — see ChargeIdempotencyKey, the single
 	// source. inv.ChargeAttemptSeq advances on every write that records an
 	// attempt outcome, so each genuine retry gets a fresh key and Stripe
@@ -902,12 +879,11 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	recordPaymentCharge("succeeded")
 
 	// If already succeeded (the common off-session case), settle through the
-	// settlement primitive NOW: a test-clock catch-up charge has no
-	// time-ordered webhook, so the inline settle is what stamps paid_at at
-	// the contracted instant. If this write fails the invoice stays unknown
-	// on the PaymentIntent, and its webhook or the unknown sweep settles it.
+	// settlement primitive NOW, without waiting for the webhook. If this write
+	// fails the invoice stays unknown on the PaymentIntent, and its webhook or
+	// the unknown sweep settles it.
 	if result.Status == "succeeded" {
-		if serr := s.SettleSucceeded(withChargeAnchor(ctx), tenantID, stamped, result.ID, inv.AmountDueCents, SourceChargeResponse); serr != nil {
+		if serr := s.SettleSucceeded(ctx, tenantID, stamped, result.ID, inv.AmountDueCents, SourceChargeResponse); serr != nil {
 			return domain.Invoice{}, fmt.Errorf("settle succeeded inline: %w", serr)
 		}
 		if rerr := s.invoices.ReleaseChargeHold(ctx, tenantID, inv.ID, hold); rerr != nil {
@@ -1029,7 +1005,7 @@ func (s *Stripe) beforeConfirmError(ctx context.Context, tenantID string, inv do
 	}
 	recordChargeAttempt(ctx, s.invoices, tenantID, inv, "", trigger, domain.ChargeAttemptFailed, pe.Message,
 		chargedCard{paymentMethodID: stripePaymentMethodID, declineCode: pe.DeclineCode})
-	s.stampFailedWithoutPayment(withChargeAnchor(ctx), tenantID, inv, pe.Message, sentKey)
+	s.stampFailedWithoutPayment(ctx, tenantID, inv, pe.Message, sentKey)
 	recordPaymentCharge("failed")
 	s.releaseAfterAnswer(ctx, tenantID, inv.ID, hold)
 	return fmt.Errorf("payment failed: %w", pe)
@@ -1059,7 +1035,7 @@ func (s *Stripe) afterConfirmError(ctx context.Context, tenantID string, ce *con
 			chargedCard{paymentMethodID: stripePaymentMethodID, declineCode: pe.DeclineCode})
 		if pe.PaymentIntentID != "" {
 			seq := inv.ChargeAttemptSeq
-			current, res, serr := s.settleDeclineWithRetry(withChargeAnchor(ctx), tenantID, inv, PaymentFailure{
+			current, res, serr := s.settleDeclineWithRetry(ctx, tenantID, inv, PaymentFailure{
 				PaymentIntentID: pi,
 				Message:         pe.Message,
 				Purpose:         purpose,
@@ -1076,7 +1052,7 @@ func (s *Stripe) afterConfirmError(ctx context.Context, tenantID string, ce *con
 				logRefusedChargeOutcome(ctx, current, domain.PaymentFailed, pi, sentKey)
 			}
 		} else {
-			s.stampFailedWithoutPayment(withChargeAnchor(ctx), tenantID, inv, pe.Message, sentKey)
+			s.stampFailedWithoutPayment(ctx, tenantID, inv, pe.Message, sentKey)
 			if cerr := s.client.CancelPaymentIntent(ctx, pi); cerr != nil {
 				slog.WarnContext(ctx, "could not cancel the PaymentIntent of a confirm Stripe refused; it stays unconfirmed at Stripe and takes no money",
 					"invoice_id", inv.ID, "stripe_payment_intent_id", pi, "error", cerr)
@@ -1367,7 +1343,7 @@ const purposePaymentUpdateToken = "payment_update_token"
 //
 // 2026-05-30 design-debt audit (Tier 1 #5) replaced two log-and-swallow
 // sites here and at the inline charge-failure path with this retry.
-func startDunningWithRetry(ctx context.Context, dunning DunningStarter, tenantID, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) (started bool, err error) {
+func startDunningWithRetry(ctx context.Context, dunning DunningStarter, tenantID, invoiceID, customerID string, cause domain.DunningStartCause) (started bool, err error) {
 	delays := []time.Duration{0, 100 * time.Millisecond, 500 * time.Millisecond}
 	var lastErr error
 	for i, d := range delays {
@@ -1378,7 +1354,7 @@ func startDunningWithRetry(ctx context.Context, dunning DunningStarter, tenantID
 				return false, fmt.Errorf("ctx canceled during StartDunning retry (attempt %d): %w", i+1, ctx.Err())
 			}
 		}
-		if _, err := dunning.StartDunning(ctx, tenantID, invoiceID, customerID, simFailedAt, cause); err != nil {
+		if _, err := dunning.StartDunning(ctx, tenantID, invoiceID, customerID, cause); err != nil {
 			if errors.Is(err, errs.ErrInvalidState) {
 				// Dunning disabled or not-configured (no policy) is a DELIBERATE
 				// skip, not a transient failure — return success immediately rather
@@ -1422,10 +1398,10 @@ func (s *Stripe) stampFailedWithoutPayment(ctx context.Context, tenantID string,
 	if s.dunning == nil {
 		return
 	}
-	// Dunning starts inline, for the same test-clock reason as a decline (see
-	// SettleFailed): the run must exist when the Advance's dunning phase runs.
-	// Never on an invoice that is no longer finalized (paid, voided or written
-	// off before or during the charge), and the check reads current, not the
+	// Dunning starts inline: no webhook follows a failure with no
+	// PaymentIntent, so nothing else would start it. Never on an invoice
+	// that is no longer finalized (paid, voided or written off before or
+	// during the charge), and the check reads current, not the
 	// snapshot: StartDunning has no status opinion, and a written-off invoice
 	// already ran dunning to its final action.
 	if current.Status != domain.InvoiceFinalized {
@@ -1433,21 +1409,10 @@ func (s *Stripe) stampFailedWithoutPayment(ctx context.Context, tenantID string,
 			"invoice_id", inv.ID, "status", current.Status)
 		return
 	}
-	if _, derr := startDunningWithRetry(ctx, s.dunning, tenantID, inv.ID, inv.CustomerID, dunningSimFailedAt(ctx), domain.DunningCausePaymentFailed); derr != nil {
+	if _, derr := startDunningWithRetry(ctx, s.dunning, tenantID, inv.ID, inv.CustomerID, domain.DunningCausePaymentFailed); derr != nil {
 		slog.Error("inline StartDunning after a failed charge failed — for a wall-clock invoice the dunning backfill sweep starts the run on a later scheduler tick",
 			"invoice_id", inv.ID, "customer_id", inv.CustomerID, "error", derr)
 	}
-}
-
-// withChargeAnchor hands a simulated charge's contracted instant to its inline
-// settle — the same value the PI's hardcount_anchor_at metadata carries for the
-// webhook and the reconciler, passed directly instead of round-tripping via
-// Stripe. A wall-clock charge carries none.
-func withChargeAnchor(ctx context.Context) context.Context {
-	if sim, ok := clock.SimOf(ctx); ok {
-		return withSettleAnchor(ctx, sim.At)
-	}
-	return ctx
 }
 
 // settleDeclineWithRetry reports the charge call's own decline through
@@ -2173,9 +2138,6 @@ func (s *Stripe) handlePaymentSucceeded(ctx context.Context, tenantID string, ev
 	if event.AmountCents != nil {
 		captured = *event.AmountCents
 	}
-	if a, ok := anchorFromEventPayload(event); ok {
-		ctx = withSettleAnchor(ctx, a)
-	}
 	// Currency truth-check (ADR-100): the webhook is the ONE settle entry
 	// point carrying Stripe's independently-reported charge currency, so
 	// compare it against the invoice header here — case-folded (Stripe
@@ -2221,11 +2183,7 @@ func (s *Stripe) handlePaymentFailed(ctx context.Context, tenantID string, event
 	// invoice is waiting on) and fires payment.failed, the customer email and
 	// dunning once per PaymentIntent. The purpose decides the email (a dunning
 	// retry sent its own) and marks a hosted Checkout attempt, which never
-	// moves the invoice. The charge's anchor rides along for dunning's first
-	// retry, as it does into SettleSucceeded for paid_at.
-	if a, ok := anchorFromEventPayload(event); ok {
-		ctx = withSettleAnchor(ctx, a)
-	}
+	// moves the invoice.
 	// The purpose routes the decline (a hosted attempt never moves the
 	// invoice; a dunning retry already sent its own email). An undecodable
 	// body is not "no purpose": guessing would fail a hosted attempt into
@@ -2331,14 +2289,6 @@ func piMetadata(payload map[string]any) (map[string]string, error) {
 		return nil, err
 	}
 	return parsed.Data.Object.Metadata, nil
-}
-
-// piMetadataFromPayload is piMetadata for the charge anchor only, where an
-// unreadable body deliberately falls back (anchorFromEventPayload: a
-// malformed anchor must not block a settlement).
-func piMetadataFromPayload(payload map[string]any) map[string]string {
-	md, _ := piMetadata(payload)
-	return md
 }
 
 func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, event domain.StripeWebhookEvent) error {

@@ -554,3 +554,30 @@ func TestEnsureEffectiveNow(t *testing.T) {
 		})
 	}
 }
+
+// AtArrival dates a result at one read of c taken when it arrives: the read
+// is bound on ctx as a real instant, replacing any instant ctx carries, so
+// every later read of ctx answers it.
+func TestAtArrival(t *testing.T) {
+	action := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+	arrived := action.Add(time.Minute)
+	testMode := postgres.WithLivemode(context.Background(), false)
+	for _, c := range []struct {
+		name string
+		ctx  context.Context
+	}{
+		{"nothing decided", testMode},
+		{"real time with no instant", WithRealTime(testMode)},
+		{"the action's real instant", WithEffectiveNow(testMode, action)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			server := NewFake(arrived)
+			got := AtArrival(c.ctx, server)
+			server.Advance(time.Hour) // a later read must answer the bound instant
+			d, ok := Decision(got)
+			if later := server.Now(got); !ok || !d.At.Equal(arrived) || d.TestClockID != "" || !later.Equal(arrived) {
+				t.Errorf("decision %+v (%v), later read %v; want a real instant at %v", d, ok, later, arrived)
+			}
+		})
+	}
+}

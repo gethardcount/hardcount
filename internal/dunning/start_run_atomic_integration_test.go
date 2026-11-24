@@ -86,7 +86,7 @@ func TestStartRun_RunEventAndWebhookAreAllOrNone(t *testing.T) {
 		inv := newInvoice(t, "INV-SRA-FAIL")
 		store.SetOutboxEnqueuer(failingEnqueuer{})
 		svc := dunning.NewService(store, nil, nil)
-		if _, err := svc.StartDunning(ctx, tenantID, inv.ID, cust.ID, time.Now().UTC(), domain.DunningCauseNoPaymentMethod); err == nil {
+		if _, err := svc.StartDunning(ctx, tenantID, inv.ID, cust.ID, domain.DunningCauseNoPaymentMethod); err == nil {
 			t.Fatal("StartDunning must fail when its webhook can't be enqueued")
 		}
 		if r, e, h := runs(t, inv.ID), events(t, inv.ID), hooks(t, inv.ID); r+e+h != 0 {
@@ -98,13 +98,12 @@ func TestStartRun_RunEventAndWebhookAreAllOrNone(t *testing.T) {
 		inv := newInvoice(t, "INV-SRA-OK")
 		store.SetOutboxEnqueuer(webhook.NewOutboxStore(db))
 		svc := dunning.NewService(store, nil, nil)
-		// A clock-pinned invoice under an Advance: the run and its timeline row
-		// sit at the invoice's issue instant, not at advance-end frozen_time.
+		// The run and its timeline row sit at the failure instant ctx carries.
 		failureAt := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-		advCtx := clock.WithSim(ctx, clock.Sim{At: failureAt.Add(19 * 24 * time.Hour), TestClockID: "tclk_sra"})
+		failedCtx := clock.WithEffectiveNow(ctx, failureAt)
 		var run domain.InvoiceDunningRun
 		for i := 0; i < 2; i++ {
-			got, err := svc.StartDunning(advCtx, tenantID, inv.ID, cust.ID, failureAt, domain.DunningCauseNoPaymentMethod)
+			got, err := svc.StartDunning(failedCtx, tenantID, inv.ID, cust.ID, domain.DunningCauseNoPaymentMethod)
 			if err != nil {
 				t.Fatalf("StartDunning #%d: %v", i+1, err)
 			}
@@ -115,8 +114,8 @@ func TestStartRun_RunEventAndWebhookAreAllOrNone(t *testing.T) {
 		}
 
 		// What the rows say, not just that they exist: the timeline row keeps
-		// the cause and sits at the failure instant (not catchup's
-		// frozen_time), and the webhook carries the run and customer.
+		// the cause and sits at the failure instant, and the webhook carries
+		// the run and customer.
 		tx, err := db.BeginTx(context.Background(), postgres.TxBypass, "")
 		if err != nil {
 			t.Fatalf("begin: %v", err)

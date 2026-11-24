@@ -244,10 +244,9 @@ func (r *Reconciler) sweep(ctx context.Context, label string, list func(context.
 }
 
 // decideRow decides a row's time from its invoice, right after the sweep
-// listed it (clock.DecideWithoutDoor). On a test clock the settle keeps that
-// decision; on no clock the settle's times are read when Stripe's answer
-// arrives (clock.AtArrival), and the bound instant dates the row's other
-// writes. gone is true on a not-found:
+// listed it (clock.DecideWithoutDoor). The settle's times are read when
+// Stripe's answer arrives (clock.AtArrival), and the bound instant dates the
+// row's other writes. gone is true on a not-found:
 // the invoice, or, in a race with its clock's deletion, its clock; there is
 // nothing to settle, and the caller stamps the row so the list moves on.
 // Any other failure is clock.ErrUndecided: the row is checked again on the
@@ -346,19 +345,7 @@ func (r *Reconciler) reconcileOne(ctx context.Context, inv domain.Invoice) (bool
 		// and its webhook records it first. One refunded at Stripe since is
 		// still a payment: the refund is recorded by its own webhook as a
 		// refund made in Stripe (ADR-134).
-		// Carry the charge's anchor (the instant the charge was made at) into
-		// the settle, exactly as the inline and webhook paths do. Without it
-		// SettleSucceeded uses the row's decided time, the clock's current
-		// frozen time, so a recovery running after a wide advance would stamp
-		// paid_at at the advance's target instead of the instant the charge
-		// was made at. This path recovers
-		// dropped webhooks, so it must reproduce what the dropped webhook would
-		// have written, not a fresher answer.
-		settleCtx := ctx
-		if !res.AnchorAt.IsZero() {
-			settleCtx = withSettleAnchor(ctx, res.AnchorAt)
-		}
-		return r.settle(settleCtx, inv, res.ID, res.AmountReceivedCents, res.Purpose, "", terminalSucceeded, res.Status, "", "", "")
+		return r.settle(ctx, inv, res.ID, res.AmountReceivedCents, res.Purpose, "", terminalSucceeded, res.Status, "", "", "")
 
 	case "canceled", "requires_payment_method":
 		if res.Status == "canceled" && !answered(res) && res.Purpose != PurposeHostedInvoicePay && inv.PaymentStatus == domain.PaymentUnknown {
@@ -435,19 +422,13 @@ func (r *Reconciler) reconcileOne(ctx context.Context, inv domain.Invoice) (bool
 // settleDeclined reports a PaymentIntent that asked a bank and took no money
 // (declined, or canceled after a decline) through the settlement primitive,
 // as the webhook does. The PI purpose travels with the report: it decides the
-// customer email (failureEmailSuppressed). The anchor does too, as on the
-// succeeded branch: a decline starts dunning, whose first retry counts from
-// the instant the charge fired. The decline code and card ride along (#966):
-// a hard decline the charge response never reported must still stop the next
-// dunning retry from charging that card. So does Stripe's card message, the
-// customer email's reason, as on the webhook; the "reconciled:" text is the
-// invoice's only.
+// customer email (failureEmailSuppressed). The decline code and card ride
+// along (#966): a hard decline the charge response never reported must still
+// stop the next dunning retry from charging that card. So does Stripe's card
+// message, the customer email's reason, as on the webhook; the "reconciled:"
+// text is the invoice's only.
 func (r *Reconciler) settleDeclined(ctx context.Context, inv domain.Invoice, res PaymentIntentResult) (bool, error) {
-	settleCtx := ctx
-	if !res.AnchorAt.IsZero() {
-		settleCtx = withSettleAnchor(ctx, res.AnchorAt)
-	}
-	return r.settle(settleCtx, inv, res.ID, 0, res.Purpose, "reconciled: "+res.Status, terminalFailed, res.Status, res.DeclineCode, res.PaymentMethodID, res.CardMessage)
+	return r.settle(ctx, inv, res.ID, 0, res.Purpose, "reconciled: "+res.Status, terminalFailed, res.Status, res.DeclineCode, res.PaymentMethodID, res.CardMessage)
 }
 
 // endWithoutPayment ends an unknown invoice's attempt whose PaymentIntent

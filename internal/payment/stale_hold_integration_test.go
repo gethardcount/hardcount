@@ -54,7 +54,7 @@ type shDunning struct {
 	resolved []string
 }
 
-func (d *shDunning) StartDunning(_ context.Context, _ string, invoiceID, _ string, _ time.Time, _ domain.DunningStartCause) (domain.InvoiceDunningRun, error) {
+func (d *shDunning) StartDunning(_ context.Context, _ string, invoiceID, _ string, _ domain.DunningStartCause) (domain.InvoiceDunningRun, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.started = append(d.started, invoiceID)

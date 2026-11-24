@@ -94,7 +94,7 @@ func TestCollect_CreditCoveredInvoice_ResolvesActiveDunningRun(t *testing.T) {
 	}
 
 	// The no-card enrollment the auto-charge sweep performs.
-	run, err := dunSvc.StartDunning(ctx, tenantID, draft.ID, cust.ID, time.Time{}, domain.DunningCauseNoPaymentMethod)
+	run, err := dunSvc.StartDunning(ctx, tenantID, draft.ID, cust.ID, domain.DunningCauseNoPaymentMethod)
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}

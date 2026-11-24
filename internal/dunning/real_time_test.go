@@ -38,7 +38,7 @@ func TestDunning_AtRealTimeReadsTheServersClockOnce(t *testing.T) {
 		store := &instantStore{memStore: newMemStore()}
 		server := &steppingClock{at: past}
 		svc := NewService(store, &noopRetrier{}, server)
-		started, err := svc.StartDunning(clock.EnsureEffectiveNow(testutil.AtRealTime(), clock.NewFake(past.Add(-time.Hour))), "t1", "inv_1", "cus_1", time.Time{}, domain.DunningCausePaymentFailed)
+		started, err := svc.StartDunning(clock.EnsureEffectiveNow(testutil.AtRealTime(), clock.NewFake(past.Add(-time.Hour))), "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 		if err != nil {
 			t.Fatalf("StartDunning: %v", err)
 		}
@@ -60,7 +60,7 @@ func TestDunning_AtRealTimeReadsTheServersClockOnce(t *testing.T) {
 		store := &instantStore{memStore: newMemStore()}
 		server := &steppingClock{at: past}
 		svc := NewService(store, &failingRetrier{}, server)
-		run, err := svc.StartDunning(clock.EnsureEffectiveNow(testutil.AtRealTime(), clock.NewFake(past.Add(-48*time.Hour))), "t1", "inv_1", "cus_1", time.Time{}, domain.DunningCausePaymentFailed)
+		run, err := svc.StartDunning(clock.EnsureEffectiveNow(testutil.AtRealTime(), clock.NewFake(past.Add(-48*time.Hour))), "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 		if err != nil {
 			t.Fatalf("StartDunning: %v", err)
 		}
@@ -133,7 +133,7 @@ func TestDunning_TheCronWorksEachRunOnItsOwnInstant(t *testing.T) {
 	due := past.Add(-time.Hour)
 	var ids []string
 	for _, inv := range []string{"inv_1", "inv_2"} {
-		run, err := svc.StartDunning(started, "t1", inv, "cus_1", time.Time{}, domain.DunningCausePaymentFailed)
+		run, err := svc.StartDunning(started, "t1", inv, "cus_1", domain.DunningCausePaymentFailed)
 		if err != nil {
 			t.Fatalf("StartDunning %s: %v", inv, err)
 		}

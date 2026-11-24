@@ -3,7 +3,6 @@ package billing_test
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/gethardcount/hardcount/internal/billing"
 	"github.com/gethardcount/hardcount/internal/domain"
@@ -103,6 +102,6 @@ func (m *testInvoiceEmailer) EmailInvoice(_ context.Context, _, invoiceID string
 // Tests that assert on dunning wire their own.
 type testDunningStarter struct{}
 
-func (testDunningStarter) StartDunning(context.Context, string, string, string, time.Time, domain.DunningStartCause) error {
+func (testDunningStarter) StartDunning(context.Context, string, string, string, domain.DunningStartCause) error {
 	return nil
 }

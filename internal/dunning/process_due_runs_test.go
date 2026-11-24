@@ -24,7 +24,7 @@ func dueRuns(t *testing.T, store *memStore, svc *Service, n int) []string {
 	var ids []string
 	past := time.Now().UTC().Add(-time.Hour)
 	for i := range n {
-		run, err := svc.StartDunning(context.Background(), "t1", fmt.Sprintf("inv_%d", i), "cus_1", time.Now(), domain.DunningCausePaymentFailed)
+		run, err := svc.StartDunning(context.Background(), "t1", fmt.Sprintf("inv_%d", i), "cus_1", domain.DunningCausePaymentFailed)
 		if err != nil {
 			t.Fatalf("start dunning: %v", err)
 		}

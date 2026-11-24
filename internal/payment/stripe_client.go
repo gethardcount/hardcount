@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/stripe/stripe-go/v82"
 
@@ -642,9 +641,8 @@ func (c *LiveStripeClient) GetPaymentIntent(ctx context.Context, paymentIntentID
 }
 
 // paymentIntentResult maps a retrieved PaymentIntent to what the reconciler
-// reads: status, purpose, captured amount, the charge's anchor and, for a
-// declined attempt, the bank's decline code and the card it declined
-// (last_payment_error, #966).
+// reads: status, purpose, captured amount and, for a declined attempt, the
+// bank's decline code and the card it declined (last_payment_error, #966).
 func paymentIntentResult(pi *stripe.PaymentIntent) PaymentIntentResult {
 	res := PaymentIntentResult{
 		ID:                  pi.ID,
@@ -655,7 +653,6 @@ func paymentIntentResult(pi *stripe.PaymentIntent) PaymentIntentResult {
 		InvoiceID:           pi.Metadata["hardcount_invoice_id"],
 		TenantID:            pi.Metadata["hardcount_tenant_id"],
 		AmountReceivedCents: pi.AmountReceived,
-		AnchorAt:            anchorFromPIMetadata(pi.Metadata),
 	}
 	// latest_charge is set (unexpanded: its id) once a confirm reached the
 	// card network.
@@ -670,23 +667,6 @@ func paymentIntentResult(pi *stripe.PaymentIntent) PaymentIntentResult {
 		}
 	}
 	return res
-}
-
-// anchorFromPIMetadata reads the contracted simulated instant off a retrieved
-// PI, mirroring anchorFromEventPayload's read of the same key on the webhook
-// path. Absence and unparseable values both yield the zero time and are simply
-// ignored by the caller: a malformed anchor must degrade to the pin binding,
-// never block a settlement.
-func anchorFromPIMetadata(meta map[string]string) time.Time {
-	raw := meta["hardcount_anchor_at"]
-	if raw == "" {
-		return time.Time{}
-	}
-	t, err := time.Parse(time.RFC3339Nano, raw)
-	if err != nil {
-		return time.Time{}
-	}
-	return t
 }
 
 // GetCheckoutSession reads a hosted Checkout Session's outcome (the hosted

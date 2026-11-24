@@ -79,7 +79,7 @@ func TestInvoiceVoid_ClosesTheRunOnce_ARefusedVoidLeavesItOpen(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create invoice: %v", err)
 		}
-		run, err := dsvc.StartDunning(clock.WithRealTime(ctx), tenantID, inv.ID, cust.ID, time.Time{}, domain.DunningCausePaymentFailed)
+		run, err := dsvc.StartDunning(clock.WithRealTime(ctx), tenantID, inv.ID, cust.ID, domain.DunningCausePaymentFailed)
 		if err != nil || run.State != domain.DunningActive {
 			t.Fatalf("start dunning: state %s, %v", run.State, err)
 		}

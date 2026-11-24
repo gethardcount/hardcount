@@ -345,28 +345,11 @@ func (s *Service) SetCustomerEmailFetcher(fetcher CustomerEmailFetcher) {
 // race somehow gets past this check, the INSERT in CreateRun fails
 // with a constraint violation.
 //
-// The first retry lands the policy's first retry_days entry after the moment
-// collection failed, in the invoice's own time domain:
-//
-//   - A wall-clock invoice: now, the moment the failure is recorded. Not the
-//     invoice's issue date or billing period — an invoice charged (or
-//     re-charged, or backfilled) days after it was issued would otherwise get
-//     a first retry already in the past and be retried with no grace at all
-//     (found walking FLOW I10, 2026-10-11: an Oct-11 decline anchored on its
-//     Oct-1 period start was retried at once instead of on Oct 14).
-//   - A clock-pinned invoice: simFailedAt, when that is earlier than the
-//     clock's now. A test-clock Advance does its work at advance-end
-//     frozen_time, but a charge belongs at the simulated instant it fired —
-//     a cycle invoice's charge at its cycle close, a charge after a card
-//     attached on a later Advance at that Advance — so the retries fall
-//     inside the window the operator advanced through, as Stripe test clocks
-//     do.
-//
-// simFailedAt is that simulated instant, chosen by the caller: for a failed
-// charge, the charge's anchor, else the time the failure is recorded
-// (payment.dunningSimFailedAt); for an invoice with no card to charge (the
-// card-less path), its issue instant. Zero when unknown; read only for a
-// clock-pinned invoice.
+// The first retry lands the policy's first retry_days entry after now, the
+// moment the failure is recorded. Not the invoice's issue date or billing
+// period: an invoice charged (or re-charged, or backfilled) days after it was
+// issued would otherwise get a first retry already in the past and be retried
+// with no grace at all.
 //
 // cause is WHY collection needs a run — declared by the caller at write
 // time (decline paths pass payment_failed; the card-less enrollment
@@ -378,7 +361,7 @@ func (s *Service) SetCustomerEmailFetcher(fetcher CustomerEmailFetcher) {
 //
 // ctx carries the action's instant, bound by the caller; "now" above is that
 // instant.
-func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error) {
+func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, customerID string, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error) {
 	if !cause.Valid() {
 		return domain.InvoiceDunningRun{}, errs.Invalid("cause", fmt.Sprintf("unknown dunning start cause %q", cause))
 	}
@@ -429,17 +412,12 @@ func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, 
 	}
 
 	failureAt := s.clock.Now(ctx)
-	if _, simulated := clock.SimOf(ctx); simulated && !simFailedAt.IsZero() && simFailedAt.Before(failureAt) {
-		failureAt = simFailedAt
-	}
 	t := failureAt.Add(firstRetryDelay)
 	nextActionAt := &t
 
 	// One transaction: the run, its dunning_started timeline event (at the
-	// failure instant, so the invoice timeline's 'Automatic retry scheduled'
-	// row aligns with the cycle's period_end, not the orchestrator's
-	// frozen_time), and the dunning.started webhook. A failure writes none of
-	// them, and the caller's retry starts cleanly.
+	// failure instant), and the dunning.started webhook. A failure writes
+	// none of them, and the caller's retry starts cleanly.
 	run, err := s.store.StartRun(ctx, tenantID, domain.InvoiceDunningRun{
 		InvoiceID:    invoiceID,
 		CustomerID:   customerID,
@@ -448,9 +426,7 @@ func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, 
 		Reason:       string(cause),
 		AttemptCount: 0,
 		NextActionAt: nextActionAt,
-		// CreatedAt = failureAt so a simulated run lives on its invoice's
-		// issue instant, not orchestrator frozen_time.
-		CreatedAt: failureAt,
+		CreatedAt:    failureAt,
 	})
 	if err != nil {
 		return domain.InvoiceDunningRun{}, fmt.Errorf("start dunning run: %w", err)
@@ -705,11 +681,10 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 
 	// Rebind ctx's instant to the anchored retry time while keeping the
 	// clock (WithSim, never WithEffectiveNow — that clears the clock id).
-	// Everything downstream of this retry — the charge (which stamps the
-	// anchor into PI metadata for the webhook settle), credit applies,
-	// the inline settle's paid_at — inherits the CONTRACTED instant
-	// instead of the catchup's advance-end frozen_time. A run at real time
-	// is on no test clock and keeps the instant processRun bound.
+	// Everything downstream of this retry (the charge, credit applies)
+	// inherits the CONTRACTED instant instead of the catchup's advance-end
+	// frozen_time. A run at real time is on no test clock and keeps the
+	// instant processRun bound.
 	if sim, ok := clock.SimOf(ctx); ok {
 		ctx = clock.WithSim(ctx, clock.Sim{At: now, TestClockID: sim.TestClockID})
 	}

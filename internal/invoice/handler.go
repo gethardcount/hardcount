@@ -1076,10 +1076,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// On the instant the door bound for the request, as finalize's collect:
-	// on a clock invoice the charge records its clock's instant (the PI's
-	// hardcount_anchor_at), which dates paid_at and a decline's first dunning
-	// retry.
+	// On the instant the door bound for the request, as finalize's collect.
 	charged, err := h.charger.ChargeInvoiceNow(r.Context(), tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
 	if err != nil {
 		// ADR-026 boundary sanitization: ChargeInvoice wraps a

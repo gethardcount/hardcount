@@ -190,14 +190,10 @@ func EnsureEffectiveNow(ctx context.Context, c Clock) context.Context {
 }
 
 // AtArrival returns ctx for the package doc's one exception: a charge's
-// result and the invoice's writes that follow it. On a test clock ctx is
-// kept: its clock and instant. On no clock c is read once, and that read
-// replaces any real instant ctx carries, so the result is dated when it
+// result and the invoice's writes that follow it. c is read once, and that
+// read replaces any instant ctx carries, so the result is dated when it
 // arrived.
 func AtArrival(ctx context.Context, c Clock) context.Context {
-	if _, ok := SimOf(ctx); ok {
-		return ctx
-	}
 	return WithEffectiveNow(ctx, c.Now(WithRealTime(ctx)))
 }
 

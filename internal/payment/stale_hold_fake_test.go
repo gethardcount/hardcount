@@ -96,7 +96,6 @@ type fakeCrash struct{}
 type fakePI struct {
 	id, status, customer, card string
 	key, purpose, invoiceID    string
-	anchor                     string
 	declineCode, failureMsg    string
 	amount                     int64
 	created                    int64
@@ -136,8 +135,8 @@ func (f *fakeStripe) newPI(p PaymentIntentParams, status string) *fakePI {
 	pi := &fakePI{
 		id: fmt.Sprintf("pi_fake_%d", f.seq), status: status, customer: p.CustomerID, card: p.PaymentMethodID,
 		key: p.IdempotencyKey, purpose: p.Metadata["hardcount_purpose"],
-		invoiceID: p.Metadata["hardcount_invoice_id"], anchor: p.Metadata["hardcount_anchor_at"],
-		amount: p.AmountCents, created: time.Now().Unix() + int64(f.seq), // strictly increasing: oldest first is well defined
+		invoiceID: p.Metadata["hardcount_invoice_id"],
+		amount:    p.AmountCents, created: time.Now().Unix() + int64(f.seq), // strictly increasing: oldest first is well defined
 	}
 	if status == "requires_payment_method" {
 		pi.declineCode, pi.failureMsg = "generic_decline", "Your card was declined."
@@ -253,7 +252,6 @@ func (f *fakeStripe) setCustomer(stripeCustomerID, mode string) {
 func (f *fakeStripe) result(pi *fakePI) PaymentIntentResult {
 	res := PaymentIntentResult{
 		ID: pi.id, Status: pi.status, CreatedAt: pi.created, Purpose: pi.purpose,
-		AnchorAt: anchorFromPIMetadata(map[string]string{"hardcount_anchor_at": pi.anchor}),
 	}
 	setFakeListFields(&res, pi)
 	if pi.status == "succeeded" {

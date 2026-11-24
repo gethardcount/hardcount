@@ -57,36 +57,17 @@ func processingInvoice() (*mockInvoiceUpdater, *mockWebhookStore) {
 
 var succeeded = domain.StripeWebhookEvent{StripeEventID: "evt_ev", EventType: "payment_intent.succeeded", PaymentIntentID: "pi_ev"}
 
-// A test-mode payment event decides its time from the invoice it names: a
-// clock invoice is paid at its clock's time, and an invoice on no clock at
-// the machine's time, as on main. The charge's anchor, when the event
-// carries one, still wins inside the settle. All three pass on main too:
-// they guard what the decision must not change.
-func TestHandleWebhook_APaymentIsDatedAsTheInvoiceDecides(t *testing.T) {
-	anchor := eventFrozen.Add(-36 * time.Hour)
-	withAnchor := succeeded
-	withAnchor.Payload = map[string]any{"raw": `{"data":{"object":{"metadata":{"hardcount_anchor_at":"` + anchor.Format(time.RFC3339Nano) + `"}}}}`}
-	for _, c := range []struct {
-		name  string
-		res   *eventResolver
-		event domain.StripeWebhookEvent
-		want  func(time.Time) bool
-	}{
-		{"a clock invoice: the clock's time", &eventResolver{}, succeeded, func(at time.Time) bool { return at.Equal(eventFrozen) }},
-		{"an invoice on no clock: the machine's time", &eventResolver{noClock: true}, succeeded, func(at time.Time) bool { return time.Since(at) < time.Minute }},
-		{"the charge's anchor beats the decision", &eventResolver{}, withAnchor, func(at time.Time) bool { return at.Equal(anchor) }},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			invoices, webhooks := processingInvoice()
-			s := NewStripe(&mockStripeClient{}, invoices, webhooks, nil)
-			s.SetResolver(c.res)
-			if err := s.HandleWebhook(postgres.WithLivemode(context.Background(), false), "t1", c.event); err != nil {
-				t.Fatalf("HandleWebhook: %v", err)
-			}
-			if got := invoices.invoices["inv_1"]; got.PaidAt == nil || !c.want(*got.PaidAt) {
-				t.Errorf("paid_at %v", got.PaidAt)
-			}
-		})
+// A test-mode payment event on an invoice on no clock is paid at the
+// machine's time.
+func TestHandleWebhook_APaymentOnNoClockIsPaidAtTheMachinesTime(t *testing.T) {
+	invoices, webhooks := processingInvoice()
+	s := NewStripe(&mockStripeClient{}, invoices, webhooks, nil)
+	s.SetResolver(&eventResolver{noClock: true})
+	if err := s.HandleWebhook(postgres.WithLivemode(context.Background(), false), "t1", succeeded); err != nil {
+		t.Fatalf("HandleWebhook: %v", err)
+	}
+	if got := invoices.invoices["inv_1"]; got.PaidAt == nil || time.Since(*got.PaidAt) > time.Minute {
+		t.Errorf("paid_at %v; want the machine's now", got.PaidAt)
 	}
 }
 

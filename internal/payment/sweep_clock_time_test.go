@@ -17,13 +17,9 @@ import (
 )
 
 // The payment reconciler runs in real time (the billing role's tick) and
-// reaches clock invoices too. It decides each row's time from the row's
-// invoice (decideRow). On a test clock the settle keeps that decision: with
-// no contracted instant on the charge, paid_at, the failed stamp and
-// dunning's start are all at the invoice's clock time (dunningSimFailedAt:
-// the charge's anchor, else the decided time). On no clock the settle's times
-// are read when Stripe's answer arrives, and the bound instant dates the
-// row's other writes.
+// decides each row's time from the row's invoice (decideRow). The settle's
+// times are read when Stripe's answer arrives, and the bound instant dates
+// the row's other writes.
 
 var sweepFrozen = time.Date(2027, 2, 14, 9, 30, 0, 0, time.UTC)
 
@@ -76,57 +72,6 @@ func unknownClockInvoice() domain.Invoice {
 	inv.PaymentStatus = domain.PaymentUnknown
 	inv.StripePaymentIntentID = "pi_sweep"
 	return inv
-}
-
-func TestRealTimeSweep_PaysAClockInvoiceAtItsClockTime(t *testing.T) {
-	r, updater, _ := sweepHarness(unknownClockInvoice(), &mockStripeClient{piStates: map[string]PaymentIntentResult{
-		"pi_sweep": {ID: "pi_sweep", Status: "succeeded", AmountReceivedCents: 5000},
-	}})
-	if _, errs := r.Run(tickCtx(), 10); len(errs) != 0 {
-		t.Fatalf("errors: %v", errs)
-	}
-	got := updater.invoices["inv_1"]
-	if got.Status != domain.InvoicePaid || got.PaidAt == nil || !got.PaidAt.Equal(sweepFrozen) {
-		t.Errorf("status %s, paid_at %v; want paid at the clock's %v", got.Status, got.PaidAt, sweepFrozen)
-	}
-}
-
-// On a canceled PaymentIntent with no anchor, the failed stamp is at the
-// clock's time and so is dunning's start: not the invoice's issue instant,
-// which would put the first retry in the past and run it at once.
-func TestRealTimeSweep_FailingAClockInvoice_StampsAndStartsDunningAtClockTime(t *testing.T) {
-	r, updater, dunning := sweepHarness(unknownClockInvoice(), &mockStripeClient{piStates: map[string]PaymentIntentResult{
-		"pi_sweep": {ID: "pi_sweep", Status: "canceled", Charged: true},
-	}})
-	if _, errs := r.Run(tickCtx(), 10); len(errs) != 0 {
-		t.Fatalf("errors: %v", errs)
-	}
-	if !updater.failedAt.Equal(sweepFrozen) {
-		t.Errorf("failed stamp at %v, want the clock's %v", updater.failedAt, sweepFrozen)
-	}
-	if len(dunning.calls) != 1 || !dunning.calls[0].failureAt.Equal(sweepFrozen) {
-		t.Errorf("dunning starts %+v, want one at the clock's %v (not the issue instant %v)", dunning.calls, sweepFrozen, *unknownClockInvoice().IssuedAt)
-	}
-}
-
-// The hosted-session sweep settles through SettleSucceeded directly, not the
-// PaymentIntent sweep, so it is guarded on its own.
-func TestRealTimeSweep_HostedSessionPaysAClockInvoiceAtItsClockTime(t *testing.T) {
-	inv := finalizedPendingInvoice()
-	r, updater, _ := sweepHarness(inv, &mockStripeClient{piStates: map[string]PaymentIntentResult{
-		"pi_hosted": {ID: "pi_hosted", Status: "succeeded", AmountReceivedCents: 5000},
-	}})
-	r.SetHostedSessions(
-		&fakeHostedLedger{rows: []CheckoutClaim{{ID: "cks_1", TenantID: "t1", InvoiceID: inv.ID, StripeSessionID: "cs_1", Status: "completed"}}},
-		fakeSessionReader{"cs_1": {Status: "complete", PaymentStatus: "paid", PaymentIntentID: "pi_hosted"}},
-		nil)
-	if _, errs := r.sweepHostedSessions(tickCtx(), 50, new(scheduler.Panics)); len(errs) != 0 {
-		t.Fatalf("errors: %v", errs)
-	}
-	got := updater.invoices[inv.ID]
-	if got.Status != domain.InvoicePaid || got.PaidAt == nil || !got.PaidAt.Equal(sweepFrozen) {
-		t.Errorf("status %s, paid_at %v; want paid at the clock's %v", got.Status, got.PaidAt, sweepFrozen)
-	}
 }
 
 // failingClock answers every record with err.

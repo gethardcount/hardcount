@@ -51,7 +51,7 @@ func newHardDeclineHarness(t *testing.T, retrier PaymentRetrier) *hardDeclineHar
 	emails := &recordingEmailNotifier{}
 	svc.SetEmailNotifier(emails)
 	svc.SetCustomerEmailFetcher(stubCustomerEmail{})
-	run, err := svc.StartDunning(context.Background(), "t1", "inv_1", "cus_1", time.Time{}, domain.DunningCausePaymentFailed)
+	run, err := svc.StartDunning(context.Background(), "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}
