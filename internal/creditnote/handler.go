@@ -120,15 +120,15 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 
 	if req.CommitRelief != nil {
 		if len(req.Lines) > 0 {
-			respond.Validation(w, r, "commit_relief and lines are mutually exclusive — the relief derives its single line from the commit's remaining credits")
+			respond.Validation(w, r, "commit_relief can't be sent with lines, because a refund of unused credit builds its own line; send commit_relief alone.")
 			return
 		}
 		if req.StripeRefundID != "" {
-			respond.ValidationField(w, r, "stripe_refund_id", "stripe_refund_id cannot be used with commit_relief: a refund made in Stripe on an invoice that bought prepaid credit is retired with commit relief allocated out_of_band, then dismissed on the invoice")
+			respond.ValidationField(w, r, "stripe_refund_id", "stripe_refund_id can't be sent with commit_relief; for a refund made in Stripe on a top-up, refund the unused credit with out_of_band_amount_cents inside commit_relief, then dismiss that refund on the invoice.")
 			return
 		}
 		if req.CreditAmountCents > 0 {
-			respond.Validation(w, r, "credit_amount_cents cannot be used with commit_relief — paying relief from the customer's balance would refund the very credits being retired")
+			respond.Validation(w, r, "credit_amount_cents can't be sent with commit_relief, because paying the refund into the credit balance would give back the credit it takes; use refund_amount_cents or out_of_band_amount_cents inside commit_relief.")
 			return
 		}
 		// The relief's split lives inside commit_relief. At the top level it
@@ -143,7 +143,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 			{"refund_type", req.RefundType != ""},
 		} {
 			if f.set {
-				respond.ValidationField(w, r, f.name, f.name+" goes inside commit_relief for a relief, for example {\"commit_relief\": {\"retire_all\": true, \"out_of_band_amount_cents\": 5000}}")
+				respond.ValidationField(w, r, f.name, f.name+" goes inside commit_relief, for example {\"commit_relief\": {\"retire_all\": true, \"out_of_band_amount_cents\": 5000}}.")
 				return
 			}
 		}
@@ -357,13 +357,8 @@ func (h *Handler) issue(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, cn)
 }
 
-// retryRefund re-attempts the Stripe refund leg of an issued CN whose
-// refund_status is failed, unknown, pending or none. Operator-triggered via
-// dashboard when the CN was issued during a Stripe outage / before Stripe was
-// connected. Svc.RetryRefund looks for the refund at Stripe before any
-// create, so retries converge (see its contract).
-// markReturnedAnotherWay ends a failed card refund: the operator paid the
-// customer back outside Stripe. The audit row rides the service's transaction.
+// markReturnedAnotherWay ends a failed card refund: the customer has the money
+// by another way than Stripe. The audit row rides the service's transaction.
 func (h *Handler) markReturnedAnotherWay(w http.ResponseWriter, r *http.Request) {
 	if !respond.NoBody(w, r) {
 		return
@@ -380,6 +375,11 @@ func (h *Handler) markReturnedAnotherWay(w http.ResponseWriter, r *http.Request)
 	respond.JSON(w, r, http.StatusOK, cn)
 }
 
+// retryRefund re-attempts the Stripe refund leg of an issued CN whose
+// refund_status is failed, unknown, pending or none. Operator-triggered via
+// dashboard when the CN was issued during a Stripe outage / before Stripe was
+// connected. Svc.RetryRefund looks for the refund at Stripe before any
+// create, so retries converge (see its contract).
 func (h *Handler) retryRefund(w http.ResponseWriter, r *http.Request) {
 	if !respond.NoBody(w, r) {
 		return

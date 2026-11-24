@@ -645,13 +645,14 @@ func TestRetryRefundAudit_SharedFate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get credit note: %v", err)
 		}
-		// The persist rolls back with its failed emission: refund_status stays
-		// failed and the Stripe refund id is NOT stamped. The next retry
-		// re-converges on the same idempotency key (Stripe returns the same
-		// refund), so no cash is at risk — but the log never claims a state the
-		// database doesn't hold.
-		if got.RefundStatus != domain.RefundFailed {
-			t.Fatalf("refund_status: got %q, want failed — the persist must roll back with its failed audit emission", got.RefundStatus)
+		// The persist rolls back with its failed emission: the Stripe refund id
+		// is NOT stamped, and refund_status is the claim the retry committed
+		// before it called Stripe (pending), not succeeded. The next retry
+		// finds the refund at Stripe by its metadata and adopts it, so no cash
+		// is at risk — but the log never claims a state the database doesn't
+		// hold.
+		if got.RefundStatus != domain.RefundPending {
+			t.Fatalf("refund_status: got %q, want the retry's claim (pending) — the persist must roll back with its failed audit emission", got.RefundStatus)
 		}
 		if got.StripeRefundID != "" {
 			t.Errorf("stripe_refund_id must not be stamped by a rolled-back persist; got %q", got.StripeRefundID)

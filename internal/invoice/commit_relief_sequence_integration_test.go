@@ -25,10 +25,13 @@ var (
 )
 
 // TestCommitRelief_RandomSequence looks for an interleaving nobody thought of:
-// a seeded random sequence of reliefs, usage and its close, expiry, refunds
+// a seeded random sequence of reliefs (some of whose card refunds fail),
+// "returned another way" on a failed one, usage and its close, expiry, refunds
 // made in Stripe and disputes, on one customer with top-ups (every other one
 // discounted) and promotional credit. Six invariants are checked after every
-// step. A failure names its seed; -relief-seed replays it.
+// step, and each kind of step must have succeeded a few times, so a change
+// that refuses every relief cannot pass. A failure names its seed;
+// -relief-seed replays it.
 func TestCommitRelief_RandomSequence(t *testing.T) {
 	seeds := []int64{1, 2, 3}
 	if *reliefSeed != 0 {
@@ -63,12 +66,15 @@ type reliefSequence struct {
 	ctx      context.Context
 	rng      *rand.Rand
 	svc      *creditnote.Service
+	cards    *stripeRefunds
 	unbilled *unbilledUsage
 	tops     []*seqTopup
 	promoID  string
 	eventAt  time.Time          // the next Stripe event's time; each event is a second later
 	refunds  []stripeRefundMade // refunds made in Stripe that succeeded
+	inFlight []stripeRefundMade // refunds made in Stripe still pending
 	n        int
+	done     map[string]int // steps that succeeded, by kind
 }
 
 type stripeRefundMade struct {
@@ -85,8 +91,8 @@ type seqGrant struct {
 func newReliefSequence(t *testing.T, seed int64) *reliefSequence {
 	h, ctx := newCommitHarness(t, "Relief Sequence")
 	s := &reliefSequence{t: t, seed: seed, h: h, ctx: ctx, rng: rand.New(rand.NewSource(seed)),
-		unbilled: &unbilledUsage{}, eventAt: time.Now().UTC().Truncate(time.Second)}
-	s.svc = newCardReliefService(h, &stripeRefunds{})
+		unbilled: &unbilledUsage{}, eventAt: time.Now().UTC().Truncate(time.Second), cards: &stripeRefunds{}, done: map[string]int{}}
+	s.svc = newCardReliefService(h, s.cards)
 	s.svc.SetUnbilledUsageReader(s.unbilled)
 	s.buy()
 	s.buy()
@@ -101,12 +107,25 @@ func newReliefSequence(t *testing.T, seed int64) *reliefSequence {
 	return s
 }
 
+// sequenceFloor is how many times each kind of step must succeed in a run of
+// the default length: well under what the seeds do, well over zero.
+var sequenceFloor = map[string]int{
+	"relief": 10, "returned another way": 1, "close drew credit": 3, "expiry": 2,
+	"purchase": 1, "refund made in Stripe": 10, "dispute": 10,
+}
+
 func (s *reliefSequence) run(steps int) {
 	for step := 0; step < steps; step++ {
 		did := s.step()
 		s.checkInvariants(did)
 		if s.t.Failed() {
 			s.t.Fatalf("seed %d failed at step %d: %s", s.seed, step, did)
+		}
+	}
+	s.t.Logf("seed %d: steps that succeeded, by kind: %v", s.seed, s.done)
+	for kind, floor := range sequenceFloor {
+		if s.done[kind] < floor*steps/300 {
+			s.t.Errorf("seed %d: %d %q steps succeeded, want at least %d", s.seed, s.done[kind], kind, floor*steps/300)
 		}
 	}
 }
@@ -127,6 +146,7 @@ func (s *reliefSequence) buy() string {
 	pi := fmt.Sprintf("pi_seq_%d_%d", s.seed, len(s.tops))
 	payByCard(s.t, s.h, s.ctx, inv.ID, pi)
 	s.tops = append(s.tops, &seqTopup{inv: inv, pi: pi, price: price, granted: granted})
+	s.done["purchase"]++
 	return fmt.Sprintf("bought %s, %d for %d", inv.ID, price, granted)
 }
 
@@ -152,8 +172,10 @@ func (s *reliefSequence) step() string {
 		return s.expire()
 	case k < 71:
 		return s.buy()
-	case k < 86:
+	case k < 84:
 		return s.stripeRefund()
+	case k < 90:
+		return s.returnedAnotherWay()
 	default:
 		return s.dispute()
 	}
@@ -183,7 +205,13 @@ func (s *reliefSequence) relief() string {
 		oob := x - card
 		in.RefundAmountCents, in.OutOfBandAmountCents = &card, &oob
 	}
+	// One card refund in five is refused by Stripe, as a chargeback opened
+	// meanwhile makes it.
+	if s.rng.Intn(5) == 0 {
+		s.cards.refuseNext("charge_disputed")
+	}
 	cn, err := s.svc.CreateAndIssueCommitRelief(clock.WithEffectiveNow(s.ctx, at), s.h.tenantID, in)
+	s.cards.refuse.Store(nil)
 	did := fmt.Sprintf("relief of %s (retire %d, all %v, unused %d)", tp.inv.ID, in.RetireCents, in.RetireAll, unused)
 	if err != nil {
 		if !errors.Is(err, errs.ErrInvalidState) && !errors.Is(err, errs.ErrValidation) {
@@ -197,7 +225,60 @@ func (s *reliefSequence) relief() string {
 	if cn.CommitRetiredCents > unused {
 		s.t.Errorf("invariant 5: %s took %d credit, more than the %d unused at its read", did, cn.CommitRetiredCents, unused)
 	}
-	return fmt.Sprintf("%s: took %d for %d cash", did, cn.CommitRetiredCents, cn.TotalCents)
+	s.done["relief"]++
+	return fmt.Sprintf("%s: took %d for %d cash, card refund %s", did, cn.CommitRetiredCents, cn.TotalCents, cn.RefundStatus)
+}
+
+// returnedAnotherWay marks a failed card refund of a relief as paid back
+// outside Stripe. The service may refuse it (a chargeback open, a refund made
+// in Stripe not recorded yet).
+func (s *reliefSequence) returnedAnotherWay() string {
+	var failed []domain.CreditNote
+	for _, tp := range s.tops {
+		for _, cn := range reliefNotes(s.t, s.ctx, s.svc, s.h.tenantID, tp.inv.ID) {
+			if cn.RefundStatus == domain.RefundFailed {
+				failed = append(failed, cn)
+			}
+		}
+	}
+	if len(failed) == 0 {
+		return "no failed card refund to mark"
+	}
+	cn := failed[s.rng.Intn(len(failed))]
+	did := "returned another way on " + cn.CreditNoteNumber
+	_, err := s.svc.MarkRefundReturnedAnotherWay(s.ctx, s.h.tenantID, cn.ID)
+	if errs.Code(err) == "stripe_refund_unresolved" {
+		// As the operator does: the refunds made in Stripe on the invoice are
+		// not this refund's money, so dismiss them, then mark it.
+		did += ", after dismissing the refunds made in Stripe"
+		s.dismissStripeRefunds(cn.InvoiceID)
+		_, err = s.svc.MarkRefundReturnedAnotherWay(s.ctx, s.h.tenantID, cn.ID)
+	}
+	if err != nil {
+		if !errors.Is(err, errs.ErrInvalidState) {
+			s.t.Fatalf("%s: unexpected error: %v", did, err)
+		}
+		return did + ": refused: " + err.Error()
+	}
+	s.done["returned another way"]++
+	return did
+}
+
+// dismissStripeRefunds dismisses every refund made in Stripe on the invoice
+// that needs review. One still in flight cannot be dismissed and stays.
+func (s *reliefSequence) dismissStripeRefunds(invoiceID string) {
+	rows, err := creditnote.NewPostgresStore(s.h.db).ListStripeRefundsByInvoice(s.ctx, s.h.tenantID, invoiceID)
+	if err != nil {
+		s.t.Fatalf("list refunds made in Stripe: %v", err)
+	}
+	for _, r := range rows {
+		if r.Outcome != domain.StripeRefundNeedsReview {
+			continue
+		}
+		if _, err := s.svc.DismissStripeRefund(s.ctx, s.h.tenantID, invoiceID, r.StripeRefundID, "not this refund's money"); err != nil {
+			s.t.Fatalf("dismiss %s: %v", r.StripeRefundID, err)
+		}
+	}
 }
 
 // close bills the unbilled usage: credit pays what it can.
@@ -213,6 +294,9 @@ func (s *reliefSequence) close() string {
 	}
 	did := fmt.Sprintf("close of %d usage, credit paid %d", s.unbilled.cents, drawn)
 	s.unbilled.cents = 0
+	if drawn > 0 {
+		s.done["close drew credit"]++
+	}
 	return did
 }
 
@@ -224,6 +308,7 @@ func (s *reliefSequence) expire() string {
 	}
 	execBypassStamp(s.t, s.h.db, `UPDATE customer_credit_ledger SET expires_at = LEAST(COALESCE(expires_at, NOW()), NOW()) - INTERVAL '1 millisecond' WHERE id = $1`, id)
 	did := "expiry of " + id
+	s.done["expiry"]++
 	if s.rng.Intn(2) == 0 {
 		if _, errsList := s.h.creditSvc.ExpireCredits(s.ctx); len(errsList) > 0 {
 			s.t.Fatalf("sweep: %v", errsList)
@@ -235,8 +320,21 @@ func (s *reliefSequence) expire() string {
 
 // stripeRefund is a refund made in Stripe, never more than Stripe would
 // allow: what the card has left after every refund of it. Sometimes an
-// earlier one fails after it succeeded.
+// earlier one still in flight settles, or one fails after it succeeded.
 func (s *reliefSequence) stripeRefund() string {
+	if len(s.inFlight) > 0 && s.rng.Intn(3) == 0 {
+		i := s.rng.Intn(len(s.inFlight))
+		re := s.inFlight[i]
+		s.inFlight = append(s.inFlight[:i], s.inFlight[i+1:]...)
+		status := domain.StripeRefundSucceeded
+		if s.rng.Intn(2) == 0 {
+			status = domain.StripeRefundFailed
+		} else {
+			s.refunds = append(s.refunds, re)
+		}
+		recordStripeRefund(s.t, s.ctx, s.svc, s.h.tenantID, re.id, re.pi, re.cents, status, s.nextEventAt())
+		return "refund " + re.id + " settled, " + string(status)
+	}
 	if len(s.refunds) > 0 && s.rng.Intn(4) == 0 {
 		re := s.refunds[s.rng.Intn(len(s.refunds))]
 		recordStripeRefund(s.t, s.ctx, s.svc, s.h.tenantID, re.id, re.pi, re.cents, domain.StripeRefundFailed, s.nextEventAt())
@@ -253,9 +351,13 @@ func (s *reliefSequence) stripeRefund() string {
 	re := fmt.Sprintf("re_seq_%d_%d", s.seed, s.n)
 	cents := 1 + s.rng.Int63n(min(left, 20000))
 	recordStripeRefund(s.t, s.ctx, s.svc, s.h.tenantID, re, tp.pi, cents, status, s.nextEventAt())
-	if status == domain.StripeRefundSucceeded {
+	switch {
+	case status == domain.StripeRefundSucceeded:
 		s.refunds = append(s.refunds, stripeRefundMade{re, tp.pi, cents})
+	case status.InFlight():
+		s.inFlight = append(s.inFlight, stripeRefundMade{re, tp.pi, cents})
 	}
+	s.done["refund made in Stripe"]++
 	return fmt.Sprintf("refund %s of %d made in Stripe, %s", re, cents, status)
 }
 
@@ -279,6 +381,7 @@ func (s *reliefSequence) dispute() string {
 	}); err != nil {
 		s.t.Fatalf("dispute: %v", err)
 	}
+	s.done["dispute"]++
 	return fmt.Sprintf("dispute %s now %s", tp.disputeID, status)
 }
 
@@ -322,6 +425,9 @@ func (s *reliefSequence) chargebackOrLoss(tp *seqTopup) bool {
 		s.t.Fatalf("disputes: %v", err)
 	}
 	for _, d := range ds {
+		if d.StripePaymentIntentID != tp.pi {
+			continue
+		}
 		switch d.Status {
 		case domain.DisputeNeedsResponse, domain.DisputeUnderReview, domain.DisputeAppealNeedsResponse,
 			domain.DisputeAppealUnderReview, domain.DisputeLost:

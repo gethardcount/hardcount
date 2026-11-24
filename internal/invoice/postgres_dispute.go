@@ -224,10 +224,12 @@ func invoiceForPaymentIntentTx(ctx context.Context, tx *sql.Tx, paymentIntentID 
 }
 
 // DisputeStatusesTx returns the status of every dispute recorded on the
-// invoice, on the caller's tx, with no lock. Commit relief reads it under its
-// credit-note lock to refuse a payment the bank has taken or holds.
-func (s *PostgresStore) DisputeStatusesTx(ctx context.Context, tx *sql.Tx, invoiceID string) ([]domain.DisputeStatus, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT status FROM invoice_disputes WHERE invoice_id = $1`, invoiceID)
+// invoice's payment paymentIntentID, on the caller's tx, with no lock. Commit
+// relief and "returned another way" read it under the credit-note lock to
+// refuse a payment the bank has taken or holds.
+func (s *PostgresStore) DisputeStatusesTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) ([]domain.DisputeStatus, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT status FROM invoice_disputes WHERE invoice_id = $1 AND stripe_payment_intent_id = $2`, invoiceID, paymentIntentID)
 	if err != nil {
 		return nil, fmt.Errorf("read disputes of invoice %s: %w", invoiceID, err)
 	}

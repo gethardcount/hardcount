@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -323,5 +324,31 @@ func TestTopup_RefundUnusedCredit(t *testing.T) {
 	r := e.call(t, "POST", "/v1/credit-notes/"+flowStr(cn, "id")+"/mark-returned-another-way", nil)
 	if r.status != 409 || r.errCode() != "invalid_state" {
 		t.Errorf("returned another way with no failed refund: %d %.200s, want 409 invalid_state", r.status, r.raw)
+	}
+}
+
+// The usage a customer has used and no invoice has billed yet is credit
+// already used, and relief takes only what is left: the router's adapter reads
+// it from the billing engine. 700 calls at 1c on the open period leave
+// 93.00 of the 100.00 bought unused, refunded at 0.90 each.
+func TestTopup_RefundCountsUnbilledUsage(t *testing.T) {
+	r := newLagRig(t, "in_arrears", false)
+	at := lagP0.Add(10 * 24 * time.Hour)
+	r.ingest(lagP0.Add(24*time.Hour), 700)
+	inv := r.must(http.MethodPost, "/v1/invoices", at, map[string]any{
+		"customer_id": r.custID,
+		"line_items":  []map[string]any{{"description": "Prepaid credit", "quantity": 1, "unit_amount_cents": 9000, "commit_granted_cents": 10000}},
+	}, http.StatusCreated)
+	id := inv["id"].(string)
+	r.must(http.MethodPost, "/v1/invoices/"+id+"/record-payment", at, map[string]any{"note": "Wire"}, http.StatusOK)
+
+	cn := r.must(http.MethodPost, "/v1/credit-notes", at, map[string]any{
+		"invoice_id": id, "commit_relief": map[string]any{"retire_all": true},
+	}, http.StatusCreated)
+	if got := int64(cn["commit_retired_cents"].(float64)); got != 9300 {
+		t.Errorf("credit taken back %d, want 9300: the 700 of usage not invoiced yet is credit already used", got)
+	}
+	if got := int64(cn["total_cents"].(float64)); got != 8370 {
+		t.Errorf("refund %d, want 8370 (9300 of credit at 0.90)", got)
 	}
 }

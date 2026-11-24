@@ -53,7 +53,7 @@ func (e *RefundError) OperatorSafeMessage() string {
 	if e.Unknown {
 		return "Stripe didn't confirm whether the refund went through. Don't refund this payment in Stripe. Retry the refund later: Hardcount looks for the refund in Stripe first, then resends the same request."
 	}
-	return "Stripe didn't make the refund, so the customer was not refunded. Check the payment in Stripe, then retry the refund."
+	return "Stripe didn't make the refund, so the customer was not refunded. Check the payment in Stripe and retry the refund; if the card can't take it and no dispute is open, pay the customer back another way and mark the refund as returned another way."
 }
 
 // OperatorErrorCode shares the charge path's code for "no clear answer", so

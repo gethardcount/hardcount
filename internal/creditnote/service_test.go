@@ -433,6 +433,11 @@ func (m *memStore) StripeRefundedOutsideNotesTx(context.Context, *sql.Tx, string
 	return 0, nil
 }
 
+// The retry's claim is a CAS proven on the real store; here it always wins.
+func (m *memStore) ClaimFailedRefundForRetry(context.Context, string, string) (bool, error) {
+	return true, nil
+}
+
 func (m *memStore) ReturnRefundAnotherWayTx(context.Context, *sql.Tx, string, int64) (bool, error) {
 	return false, fmt.Errorf("memStore: returned another way is proven on the real store")
 }
@@ -538,7 +543,7 @@ func (m *memInvoiceReader) LockForCreditNoteTx(ctx context.Context, _ *sql.Tx, t
 	return m.Get(ctx, tenantID, id)
 }
 
-func (m *memInvoiceReader) DisputeStatusesTx(context.Context, *sql.Tx, string) ([]domain.DisputeStatus, error) {
+func (m *memInvoiceReader) DisputeStatusesTx(context.Context, *sql.Tx, string, string) ([]domain.DisputeStatus, error) {
 	return nil, nil
 }
 

@@ -69,19 +69,34 @@ func CreditDrawOwedExceptSQL(g, exceptInvoice string) string {
 		except = `
 			   AND i.id <> ` + exceptInvoice
 	}
-	reasons := make([]string, len(creditDrawAsOfIssueReasons))
-	for i, r := range creditDrawAsOfIssueReasons {
-		reasons[i] = "'" + string(r) + "'"
-	}
 	return `(EXISTS (
 			SELECT 1 FROM subscriptions s
 			 WHERE s.tenant_id = ` + g + `.tenant_id AND s.customer_id = ` + g + `.customer_id
 			   AND s.status IN ('active','trialing')
 			   AND ` + SubscriptionDueInstantSQL("s") + ` <= ` + g + `.expires_at)
-		OR EXISTS (
+		OR ` + creditDrawPendingSQL(g, except) + `)`
+}
+
+// CreditDrawPendingSQL returns a SQL expression that is true while case (ii)
+// of CreditDrawOwedSQL holds for the grant row aliased g: a period or
+// threshold invoice of its customer, issued while g was live, is a draft or
+// is queued for collection, so its collection is still to draw on the credit.
+// A grant with no expiry is live for every invoice. Commit relief refuses
+// while it holds: a closed period's usage is no longer unbilled, but the
+// credit its invoice will draw is still in the balance.
+func CreditDrawPendingSQL(g string) string {
+	return creditDrawPendingSQL(g, "")
+}
+
+func creditDrawPendingSQL(g, except string) string {
+	reasons := make([]string, len(creditDrawAsOfIssueReasons))
+	for i, r := range creditDrawAsOfIssueReasons {
+		reasons[i] = "'" + string(r) + "'"
+	}
+	return `EXISTS (
 			SELECT 1 FROM invoices i
 			 WHERE i.tenant_id = ` + g + `.tenant_id AND i.customer_id = ` + g + `.customer_id
 			   AND i.billing_reason IN (` + strings.Join(reasons, ",") + `)
-			   AND i.issued_at <= ` + g + `.expires_at` + except + `
-			   AND (i.status = 'draft' OR i.auto_charge_pending)))`
+			   AND (` + g + `.expires_at IS NULL OR i.issued_at <= ` + g + `.expires_at)` + except + `
+			   AND (i.status = 'draft' OR i.auto_charge_pending))`
 }

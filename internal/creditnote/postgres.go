@@ -48,7 +48,7 @@ const cnReadCols = `id, tenant_id, invoice_id, customer_id, credit_note_number,
 	currency, issued_at, voided_at, refund_status, COALESCE(stripe_refund_id,''),
 	COALESCE(refund_unknown_key,''), recorded_from_stripe,
 	COALESCE(tax_transaction_id,''), issue_pending,
-	tax_reversal_pending, commit_retired_cents,
+	tax_reversal_pending, commit_retired_cents, returned_another_way_at,
 	metadata, created_at, updated_at, recorded_at,
 	bill_to_snapshot, supplier_snapshot`
 
@@ -62,7 +62,7 @@ func (s *PostgresStore) cnScanDest(cn *domain.CreditNote, metaJSON *[]byte) []an
 		&cn.Currency, &cn.IssuedAt, &cn.VoidedAt, &cn.RefundStatus, &cn.StripeRefundID,
 		&cn.RefundUnknownKey, &cn.RecordedFromStripe,
 		&cn.TaxTransactionID, &cn.IssuePending,
-		&cn.TaxReversalPending, &cn.CommitRetiredCents,
+		&cn.TaxReversalPending, &cn.CommitRetiredCents, &cn.ReturnedAnotherWayAt,
 		metaJSON, &cn.CreatedAt, &cn.UpdatedAt, &cn.RecordedAt,
 		domain.SnapshotScanner[domain.DocumentBillTo]{Dst: &cn.BillToSnapshot, Open: func(b domain.DocumentBillTo) (domain.DocumentBillTo, error) {
 			return b.Open(s.enc)

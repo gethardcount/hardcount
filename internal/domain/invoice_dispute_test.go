@@ -67,8 +67,10 @@ func TestInvoiceDispute_SupersededBy(t *testing.T) {
 		t.Error("won in the same second as lost must not replace it")
 	}
 
-	// An appeal follows a loss, and closes again. Within one second a close
-	// beats an appeal in either order, so a closed dispute never reads as open.
+	// Stripe's appeal: under_review, then appeal_needs_response once the
+	// response is rejected, appeal_under_review once the appeal is sent, then
+	// won or lost. Within one second a close beats an appeal in either order,
+	// so a closed dispute never reads as open.
 	appeal := InvoiceDispute{Status: DisputeAppealUnderReview, LastEventAt: at, LastStripeEventID: "evt_appeal"}
 	for _, tc := range []struct {
 		name string
@@ -76,7 +78,7 @@ func TestInvoiceDispute_SupersededBy(t *testing.T) {
 		s    DisputeSnapshot
 		want bool
 	}{
-		{"appeal a second after the loss", lost, snap("evt_a", DisputeAppealNeedsResponse, at.Add(time.Second)), true},
+		{"appeal a second after the review", row, snap("evt_a", DisputeAppealNeedsResponse, at.Add(time.Second)), true},
 		{"won a second after the appeal", appeal, snap("evt_w", DisputeWon, at.Add(time.Second)), true},
 		{"appeal response, then its review", InvoiceDispute{Status: DisputeAppealNeedsResponse, LastEventAt: at}, snap("evt_r", DisputeAppealUnderReview, at), true},
 		{"same second: won after an appeal row", appeal, snap("evt_w", DisputeWon, at), true},

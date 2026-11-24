@@ -237,7 +237,8 @@ func (s *PostgresStore) StripeRefundedOutsideNotesTx(ctx context.Context, tx *sq
 func (s *PostgresStore) ReturnRefundAnotherWayTx(ctx context.Context, tx *sql.Tx, creditNoteID string, refundCents int64) (bool, error) {
 	res, err := tx.ExecContext(ctx, `
 		UPDATE credit_notes SET out_of_band_amount_cents = out_of_band_amount_cents + refund_amount_cents,
-			refund_amount_cents = 0, refund_status = 'none', refund_unknown_key = NULL, updated_at = $3
+			refund_amount_cents = 0, refund_status = 'none', refund_unknown_key = NULL,
+			returned_another_way_at = $3, updated_at = $3
 		WHERE id = $1 AND status = 'issued' AND refund_status = 'failed' AND refund_amount_cents = $2 AND refund_amount_cents > 0`,
 		creditNoteID, refundCents, clock.Now(ctx))
 	if err != nil {
@@ -248,6 +249,30 @@ func (s *PostgresStore) ReturnRefundAnotherWayTx(ctx context.Context, tx *sql.Tx
 		return false, err
 	}
 	return n == 1, nil
+}
+
+// ClaimFailedRefundForRetry moves an issued note's failed card refund to
+// pending, as a CAS: false when the refund is no longer failed. Retry refund
+// claims its attempt this way before it calls Stripe, so "returned another
+// way", whose CAS needs the refund failed, loses while a retry runs.
+func (s *PostgresStore) ClaimFailedRefundForRetry(ctx context.Context, tenantID, creditNoteID string) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return false, err
+	}
+	defer postgres.Rollback(tx)
+	res, err := tx.ExecContext(ctx, `
+		UPDATE credit_notes SET refund_status = 'pending', updated_at = $2
+		WHERE id = $1 AND status = 'issued' AND refund_status = 'failed' AND refund_amount_cents > 0`,
+		creditNoteID, clock.Now(ctx))
+	if err != nil {
+		return false, fmt.Errorf("claim the refund retry of credit note %s: %w", creditNoteID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, tx.Commit()
 }
 
 func (s *PostgresStore) LinkStripeRefundTx(ctx context.Context, tx *sql.Tx, id, creditNoteID string) (domain.InvoiceStripeRefund, error) {

@@ -129,17 +129,26 @@ refund at face (over-refund); charging consumption at face under-refunds.
   spendable balance is read on the relief's transaction under the customer's
   credit lock; the unbilled usage, billing's figure, before the transaction.
   `retire_all` takes all of it; a larger `retire_cents` answers 422 with it.
+  While an issued period or threshold invoice is still to draw on the grant
+  (`domain.CreditDrawPendingSQL`, the invoice half of the expiry sweep's
+  owed draw), relief is refused: that invoice's usage is no longer unbilled,
+  and the credit it will draw is still in the balance.
 - **A top-up only.** Relief requires `billing_reason = 'topup'`, which
   replaces the mixed-invoice gate of decision 6: a top-up has one line.
 - **The card cap counts refunds made in Stripe** of the same payment that
   moved or may move money and that no note holds, read under the
   per-invoice credit-note lock (decision 4's PM refund cap).
-- **Disputes.** Relief is refused while a chargeback is recorded (an appeal
-  included) and once the bank won it. When one opens during the relief,
-  Stripe refuses the card refund, and "returned another way"
-  (`POST /v1/credit-notes/{id}/mark-returned-another-way`) ends it. This
-  replaces the 2026-10-19 note's advice to relieve a lost dispute out of
-  band.
+- **Disputes.** Relief is refused, with code `payment_disputed`, while a
+  chargeback is recorded on the invoice's own payment (an appeal included)
+  and once the bank won it. When one opens during the relief, Stripe refuses
+  the card refund, and "returned another way"
+  (`POST /v1/credit-notes/{id}/mark-returned-another-way`) ends it. That
+  action is refused while the chargeback is open, and allowed once it is
+  lost. This replaces the 2026-10-19 note's advice to relieve a lost dispute
+  out of band.
+- **Retry and "returned another way".** Retry refund moves a failed refund
+  to `pending` before it calls Stripe, and the mark needs it `failed`, so
+  the two never both land.
 - **Lock order.** The credit-note lock, the invoice row `FOR KEY SHARE`, the
   customer's credit lock and the grant row, then the tenant's number row.
   The early `FOR KEY SHARE` keeps the invoice row before the number row. The

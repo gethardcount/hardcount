@@ -103,7 +103,7 @@ The same steps through the API follow. Act on a `needs_review` refund by its
 | `invoice_not_paid` | Check the invoice's payments in Stripe. Once the invoice is paid, record it (step 1); otherwise dismiss it. |
 | `exceeds_card_refundable` | The refund is more than the card payment had left after the credit notes on the invoice. Check the payment in Stripe, record the difference in your own books, and dismiss it. |
 | `exceeds_creditable` | An earlier credit note already gave part of the invoice back another way, for example as account credit. If that credit was not meant as well, take it back from the customer's balance. Then dismiss it. |
-| `prepaid_commit` | The invoice bought prepaid credit, which the customer can still spend. Retire (remove) it with commit relief, the part of a credit note that retires prepaid credit, recorded as money returned outside Hardcount, as in [Card disputes](card-disputes.md#fix) step 3, then dismiss it. |
+| `prepaid_commit` | The invoice bought prepaid credit, which the customer can still spend. Take back the credit this refund paid for with commit relief, its money as `out_of_band_amount_cents` because the refund already returned it ([Refund unused credit](../../guides/sell-prepaid-credit.md#refund-unused-credit)), then dismiss it. |
 | `currency_mismatch` | Record it in your own books and dismiss it. |
 
 1. **Record it with a credit note that names the refund.** Send the refund's

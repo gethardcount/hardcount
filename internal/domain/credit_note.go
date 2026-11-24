@@ -51,12 +51,16 @@ type CreditNote struct {
 	// its relief leg (ADR-080). It is 0 on every credit note that is not a
 	// relief. It is a real column, not metadata, so auditors can reconcile
 	// grant.cn_retired_cents == SUM(cn.commit_retired_cents).
-	CommitRetiredCents int64        `json:"commit_retired_cents,omitempty"`
-	Currency           string       `json:"currency"`
-	IssuedAt           *time.Time   `json:"issued_at,omitempty"`
-	VoidedAt           *time.Time   `json:"voided_at,omitempty"`
-	RefundStatus       RefundStatus `json:"refund_status"`
-	StripeRefundID     string       `json:"stripe_refund_id,omitempty"`
+	CommitRetiredCents int64 `json:"commit_retired_cents,omitempty"`
+	// ReturnedAnotherWayAt is when the operator marked the note's failed card
+	// refund as paid back outside Stripe, which moved it to out_of_band. Nil
+	// on every other note.
+	ReturnedAnotherWayAt *time.Time   `json:"-"`
+	Currency             string       `json:"currency"`
+	IssuedAt             *time.Time   `json:"issued_at,omitempty"`
+	VoidedAt             *time.Time   `json:"voided_at,omitempty"`
+	RefundStatus         RefundStatus `json:"refund_status"`
+	StripeRefundID       string       `json:"stripe_refund_id,omitempty"`
 	// RecordedFromStripe marks a credit note whose card refund is a refund
 	// made in Stripe outside Hardcount (ADR-134): recorded from the refund
 	// webhook, or linked by the operator at create. Hardcount made no refund

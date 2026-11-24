@@ -1350,12 +1350,14 @@ The credit note PDF is attached for your records.
 type creditNoteFigure struct{ label, amount string }
 
 // creditNoteFigures are the amounts a credit-note email states. A note that
-// took credit back refunded its total for that credit; any other credited its
-// total.
+// took credit back refunds its total for that credit; any other credited its
+// total. The refund is named without a tense: the email can be sent at any
+// time after the note is issued, whatever its card refund's state, and the
+// attached PDF says that state.
 func creditNoteFigures(amountCents, creditTakenBackCents int64, currency string) []creditNoteFigure {
 	if creditTakenBackCents > 0 {
 		return []creditNoteFigure{
-			{"Refunded", formatAmount(amountCents, currency)},
+			{"Refund", formatAmount(amountCents, currency)},
 			{"Credit taken back", formatAmount(creditTakenBackCents, currency)},
 		}
 	}

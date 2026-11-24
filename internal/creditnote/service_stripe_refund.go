@@ -747,13 +747,28 @@ func (s *Service) createAndIssueLinked(ctx context.Context, tenantID string, inp
 	return s.runPostIssueExternalLegs(ctx, tenantID, cn.ID, cn, inv)
 }
 
-// RefundBlockedByStripeRefund is RetryRefund's guard against refunding a
-// customer twice (ADR-134, 2026-10-30 review): while the invoice has a refund
-// made in Stripe that is not settled yet (flagged for review, or still in
-// flight), the operator may have refunded by hand what this note's failed
-// refund was for. A retry is refused until that refund is recorded,
-// attached to this note, or dismissed.
-func (s *Service) refundBlockedByStripeRefund(ctx context.Context, tenantID, invoiceID string) error {
+// blockedAction words refundBlockedByStripeRefund's refusal for the action it
+// guards: what to do once the refund made in Stripe is settled or decided.
+type blockedAction struct{ unrecorded, inFlight string }
+
+var (
+	blockRetry = blockedAction{
+		unrecorded: "Then retry. Retrying now could refund the customer twice.",
+		inFlight:   "Wait for Stripe to settle it, then retry. Retrying now could refund the customer twice.",
+	}
+	blockMark = blockedAction{
+		unrecorded: "Then mark this refund as returned another way if it still is: that refund may be its money.",
+		inFlight:   "Wait for Stripe to settle it before you mark this refund as returned another way: it may be its money.",
+	}
+)
+
+// RefundBlockedByStripeRefund guards Retry refund and "returned another way"
+// against refunding a customer twice (ADR-134, 2026-10-30 review): while the
+// invoice has a refund made in Stripe that is not settled yet (flagged for
+// review, or still in flight), the operator may have refunded by hand what
+// this note's failed refund was for. The action is refused until that refund
+// is recorded, attached to this note, or dismissed.
+func (s *Service) refundBlockedByStripeRefund(ctx context.Context, tenantID, invoiceID string, action blockedAction) error {
 	if s.refunds == nil {
 		return nil
 	}
@@ -765,12 +780,12 @@ func (s *Service) refundBlockedByStripeRefund(ctx context.Context, tenantID, inv
 		switch r.Outcome {
 		case domain.StripeRefundNeedsReview:
 			return errs.InvalidState(fmt.Sprintf(
-				"A refund of %s was made in Stripe on this invoice (%s) and is not recorded here. If it replaces this refund, attach it to this credit note; otherwise record it or dismiss it. Then retry. Retrying now could refund the customer twice.",
-				domain.FormatMoneyMinor(r.AmountCents, r.Currency), r.StripeRefundID)).WithCode("stripe_refund_unresolved")
+				"A refund of %s was made in Stripe on this invoice (%s) and is not recorded here. If it replaces this refund, attach it to this credit note; otherwise record it or dismiss it. %s",
+				domain.FormatMoneyMinor(r.AmountCents, r.Currency), r.StripeRefundID, action.unrecorded)).WithCode("stripe_refund_unresolved")
 		case domain.StripeRefundAwaiting:
 			return errs.InvalidState(fmt.Sprintf(
-				"A refund of %s made in Stripe on this invoice (%s) is still in flight. Wait for Stripe to settle it, then retry. Retrying now could refund the customer twice.",
-				domain.FormatMoneyMinor(r.AmountCents, r.Currency), r.StripeRefundID)).WithCode("stripe_refund_unresolved")
+				"A refund of %s made in Stripe on this invoice (%s) is still in flight. %s",
+				domain.FormatMoneyMinor(r.AmountCents, r.Currency), r.StripeRefundID, action.inFlight)).WithCode("stripe_refund_unresolved")
 		}
 	}
 	return nil

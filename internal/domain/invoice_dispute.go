@@ -5,8 +5,12 @@ import "time"
 // DisputeStatus is Stripe's Dispute.status, stored as Stripe sends it
 // (https://docs.stripe.com/api/disputes/object#dispute_object-status). The
 // warning_* values are an inquiry: the card network asks about the payment
-// before any chargeback. The other values are a chargeback. The appeal_*
-// values reopen a lost chargeback while the merchant appeals it.
+// before any chargeback. The other values are a chargeback. Stripe sends the
+// appeal_* values only when appeals are turned on: under_review moves to
+// appeal_needs_response when the bank rejects the response and the dispute
+// can be appealed, then to appeal_under_review once the appeal is sent, and
+// the dispute closes won or lost. Closing it at appeal_needs_response makes it
+// lost.
 //
 // The column's CHECK lists the same ten values (migration 00246). The
 // webhook handler refuses, loudly, a status that Stripe adds later, until both
@@ -48,14 +52,10 @@ const disputeStageClosed = 7
 
 // stage orders statuses along the dispute's life, so two snapshots stamped in
 // the same second apply in the order they happened: an inquiry before the
-// chargeback it became, an open dispute before its close. Statuses at the
-// same stage do not order each other. 0 means not a status Hardcount knows.
-//
-// An appeal comes after a loss and before the close that ends it, so the
-// order cannot follow the dispute's life for both. A close outranks an
-// appeal: in a same-second tie the row reads closed, never open after it
-// closed. The other way round, a same-second tie between a loss and the
-// appeal of it reads lost; relief treats lost and an open appeal alike.
+// chargeback it became, a review before its appeal, an open dispute before its
+// close. Statuses at the same stage do not order each other. 0 means not a
+// status Hardcount knows. A close outranks an appeal, so a closed dispute
+// never reads as open.
 func (s DisputeStatus) stage() int {
 	switch s {
 	case DisputeWarningNeedsResponse:

@@ -183,20 +183,23 @@ func TestRecordStripeDispute_InOrder(t *testing.T) {
 		t.Errorf("lost disputes = %+v, want only %s on %s", lost, du, h.invID)
 	}
 
-	// The merchant appeals the loss: the dispute is open again until the
-	// appeal closes it.
-	for i, st := range []domain.DisputeStatus{domain.DisputeAppealNeedsResponse, domain.DisputeAppealUnderReview} {
-		r = h.record(t, h.snap(fmt.Sprintf("evt_appeal_%d", i), du, st, lostAt.Add(time.Duration(i+1)*time.Minute)))
+	// Stripe's appeal, when appeals are on: the bank rejects the response,
+	// the merchant appeals, and the appeal decides. The dispute stays open,
+	// with no close time, until won or lost.
+	const appealed = "du_appealed"
+	for i, st := range []domain.DisputeStatus{domain.DisputeNeedsResponse, domain.DisputeUnderReview,
+		domain.DisputeAppealNeedsResponse, domain.DisputeAppealUnderReview} {
+		r = h.record(t, h.snap(fmt.Sprintf("evt_appeal_%d", i), appealed, st, h.t0.Add(time.Duration(i)*time.Minute)))
 		if !r.Applied || r.Closed || r.Dispute.Status != st || r.Dispute.ClosedAt != nil {
 			t.Fatalf("appeal step %s: %+v, want applied, open, no close time", st, r)
 		}
 	}
-	wonAt := lostAt.Add(3 * time.Minute)
-	r = h.record(t, h.snap("evt_appeal_won", du, domain.DisputeWon, wonAt))
+	wonAt := h.t0.Add(4 * time.Minute)
+	r = h.record(t, h.snap("evt_appeal_won", appealed, domain.DisputeWon, wonAt))
 	if !r.Applied || !r.Closed || r.Dispute.Status != domain.DisputeWon || r.Dispute.ClosedAt == nil || !r.Dispute.ClosedAt.Equal(wonAt) {
 		t.Fatalf("appeal won: %+v, want closed won at %s", r, wonAt)
 	}
-	h.wantEvents(t, du, 1, 2)
+	h.wantEvents(t, appealed, 1, 1)
 	h.wantInvoiceUntouched(t)
 }
 

@@ -287,7 +287,6 @@ func (s *Service) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, 
 type ReliefGrant struct {
 	GrantID        string
 	GrantedCents   int64 // G
-	ConsumedCents  int64 // C
 	CNRetiredCents int64 // K
 	// LiveRemainingCents is what is left of the grant at the instant, 0 once
 	// it is past its expires_at, swept or not.
@@ -295,6 +294,9 @@ type ReliefGrant struct {
 	// SpendableCents is the customer's spendable balance in the grant's
 	// currency at the instant (SpendableBalance), read under the same lock.
 	SpendableCents int64
+	// DrawPending is whether an issued invoice of the customer is still to
+	// draw on the grant (domain.CreditDrawPendingSQL).
+	DrawPending bool
 }
 
 // LockCommitGrantForReliefTx reads the funded grant under the relief locks
@@ -312,8 +314,8 @@ func (s *Service) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, te
 	if err != nil {
 		return ReliefGrant{}, false, fmt.Errorf("read the spendable balance for relief: %w", err)
 	}
-	out := ReliefGrant{GrantID: g.GrantID, GrantedCents: g.AmountCents, ConsumedCents: g.ConsumedCents,
-		CNRetiredCents: g.CNRetiredCents, SpendableCents: spendable[g.Currency]}
+	out := ReliefGrant{GrantID: g.GrantID, GrantedCents: g.AmountCents, CNRetiredCents: g.CNRetiredCents,
+		SpendableCents: spendable[g.Currency], DrawPending: g.DrawPending}
 	if g.Live {
 		out.LiveRemainingCents = g.Remaining()
 	}

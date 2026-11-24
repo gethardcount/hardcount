@@ -682,8 +682,8 @@ func itoa(n int) string {
 // rider). No CTA — no hosted CN page exists; the PDF is the document.
 // invoiceNumber names the APPLIED invoice so finance can match the
 // credit to the bill it adjusts. A note that took credit back (a top-up's
-// refund, creditTakenBackCents > 0) says what was refunded and what credit
-// went with it, never that an amount was credited.
+// refund, creditTakenBackCents > 0) states the refund and the credit taken
+// back, never that an amount was credited.
 func renderCreditNoteHTML(customerName, creditNoteNumber, invoiceNumber string, amountCents, creditTakenBackCents int64, currency, companyName string) (subject, contentHTML string) {
 	subject = "Credit note " + creditNoteNumber + " from " + sellerName(companyName)
 	var b strings.Builder

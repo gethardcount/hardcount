@@ -10602,14 +10602,21 @@ export const getMarkCreditNoteReturnedAnotherWayUrl = (id: string,) => {
 }
 
 /**
- * Records that you paid the customer back outside Stripe for the refund
- * part of an `issued` credit note whose `refund_status` is `failed`,
- * for example after Stripe refused it because the payment was
- * disputed. The refund part moves to `out_of_band_amount_cents`, the
- * refund is no longer `failed`, and nothing retries it. An issued
+ * Records that the customer has the money of a failed card refund by
+ * another way than Stripe: the refund part of an `issued` credit note
+ * whose `refund_status` is `failed` moves to `out_of_band_amount_cents`,
+ * the refund is no longer `failed`, and nothing retries it. An issued
  * credit note cannot be voided, so this is how a failed refund ends.
  * The note keeps `stripe_refund_id`, the refund that failed. The action
  * is recorded in the audit log. The route takes no body.
+ *
+ * Use it once you have paid the customer back outside Stripe, or once
+ * the customer's bank returned the money in a dispute you lost: then
+ * mark it without paying. While a dispute is open, do neither: it is
+ * refused with `payment_disputed`. If you win, retry the refund
+ * (`POST /v1/credit-notes/{id}/retry-refund`). A refund you make later
+ * in the Stripe dashboard is recorded as a refund made in Stripe, apart
+ * from this note.
  * @summary Mark a failed refund as returned another way
  */
 export const markCreditNoteReturnedAnotherWay = async (id: string, options?: RequestInit): Promise<CreditNote> => {

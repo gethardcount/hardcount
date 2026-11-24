@@ -6262,9 +6262,13 @@ components:
           description: |
             Stripe's dispute status, as Stripe sends it. The `warning_`
             statuses are an inquiry, which comes before a chargeback or
-            instead of one. The `appeal_` statuses reopen a lost dispute
-            while you appeal it. `won`, `lost`, `warning_closed` and
-            `prevented` are closed.
+            instead of one. Stripe sends the `appeal_` statuses only when
+            appeals are turned on: `under_review` moves to
+            `appeal_needs_response` when the bank rejects your response and
+            you can appeal, then to `appeal_under_review` once you send the
+            appeal, and the dispute closes `won` or `lost`. Closing it at
+            `appeal_needs_response` makes it `lost`. `won`, `lost`,
+            `warning_closed` and `prevented` are closed.
         reason:
           type: string
           description: The reason the cardholder gave, for example `fraudulent`. Absent when Stripe gave none.
@@ -12704,13 +12708,14 @@ paths:
             The invoice's state refuses the note. Code `invalid_state`: the
             invoice is a draft, voided or written off, already fully
             credited, or bought prepaid credit (use commit relief when it is
-            paid, void it when it is unpaid); a relief on an unpaid,
-            written-off, voided or zero-total top-up, one with no unused
-            credit, or one whose payment the customer's bank disputes (a
-            chargeback or an appeal) or took back in a lost dispute;
-            or a `stripe_refund_id` that a credit note already records, or
-            that is still in flight at Stripe. Code `payment_in_flight`: a
-            charge on the invoice is unresolved.
+            paid, void it when it is unpaid); a relief on an unpaid or
+            withdrawn top-up, one with no unused credit, or one of a customer
+            with an issued invoice still to draw on the credit; or a
+            `stripe_refund_id` that a credit note already records, or
+            that is still in flight at Stripe. Code `payment_disputed`: a
+            relief on a top-up whose payment the customer's bank disputes (a
+            chargeback, an appeal included) or took back in a lost dispute.
+            Code `payment_in_flight`: a charge on the invoice is unresolved.
             Code `concurrent_change`: with `auto_issue`, Postgres stopped the
             issue because of another change to the same records (it broke a
             deadlock, or ended a wait for a lock), and the note made was voided;
@@ -21599,8 +21604,9 @@ paths:
           description: |
             Code `invalid_state`. The note is not issued, has no refund part,
             the refund already succeeded or is still processing at Stripe,
-            or the invoice was paid outside Stripe (once you have paid the
-            customer back another way, record it with
+            it is already recorded as returned another way, its refund
+            changed since it was read, or the invoice was paid outside Stripe
+            (once you have paid the customer back another way, record it with
             `POST /v1/credit-notes/{id}/mark-returned-another-way`). Code `stripe_refund_unresolved`: the
             invoice has a refund made in Stripe that is not recorded yet
             (flagged for review, or still in flight). Record it, attach it to
@@ -21649,7 +21655,7 @@ paths:
                 error:
                   type: api_error
                   code: provider_error
-                  message: Stripe didn't make the refund, so the customer was not refunded. Check the payment in Stripe, then retry the refund.
+                  message: Stripe didn't make the refund, so the customer was not refunded. Check the payment in Stripe and retry the refund; if the card can't take it and no dispute is open, pay the customer back another way and mark the refund as returned another way.
                   request_id: req_dbjg652q3gpgqfoq5cd0
 
   /v1/credit-notes/{id}/mark-returned-another-way:
@@ -21658,14 +21664,21 @@ paths:
       summary: Mark a failed refund as returned another way
       operationId: markCreditNoteReturnedAnotherWay
       description: |
-        Records that you paid the customer back outside Stripe for the refund
-        part of an `issued` credit note whose `refund_status` is `failed`,
-        for example after Stripe refused it because the payment was
-        disputed. The refund part moves to `out_of_band_amount_cents`, the
-        refund is no longer `failed`, and nothing retries it. An issued
+        Records that the customer has the money of a failed card refund by
+        another way than Stripe: the refund part of an `issued` credit note
+        whose `refund_status` is `failed` moves to `out_of_band_amount_cents`,
+        the refund is no longer `failed`, and nothing retries it. An issued
         credit note cannot be voided, so this is how a failed refund ends.
         The note keeps `stripe_refund_id`, the refund that failed. The action
         is recorded in the audit log. The route takes no body.
+
+        Use it once you have paid the customer back outside Stripe, or once
+        the customer's bank returned the money in a dispute you lost: then
+        mark it without paying. While a dispute is open, do neither: it is
+        refused with `payment_disputed`. If you win, retry the refund
+        (`POST /v1/credit-notes/{id}/retry-refund`). A refund you make later
+        in the Stripe dashboard is recorded as a refund made in Stripe, apart
+        from this note.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
@@ -21726,8 +21739,15 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "409":
           description: |
-            Code `invalid_state`. The note is not issued, or its refund did
-            not fail: it is pending, succeeded, or there is none.
+            Code `invalid_state`: the note is not issued; its refund did not
+            fail (it is pending, a retry of it is running, it succeeded, its
+            result is `unknown`, or there is none); it is already recorded as
+            returned another way; or its refund changed since it was read.
+            Code `payment_disputed`: the customer's bank holds a chargeback
+            on the payment; wait for its outcome. Code
+            `stripe_refund_unresolved`: the invoice has a refund made in
+            Stripe that is not recorded yet; record it, attach it to this
+            note, or dismiss it first.
           content:
             application/json:
               schema:

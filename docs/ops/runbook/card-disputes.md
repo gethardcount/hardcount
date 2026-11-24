@@ -56,8 +56,8 @@ The status tells you where the dispute is:
 | `warning_under_review`, `under_review` | You responded; the bank is deciding |
 | `won` | Closed in your favor; the money comes back |
 | `lost` | Closed in the customer's favor; the bank keeps the money |
-| `appeal_needs_response` | You appealed the loss; waiting for your response to the appeal |
-| `appeal_under_review` | You sent your appeal evidence; the network is deciding |
+| `appeal_needs_response` | The bank rejected your response, and you can appeal it. Stripe sends this only when appeals are turned on. Closing the dispute now makes it `lost` |
+| `appeal_under_review` | You sent your appeal; the card network is deciding |
 | `warning_closed` | The inquiry closed without a chargeback |
 | `prevented` | Stripe stopped it before it became a chargeback |
 
@@ -69,16 +69,19 @@ The status tells you where the dispute is:
    Stripe refuses refunds on a payment under a chargeback, so the card
    refund fails. An inquiry can be resolved with a full refund.
 
-   **On an invoice that bought prepaid credit** (a top-up), Hardcount refuses
-   the refund of its unused credit (commit relief) with `409` while the
-   chargeback or an appeal is open. Relief is refused when a chargeback is
-   recorded. When one opens during the relief, Stripe refuses the card
-   refund, and "returned another way" ends it. Until then the credit note
-   shows `refund_status` `failed`. Once you have paid the customer back
-   another way, record it with
-   `POST /v1/credit-notes/{id}/mark-returned-another-way`. No stronger lock
-   in Hardcount would close that gap: Stripe opens the dispute before
-   Hardcount hears of it.
+   **On an invoice that bought prepaid credit** (a top-up), refunding its
+   unused credit (commit relief) answers `409` `payment_disputed` while the
+   chargeback or your appeal of it is open. Relief is refused when a
+   chargeback is recorded. When one opens during the relief, Stripe refuses
+   the card refund, and "returned another way" ends it. You see such a
+   refund as a credit note whose `refund_status` is `failed`. Don't pay the
+   customer back while the dispute is open: if the bank also decides for
+   them, they are paid twice. Wait for the outcome:
+   - **Won:** retry the refund (`POST /v1/credit-notes/{id}/retry-refund`).
+   - **Lost:** the bank has already returned the money to the customer, so
+     pay nothing. Mark the refund as returned another way
+     (`POST /v1/credit-notes/{id}/mark-returned-another-way`), which ends
+     it.
 2. **If it is won, do nothing.** The invoice is still paid and Stripe
    returns the money.
 3. **If it is lost, decide what the invoice should say.** The bank already
