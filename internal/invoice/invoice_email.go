@@ -37,11 +37,20 @@ func (h *Handler) invoiceEmailRefusal(inv domain.Invoice) error {
 	// button. A draft is not issued yet and its lines can still change; a
 	// voided invoice is cancelled. Either way the customer would be asked for
 	// money they do not owe.
-	switch inv.Status {
-	case domain.InvoiceDraft:
+	switch {
+	case inv.UnpaidTopup():
+		// Its email is a link to its hosted page, where it is paid: without
+		// the link it would offer credit the customer cannot buy.
+		if h.svc.hostedPayOff {
+			return errs.InvalidState("This top-up's email is a link to its payment page, and the link can't be built: this server has no HOSTED_INVOICE_BASE_URL. Set it to your hosted invoice page's address (for example https://billing.example.com), restart, and send again.")
+		}
+		if inv.PublicToken == "" {
+			return errs.InvalidState("This top-up's email is a link to its payment page, and the link can't be built: its link token could not be read. Withdraw it and create another.")
+		}
+	case inv.Status == domain.InvoiceDraft:
 		return errs.InvalidState("a draft invoice can't be emailed because it isn't issued yet. Finalize it first, then email it").
 			WithCode("invoice_not_sendable")
-	case domain.InvoiceVoided:
+	case inv.Status == domain.InvoiceVoided:
 		return errs.InvalidState("a voided invoice can't be emailed because it is cancelled and nothing is owed. To bill the customer, create a new invoice").
 			WithCode("invoice_not_sendable")
 	}
@@ -75,16 +84,26 @@ func (h *Handler) emailInvoice(ctx context.Context, tenantID string, inv domain.
 	// from the downloaded one.
 	bt, ci, cnInfos := BuildPDFContext(ctx, h.customers, h.settings, h.pdfCreditNotes, tenantID, inv)
 
-	pdfBytes, err := RenderPDF(ctx, inv, items, bt, cnInfos, ci)
-	if err != nil {
-		return fmt.Errorf("%w: %w", errInvoicePDF, err)
-	}
-
-	// AmountDueCents, not Total: the email template labels this figure
-	// "Amount due", and credits/partial payments make the two differ —
-	// telling a customer they owe the pre-credit total is wrong.
-	if err := h.emailSender.SendInvoice(ctx, tenantID, to, cc, bt.Name, inv.InvoiceNumber, inv.AmountDueCents, inv.Currency, pdfBytes, inv.PublicToken, inv.Status == domain.InvoiceUncollectible); err != nil {
-		return err
+	if inv.UnpaidTopup() {
+		// "Buy prepaid credit": no bill and no document yet, only the link.
+		credit, ok := domain.TopupCreditOf(items)
+		if !ok {
+			return fmt.Errorf("top-up %s has no commit line", inv.ID)
+		}
+		if err := h.emailSender.SendTopupOffer(ctx, tenantID, to, cc, bt.Name, inv.AmountDueCents, credit, inv.Currency, inv.PublicToken); err != nil {
+			return err
+		}
+	} else {
+		pdfBytes, err := RenderPDF(ctx, inv, items, bt, cnInfos, ci)
+		if err != nil {
+			return fmt.Errorf("%w: %w", errInvoicePDF, err)
+		}
+		// AmountDueCents, not Total: the email template labels this figure
+		// "Amount due", and credits/partial payments make the two differ —
+		// telling a customer they owe the pre-credit total is wrong.
+		if err := h.emailSender.SendInvoice(ctx, tenantID, to, cc, bt.Name, inv.InvoiceNumber, inv.AmountDueCents, inv.Currency, pdfBytes, inv.PublicToken, inv.Status == domain.InvoiceUncollectible); err != nil {
+			return err
+		}
 	}
 
 	// Explicit audit row so a send is recorded as "Emailed INV-NNN". (It used

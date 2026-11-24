@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { invoiceLabel } from '@/lib/invoiceDocument'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -281,7 +282,7 @@ export default function DashboardPage() {
                           the amount. */}
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
                         <StatusDot status={invoiceStatus(inv, now)} />
-                        <span className="text-sm font-mono text-foreground">{inv.invoice_number}</span>
+                        <span className="text-sm font-mono text-foreground">{invoiceLabel(inv)}</span>
                         <StatusBadge
                           status={invoiceStatus(inv, now)}
                           className="text-[10px]"

@@ -619,7 +619,7 @@ func TestStopCollection_CancelsWithTheNamedTenantsCredentials(t *testing.T) {
 	})
 }
 
-func (r *recordingReceiptEmail) SendPaymentReceiptTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, name, num string, amt int64, cur, tok string) error {
+func (r *recordingReceiptEmail) SendPaymentReceiptTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, name, num string, amt int64, cur, tok string, _ *domain.TopupCredit) error {
 	return r.SendPaymentReceipt(ctx, tenantID, to, cc, name, num, amt, cur, tok)
 }
 
@@ -627,7 +627,7 @@ func (r *recordingFailedEmail) SendPaymentFailedTx(ctx context.Context, _ *sql.T
 	return r.SendPaymentFailed(ctx, tenantID, to, cc, name, num, reason, tok, ask)
 }
 
-func (r sequencedReceiptEmail) SendPaymentReceiptTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, name, num string, amt int64, cur, tok string) error {
+func (r sequencedReceiptEmail) SendPaymentReceiptTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, name, num string, amt int64, cur, tok string, _ *domain.TopupCredit) error {
 	return r.SendPaymentReceipt(ctx, tenantID, to, cc, name, num, amt, cur, tok)
 }
 

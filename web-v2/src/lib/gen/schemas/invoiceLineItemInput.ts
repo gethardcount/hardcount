@@ -37,11 +37,14 @@ export interface InvoiceLineItemInput {
      */
   unit_amount_cents: number;
   /**
-     * Makes this line a prepaid commit purchase: when the invoice is
-     * finalized, the customer gets this many cents of credit, which
-     * never expires. Only on an `add_on` line of an invoice you create,
-     * and alone on it: an invoice with a commit line takes no other
-     * line. At most 100,000,000 ($1,000,000).
+     * Makes this line a prepaid commit purchase. An invoice created
+     * with this line alone is a top-up (`billing_reason` `topup`): a
+     * draft with no number and no due date, frozen, with its hosted
+     * page link. When it is paid, the customer gets this many cents of
+     * credit, valid for the account's `topup_credit_valid_days` as set
+     * at create (never expiring when unset). Only on an `add_on` line,
+     * alone on its invoice, and only when creating it: a draft takes no
+     * commit line later. At most 100,000,000 ($1,000,000).
      * @minimum 1
      * @maximum 100000000
      */

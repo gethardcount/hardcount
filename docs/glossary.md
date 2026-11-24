@@ -223,11 +223,15 @@ follows.
   invoice always adds its full credit to the balance.
   [More](concepts/credits.md), and
   [the decision](adr/132-returned-credit-goes-back-to-its-grants.md)
-- **prepaid commit**: Usage credit the customer pays for up front, sold as
-  a line on a one-off invoice. When that invoice is finalized, Hardcount adds a
-  credit block to the customer's balance. The credit can be more than the
+- **prepaid commit**: Usage credit the customer pays for up front, sold on
+  a top-up (a one-off invoice with that one line). When the top-up is paid,
+  Hardcount adds a credit block to the customer's balance. The credit can be more than the
   price (pay $9k, get $10k). The purchase is not taxed; the usage the
   credit pays for is. [More](concepts/credits.md#prepaid-commits)
+- **top-up**: The one-off invoice a prepaid commit is sold on
+  (`billing_reason` `topup`). It is a draft with no number until it is
+  paid; its payment numbers it, issues it and adds the credit. Void it to
+  withdraw it. [More](concepts/credits.md#prepaid-commits)
 - **drawdown**: Using a customer's credit balance to pay part of an invoice
   right after it is issued, so less is charged. Free promotional credit is
   used before other credit. Within each, the credit that expires soonest

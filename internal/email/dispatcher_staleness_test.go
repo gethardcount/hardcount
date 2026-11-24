@@ -16,7 +16,11 @@ func (r *recordingDeliverer) SendInvoice(_ context.Context, _, _ string, _ []str
 	r.sent = append(r.sent, TypeInvoice)
 	return nil
 }
-func (r *recordingDeliverer) SendPaymentReceipt(_ context.Context, _, _ string, _ []string, _, _ string, _ int64, _, _ string) error {
+func (r *recordingDeliverer) SendTopupOffer(_ context.Context, _, _ string, _ []string, _ string, _ int64, _ domain.TopupCredit, _, _ string) error {
+	r.sent = append(r.sent, TypeTopupOffer)
+	return nil
+}
+func (r *recordingDeliverer) SendPaymentReceipt(_ context.Context, _, _ string, _ []string, _, _ string, _ int64, _, _ string, _ *domain.TopupCredit) error {
 	r.sent = append(r.sent, TypePaymentReceipt)
 	return nil
 }

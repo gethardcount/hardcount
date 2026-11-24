@@ -1533,6 +1533,10 @@ func hostedInvoiceCheckoutParams(
 ) *stripe.CheckoutSessionCreateParams {
 	currency := strings.ToLower(claim.Currency)
 	productName := "Invoice " + inv.InvoiceNumber
+	if inv.BillingReason == domain.BillingReasonTopup {
+		// A top-up has no number until it is paid.
+		productName = "Prepaid credit"
+	}
 	// Put the metadata on both the session and the PaymentIntent. Session
 	// metadata lives only on the checkout_session object, and Stripe does
 	// not copy it to the PaymentIntent. The webhook path routes

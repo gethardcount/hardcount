@@ -106,7 +106,7 @@ func TestDrainOrder_PromotionalFirst_NullSafe(t *testing.T) {
 		if err != nil {
 			t.Fatalf("begin: %v", err)
 		}
-		commitEntry, err = svc.GrantCommitForInvoiceTx(ctx, tx, tenantID, custID, fundingInv, "HC-DRAIN-FUND", "USD", 30000)
+		commitEntry, err = svc.GrantCommitForInvoiceTx(ctx, tx, tenantID, custID, fundingInv, "HC-DRAIN-FUND", "USD", 30000, nil)
 		if err != nil {
 			t.Fatalf("commit grant: %v", err)
 		}

@@ -88,12 +88,20 @@ export interface InvoiceLineItem {
   created_at: string;
   /**
      * Marks the line as a prepaid commit purchase (credit the customer
-     * pays for up front): when the invoice is finalized, the customer
-     * gets a credit grant of this
-     * many cents (in the invoice's currency). It may differ from the
-     * line's price: a discounted commit sells $10,000 of credit for
-     * $9,000. Only on an `add_on` line of an invoice you create, alone
-     * on it. The credit never expires. Absent on other lines.
+     * pays for up front): when the top-up is paid, the customer gets a
+     * credit grant of this many cents (in the invoice's currency). It
+     * may differ from the line's price: a discounted commit sells
+     * $10,000 of credit for $9,000. Only on the one line of a top-up
+     * (`billing_reason` `topup`). Absent on other lines.
      */
   commit_granted_cents?: number;
+  /**
+     * On a commit line: how many days the credit stays usable after
+     * the payment, copied from the account's `topup_credit_valid_days`
+     * when the top-up was created, so a later change of the setting
+     * does not change it. Absent when the credit never expires, and on
+     * other lines.
+     * @minimum 1
+     */
+  credit_valid_days?: number;
 }

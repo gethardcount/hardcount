@@ -37,7 +37,8 @@ type DispatcherConfig struct {
 // the Sender resolve against the correct tenant_settings row.
 type EmailDeliverer interface {
 	SendInvoice(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, totalCents int64, currency string, pdfBytes []byte, publicToken string, writtenOff bool) error
-	SendPaymentReceipt(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string) error
+	SendTopupOffer(ctx context.Context, tenantID, to string, cc []string, customerName string, payCents int64, credit domain.TopupCredit, currency, publicToken string) error
+	SendPaymentReceipt(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string, credit *domain.TopupCredit) error
 	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, ask domain.DeclineAsk) error
 	SendDunningEscalation(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
 	SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string, ask domain.DeclineAsk) error
@@ -225,9 +226,12 @@ func (d *Dispatcher) handle(ctx context.Context, row OutboxRow) error {
 	case TypeInvoice:
 		return d.sender.SendInvoice(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.InvoiceNumber,
 			msg.AmountCents, msg.Currency, msg.PDF, msg.PublicToken, msg.InvoiceWrittenOff)
+	case TypeTopupOffer:
+		return d.sender.SendTopupOffer(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.AmountCents,
+			domain.TopupCredit{CreditCents: msg.CreditCents, ValidDays: msg.CreditValidDays}, msg.Currency, msg.PublicToken)
 	case TypePaymentReceipt:
 		return d.sender.SendPaymentReceipt(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.InvoiceNumber,
-			msg.AmountCents, msg.Currency, msg.PublicToken)
+			msg.AmountCents, msg.Currency, msg.PublicToken, msg.topupCredit())
 	case TypeDunningWarning:
 		return d.sender.SendDunningWarning(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.InvoiceNumber,
 			msg.AttemptNumber, msg.MaxAttempts, msg.NextRetryDate, msg.FailureReason, msg.PublicToken, msg.declineAsk())

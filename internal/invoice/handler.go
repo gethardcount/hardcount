@@ -143,6 +143,9 @@ type DunningTimelineFetcher interface {
 // stamps the right tenant_settings + email_outbox row.
 type EmailSender interface {
 	SendInvoice(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, totalCents int64, currency string, pdfBytes []byte, publicToken string, writtenOff bool) error
+	// SendTopupOffer sends an unpaid top-up's link: "Buy prepaid credit".
+	// payCents is what the customer pays, credit what they get.
+	SendTopupOffer(ctx context.Context, tenantID, to string, cc []string, customerName string, payCents int64, credit domain.TopupCredit, currency, publicToken string) error
 }
 
 // EmailEventLister surfaces customer-notification email rows
@@ -923,7 +926,10 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	// carried stale state. Recovery of a returned customer runs on NORMAL
 	// rails — a fresh recovery invoice — and a written-off invoice is settled
 	// by RECORDING writers only (offline payment, the stale-hold sweep's settle).
-	if inv.Status != domain.InvoiceFinalized {
+	// An unpaid top-up is charged too: its payment issues it. A team's own
+	// code may call this route for a top-up; its Idempotency-Key replays the
+	// first answer, so a retry never charges twice.
+	if !inv.OpenForPayment() {
 		respond.Validation(w, r, "can only collect payment on a finalized invoice — for a written-off debt, issue a recovery invoice or record an offline payment")
 		return
 	}

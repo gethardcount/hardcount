@@ -3,6 +3,7 @@ package invoice
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -21,6 +22,11 @@ type ccCapturingSender struct {
 	to         string
 	cc         []string
 	writtenOff bool
+}
+
+func (c *ccCapturingSender) SendTopupOffer(context.Context, string, string, []string, string, int64, domain.TopupCredit, string, string) error {
+	c.called = true
+	return nil
 }
 
 func (c *ccCapturingSender) SendInvoice(_ context.Context, _, to string, cc []string, _, _ string, _ int64, _ string, _ []byte, _ string, writtenOff bool) error {
@@ -202,31 +208,39 @@ func TestSendEmail_RefusesWhenEmailNotConfigured(t *testing.T) {
 // voided invoice is cancelled, so sending either asks the customer for money
 // they do not owe. Both are refused and nothing is queued; every issued status
 // still sends (a paid or written-off invoice's document is the customer's
-// record).
+// record). An unpaid top-up's email is only its pay link, so on a server that
+// cannot build the link it is refused too.
 func TestSendEmail_RefusesDraftAndVoided(t *testing.T) {
 	cases := []struct {
-		status   domain.InvoiceStatus
-		wantCode int
+		status         domain.InvoiceStatus
+		topupNoPayLink bool
+		wantCode       int
 	}{
-		{domain.InvoiceDraft, http.StatusConflict},
-		{domain.InvoiceVoided, http.StatusConflict},
-		{domain.InvoiceFinalized, http.StatusOK},
-		{domain.InvoicePaid, http.StatusOK},
-		{domain.InvoiceUncollectible, http.StatusOK},
+		{domain.InvoiceDraft, false, http.StatusConflict},
+		{domain.InvoiceDraft, true, http.StatusConflict},
+		{domain.InvoiceVoided, false, http.StatusConflict},
+		{domain.InvoiceFinalized, false, http.StatusOK},
+		{domain.InvoicePaid, false, http.StatusOK},
+		{domain.InvoiceUncollectible, false, http.StatusOK},
 	}
 	for _, tc := range cases {
-		t.Run(string(tc.status), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s topup=%t", tc.status, tc.topupNoPayLink), func(t *testing.T) {
 			store := newMemStore()
-			inv, err := store.Create(context.Background(), "t1", domain.Invoice{
+			seed := domain.Invoice{
 				InvoiceNumber: "INV-ST-" + string(tc.status), Status: tc.status,
 				PaymentStatus: domain.PaymentPending, CustomerID: "cus_cc", Currency: "USD",
 				TotalAmountCents: 10000, AmountDueCents: 10000,
-			})
+			}
+			if tc.topupNoPayLink {
+				seed.InvoiceNumber, seed.BillingReason, seed.PublicToken = "", domain.BillingReasonTopup, "tok_topup"
+			}
+			inv, err := store.Create(context.Background(), "t1", seed)
 			if err != nil {
 				t.Fatalf("seed invoice: %v", err)
 			}
 			sender := &ccCapturingSender{}
 			h := &Handler{svc: NewService(store, nil, newMemNumberer()), emailSender: sender, emailConfigured: true}
+			h.svc.SetHostedPayConfigured(!tc.topupNoPayLink)
 			h.customers = staticCustomerGetter{cust: domain.Customer{ID: "cus_cc", DisplayName: "CC Co", Email: "ap@acme.test"}}
 
 			rr := sendReq(t, h, inv.ID, `{"email":"ap@acme.test"}`)
@@ -239,8 +253,15 @@ func TestSendEmail_RefusesDraftAndVoided(t *testing.T) {
 				}
 				return
 			}
-			if !bytes.Contains(rr.Body.Bytes(), []byte(`"code":"invoice_not_sendable"`)) {
-				t.Errorf("want code invoice_not_sendable, got %s", rr.Body.String())
+			wantErr := `"code":"invoice_not_sendable"`
+			if tc.topupNoPayLink {
+				wantErr = `"code":"invalid_state"`
+				if !bytes.Contains(rr.Body.Bytes(), []byte("HOSTED_INVOICE_BASE_URL")) {
+					t.Errorf("want the setting to set named, got %s", rr.Body.String())
+				}
+			}
+			if !bytes.Contains(rr.Body.Bytes(), []byte(wantErr)) {
+				t.Errorf("want %s, got %s", wantErr, rr.Body.String())
 			}
 			if sender.called {
 				t.Errorf("a %s invoice was emailed to the customer", tc.status)

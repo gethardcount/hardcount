@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { invoiceLabel } from '@/lib/invoiceDocument'
 import { StaleNotice } from '@/components/StaleNotice'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useNowFor } from '@/hooks/useNow'
@@ -772,7 +773,7 @@ export default function CustomerDetailPage() {
                     return (
                       <Link key={inv.id} to={`/invoices/${inv.id}`} className="flex items-center justify-between px-6 py-3 hover:bg-accent/50 transition-colors">
                         <div>
-                          <p className="text-sm font-medium text-foreground">{inv.invoice_number}</p>
+                          <p className="text-sm font-medium text-foreground">{invoiceLabel(inv)}</p>
                           <p className="text-xs text-muted-foreground">
                             {formatDate(inv.created_at)}
                             {/* Why amount due is below the total: Outstanding
@@ -1210,7 +1211,7 @@ export default function CustomerDetailPage() {
             // invoice, so the credit balance, the commit/promo split and the
             // outstanding total all move: refresh every money surface.
             invalidateMoneySurfaces(queryClient, { customerId: id, invoiceId: invoice.id })
-            showOutcome(newInvoiceOutcome(invoice.invoice_number, result), {
+            showOutcome(newInvoiceOutcome(invoiceLabel(invoice), result), {
               label: 'View invoice',
               onClick: () => navigate(`/invoices/${invoice.id}`),
             })
@@ -1915,7 +1916,21 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
       // best-effort: a failed send must not unwind a finalized invoice, and
       // it must not be reported as a saved draft either.
       let result: NewInvoiceResult = { kind: 'draft' }
-      if (action === 'send') {
+      const created: Invoice & { billing_reason?: string } = invoice
+      if (action === 'send' && created.billing_reason === 'topup') {
+        // A top-up is issued by its payment, never finalized: send its link.
+        const recipient = customer.email
+        if (!recipient) {
+          result = { kind: 'topup_not_sent', reason: 'The customer has no email address. Add one, then send it from the invoice page.' }
+        } else {
+          try {
+            await api.sendInvoiceEmail(invoice.id, recipient)
+            result = { kind: 'topup_sent' }
+          } catch (err) {
+            result = { kind: 'topup_not_sent', reason: err instanceof Error ? err.message : String(err) }
+          }
+        }
+      } else if (action === 'send') {
         invoice = await api.finalizeInvoice(invoice.id)
         const recipient = customer.email
         // Without Stripe the finalize already emailed the customer the
@@ -1947,7 +1962,7 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
       // can pick it up from the invoice detail page.
       if (invoice) {
         setErrors({
-          form: `Draft ${invoice.invoice_number} created, but a later step failed: ${message}. Open the invoice detail page to continue.`,
+          form: `Draft ${invoiceLabel(invoice)} created, but a later step failed: ${message}. Open the invoice detail page to continue.`,
         })
       } else if (outcomeUnknown(err)) {
         setErrors({ form: NEW_INVOICE_NO_ANSWER, noAnswer: true })
@@ -1960,6 +1975,9 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
   })
 
   const isBusy = submitting !== null
+  // One line that sells credit is a top-up: Save & send creates it and sends
+  // its link, and finalizes nothing (the server makes the same call).
+  const topupForm = lines.length === 1 && lines[0].sellsCredits && (lines[0].line_type || 'add_on') === 'add_on'
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !isBusy) onClose() }}>
@@ -2280,7 +2298,26 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
         </DialogFooter>
       </DialogContent>
 
-      <AlertDialog open={confirmSend} onOpenChange={(open) => { if (!open && !isBusy) setConfirmSend(false) }}>
+      <AlertDialog open={confirmSend && topupForm} onOpenChange={(open) => { if (!open && !isBusy) setConfirmSend(false) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Create this top-up and send its link?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {customer.email
+                ? `${customer.display_name} gets a link at ${customer.email} to buy the credit. Nothing is charged until they pay.`
+                : 'The customer has no email address, so the top-up is created and its link is not sent.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isBusy}>Back</AlertDialogCancel>
+            <AlertDialogAction onClick={() => submit('send')} disabled={isBusy}>
+              {submitting === 'send' ? <><Loader2 size={14} className="animate-spin mr-1.5" />Sending…</> : 'Create and send'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmSend && !topupForm} onOpenChange={(open) => { if (!open && !isBusy) setConfirmSend(false) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Finalize and send this invoice?</AlertDialogTitle>

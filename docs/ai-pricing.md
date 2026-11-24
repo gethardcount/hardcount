@@ -326,13 +326,14 @@ jq -n --arg meter "$METER_ID" \
 
 ## Sell prepaid credit (a prepaid commit)
 
-A prepaid commit is a one-off invoice with a special line. When the invoice
-is finalized (issued), the customer gets the credit, and later invoices
-in the same currency draw it down. Here the customer pays $9,000 for
-$10,000 of credit.
+A prepaid commit is sold on a top-up: a one-off invoice with one special
+line and nothing else. The top-up stays a draft, with no number, until it is
+paid. Its payment numbers it, issues it and gives the customer the credit,
+and later invoices in the same currency draw it down. Here the customer pays
+$9,000 for $10,000 of credit.
 
-1. **Make a one-off invoice with the commit line.** `unit_amount_cents` is
-   what the customer pays. `commit_granted_cents` is the credit they get.
+1. **Make the top-up.** `unit_amount_cents` is what the customer pays.
+   `commit_granted_cents` is the credit they get.
 
    ```bash
    COMMIT_INVOICE_ID=$(jq -n --arg cus "$CUSTOMER_ID" \
@@ -346,17 +347,20 @@ $10,000 of credit.
    echo "$COMMIT_INVOICE_ID"
    ```
 
-   **You see:** the invoice ID, such as `hc_inv_…`. The invoice is a
-   draft.
+   **You see:** the invoice ID, such as `hc_inv_…`. The invoice is a draft
+   with `billing_reason` `topup` and no `invoice_number`.
 
-2. **Finalize it.**
+2. **Take the payment.** Here the customer paid by bank transfer, so you
+   record it. To charge their saved card instead, call
+   `POST /v1/invoices/$COMMIT_INVOICE_ID/collect`; to email them a link
+   to pay, call `POST /v1/invoices/$COMMIT_INVOICE_ID/send`.
 
    ```bash
-   curl -s -X POST "$HARDCOUNT/v1/invoices/$COMMIT_INVOICE_ID/finalize" \
+   curl -s -X POST "$HARDCOUNT/v1/invoices/$COMMIT_INVOICE_ID/record-payment" \
      -H "Authorization: Bearer $HARDCOUNT_KEY" | jq -c '{status, total_amount_cents}'
    ```
 
-   **You see:** `{"status":"finalized","total_amount_cents":900000}`
+   **You see:** `{"status":"paid","total_amount_cents":900000}`
 
 3. **Check the credit balance.**
 
@@ -368,9 +372,11 @@ $10,000 of credit.
    **You see:** `{"currency":"USD","balance_cents":1000000,"total_granted":1000000}`
    (one line per currency the customer holds credit in).
 
-The commit line is the only line on its invoice, and the credit it buys
-never expires. To stop a customer's usage
-when the credit runs out, see [Stop usage when credit runs
+The commit line is the only line on its invoice. The credit stays usable for
+`topup_credit_valid_days` after the payment, a setting of
+`PUT /v1/settings` that the top-up copies when it is made; unset, it never
+expires. To withdraw a top-up nobody paid, void it. To stop a customer's
+usage when the credit runs out, see [Stop usage when credit runs
 out](stop-usage-when-credit-runs-out.md).
 
 ### Tax on prepaid credit

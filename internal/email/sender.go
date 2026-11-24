@@ -513,13 +513,39 @@ func (s *Sender) SendInvoice(ctx context.Context, tenantID, to string, cc []stri
 	})
 }
 
-// SendPaymentReceipt sends a receipt after successful payment.
-func (s *Sender) SendPaymentReceipt(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string) error {
+// SendTopupOffer sends the link to buy prepaid credit on an unpaid top-up:
+// payCents is what the customer pays, credit what they get. It attaches no
+// PDF, because a top-up has no document until it is paid.
+func (s *Sender) SendTopupOffer(ctx context.Context, tenantID, to string, cc []string, customerName string, payCents int64, credit domain.TopupCredit, currency, publicToken string) error {
+	brand := s.brandingFor(ctx, tenantID)
+	hostedURL := s.hostedInvoiceURL(publicToken)
+
+	subject, contentHTML, ctaURL, ctaLabel := renderTopupOfferHTML(customerName, brand.CompanyName, payCents, credit, currency, hostedURL)
+	htmlBody, err := renderLayout(layoutInputs{
+		Subject: subject, CompanyName: brand.CompanyName, LogoURL: brand.LogoURL,
+		BrandColor: brand.BrandColor, SupportURL: brand.SupportURL,
+		Content: template.HTML(contentHTML), CTAURL: ctaURL, CTALabel: ctaLabel,
+	})
+	if err != nil {
+		return fmt.Errorf("render topup offer html: %w", err)
+	}
+	textBody := topupOfferTextBody(customerName, brand.CompanyName, payCents, credit, currency, hostedURL)
+
+	return s.sendRich(ctx, richMessage{
+		TenantID: tenantID, To: to, Cc: cc, Subject: subject,
+		TextBody: textBody, HTMLBody: htmlBody, FromName: brand.CompanyName,
+	})
+}
+
+// SendPaymentReceipt sends a receipt after successful payment. credit is set
+// only for a top-up, whose receipt also says what credit was added.
+func (s *Sender) SendPaymentReceipt(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string, credit *domain.TopupCredit) error {
 	brand := s.brandingFor(ctx, tenantID)
 	hostedURL := s.hostedInvoiceURL(publicToken)
 	amount := formatAmount(amountCents, currency)
+	creditLines := topupReceiptLines(credit, currency)
 
-	subject, contentHTML, ctaURL, ctaLabel := renderReceiptHTML(customerName, invoiceNumber, amount, hostedURL)
+	subject, contentHTML, ctaURL, ctaLabel := renderReceiptHTML(customerName, invoiceNumber, amount, hostedURL, creditLines)
 	htmlBody, err := renderLayout(layoutInputs{
 		Subject: subject, CompanyName: brand.CompanyName, LogoURL: brand.LogoURL,
 		BrandColor: brand.BrandColor, SupportURL: brand.SupportURL,
@@ -528,7 +554,7 @@ func (s *Sender) SendPaymentReceipt(ctx context.Context, tenantID, to string, cc
 	if err != nil {
 		return fmt.Errorf("render receipt html: %w", err)
 	}
-	textBody := receiptTextBody(customerName, invoiceNumber, amount, hostedURL)
+	textBody := receiptTextBody(customerName, invoiceNumber, amount, hostedURL, creditLines)
 
 	return s.sendRich(ctx, richMessage{
 		TenantID: tenantID, To: to, Cc: cc, Subject: subject,
@@ -828,9 +854,24 @@ func invoiceTextBody(customerName, invoiceNumber, amount, currency, hostedURL st
 	return b.String()
 }
 
-func receiptTextBody(customerName, invoiceNumber, amount, hostedURL string) string {
+// topupOfferTextBody is the plain-text part of the top-up offer
+// (renderTopupOfferHTML).
+func topupOfferTextBody(customerName, companyName string, payCents int64, credit domain.TopupCredit, currency, hostedURL string) string {
+	lead, validity := topupOfferCopy(companyName, payCents, credit, currency)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Hi %s,\n\n%s\n%s\n\n", customerName, lead, validity)
+	if hostedURL != "" {
+		fmt.Fprintf(&b, "Buy credit: %s\n", hostedURL)
+	}
+	return b.String()
+}
+
+func receiptTextBody(customerName, invoiceNumber, amount, hostedURL string, creditLines []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Hi %s,\n\nThanks — we received your payment of %s for invoice %s.\n\n", customerName, amount, invoiceNumber)
+	if len(creditLines) > 0 {
+		fmt.Fprintf(&b, "%s\n\n", strings.Join(creditLines, "\n"))
+	}
 	if hostedURL != "" {
 		fmt.Fprintf(&b, "View receipt: %s\n", hostedURL)
 	}

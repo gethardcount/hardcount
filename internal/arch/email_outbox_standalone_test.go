@@ -33,6 +33,7 @@ import (
 var standaloneEmailSends = map[string]string{
 	"internal/invoice/invoice_email.go Handler.emailInvoice SendInvoice": "The operator's Email invoice has no business transaction: the email is the action, and the request returns the enqueue error. " +
 		"The collector's automatic send stamps invoice_emailed_at only after the enqueue, so its next visit sends again.",
+	"internal/invoice/invoice_email.go Handler.emailInvoice SendTopupOffer": "The operator's Send on an unpaid top-up has no business transaction: the email is the action, and the request returns the enqueue error.",
 	"internal/api/adapters.go noPaymentMethodNotifierAdapter.NotifyNoPaymentMethod SendPaymentSetupRequest": "The engine stamps no_pm_notified_at only after the send, so its next visit sends again. " +
 		"The operator's resend has no business transaction and returns the error.",
 	"internal/paymentmethods/handler.go Handler.operatorSendSetupEmail SendPaymentSetupLink": "An operator action with no business transaction (a Stripe setup session, then the email). The error goes back to the operator.",

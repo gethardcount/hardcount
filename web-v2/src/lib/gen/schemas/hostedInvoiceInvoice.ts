@@ -18,7 +18,7 @@ import type { InvoiceStatus } from './invoiceStatus';
  * The invoice's number, status, totals and dates.
  */
 export type HostedInvoiceInvoice = {
-  /** The number printed on the invoice, for example `HC-000042`. */
+  /** The number printed on the invoice, for example `HC-000042`. Empty on an unpaid top-up, which is numbered when it is paid. */
   invoice_number: string;
   status: InvoiceStatus;
   payment_status: InvoicePaymentStatus;

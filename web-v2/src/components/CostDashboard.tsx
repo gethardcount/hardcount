@@ -17,6 +17,7 @@
 // is the industry-standard answer.
 
 import { money, unitScale } from '@/lib/priceDisplay'
+import { invoiceLabel } from '@/lib/invoiceDocument'
 import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -322,7 +323,7 @@ function LastInvoiceLine({ invoice, effectiveNow }: { invoice: Invoice; effectiv
         {/* The same badge as the invoice list: a void reads Void, not the
             payment_status it kept ("pending"). */}
         <StatusBadge status={invoiceStatus(invoice, effectiveNow)} />
-        <span className="font-mono text-foreground truncate">{invoice.invoice_number}</span>
+        <span className="font-mono text-foreground truncate">{invoiceLabel(invoice)}</span>
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <span className="font-medium tabular-nums text-foreground">

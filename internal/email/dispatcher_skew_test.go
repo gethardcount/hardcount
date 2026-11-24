@@ -51,7 +51,7 @@ func TestDispatcherEveryDeclaredTypeDispatches(t *testing.T) {
 	all := []string{
 		TypeInvoice, TypePaymentReceipt, TypeDunningWarning, TypeDunningEscalation,
 		TypePaymentFailed, TypePaymentSetupRequest, TypePaymentSetupLink,
-		TypePasswordReset, TypeMemberInvite, TypeCreditNote,
+		TypePasswordReset, TypeMemberInvite, TypeCreditNote, TypeTopupOffer,
 	}
 	for _, typ := range all {
 		sender := &recordingDeliverer{}

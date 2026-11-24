@@ -2050,7 +2050,7 @@ components:
 
     InvoiceBillingReason:
       type: string
-      enum: [subscription_cycle, subscription_create, subscription_cancel, subscription_update, manual, threshold]
+      enum: [subscription_cycle, subscription_create, subscription_cancel, subscription_update, manual, threshold, topup]
       description: |
         Why the invoice was made, like Stripe's `invoice.billing_reason`.
         Set when the invoice is created and never changed.
@@ -2067,6 +2067,10 @@ components:
         - `manual`: an invoice you created with `POST /v1/invoices`.
         - `threshold`: an early invoice because a spend threshold was
           crossed.
+        - `topup`: a top-up, which sells prepaid credit: an invoice you
+          created with `POST /v1/invoices` and one `commit_granted_cents`
+          line, alone. It stays a draft with no `invoice_number` until it is
+          paid; the payment numbers it, issues it and grants the credit.
 
     InvoiceLineType:
       type: string
@@ -2149,7 +2153,9 @@ components:
             The number printed on the invoice: the account's invoice prefix
             (default `HC`), a hyphen and a sequence padded to six digits, for
             example `HC-000042`. Test mode and live mode count separately.
-            Set when the invoice is created, drafts included.
+            Set when the invoice is created, drafts included, except on a
+            top-up (`billing_reason` `topup`): empty until its payment
+            numbers it, and still empty once an unpaid one is voided.
         status:
           $ref: "#/components/schemas/InvoiceStatus"
         payment_status:
@@ -2422,7 +2428,8 @@ components:
             calendar days, counted in `billing_timezone`. Set with
             `issued_at`. Hardcount does not charge on this date: it collects
             right after finalize and retries on the dunning schedule. The
-            `overdue` filter of `GET /v1/invoices` uses it.
+            `overdue` filter of `GET /v1/invoices` uses it. Absent on a
+            top-up, which has no due date.
         paid_at:
           type: string
           format: date-time
@@ -2734,12 +2741,20 @@ components:
           format: int64
           description: |
             Marks the line as a prepaid commit purchase (credit the customer
-            pays for up front): when the invoice is finalized, the customer
-            gets a credit grant of this
-            many cents (in the invoice's currency). It may differ from the
-            line's price: a discounted commit sells $10,000 of credit for
-            $9,000. Only on an `add_on` line of an invoice you create, alone
-            on it. The credit never expires. Absent on other lines.
+            pays for up front): when the top-up is paid, the customer gets a
+            credit grant of this many cents (in the invoice's currency). It
+            may differ from the line's price: a discounted commit sells
+            $10,000 of credit for $9,000. Only on the one line of a top-up
+            (`billing_reason` `topup`). Absent on other lines.
+        credit_valid_days:
+          type: integer
+          minimum: 1
+          description: |
+            On a commit line: how many days the credit stays usable after
+            the payment, copied from the account's `topup_credit_valid_days`
+            when the top-up was created, so a later change of the setting
+            does not change it. Absent when the credit never expires, and on
+            other lines.
       example:
         id: hc_ili_dbj84baq3gpgqfoq5c4g
         invoice_id: hc_inv_dbj84b2q3gpgqfoq5c40
@@ -5633,11 +5648,14 @@ components:
           minimum: 1
           maximum: 100000000
           description: |
-            Makes this line a prepaid commit purchase: when the invoice is
-            finalized, the customer gets this many cents of credit, which
-            never expires. Only on an `add_on` line of an invoice you create,
-            and alone on it: an invoice with a commit line takes no other
-            line. At most 100,000,000 ($1,000,000).
+            Makes this line a prepaid commit purchase. An invoice created
+            with this line alone is a top-up (`billing_reason` `topup`): a
+            draft with no number and no due date, frozen, with its hosted
+            page link. When it is paid, the customer gets this many cents of
+            credit, valid for the account's `topup_credit_valid_days` as set
+            at create (never expiring when unset). Only on an `add_on` line,
+            alone on its invoice, and only when creating it: a draft takes no
+            commit line later. At most 100,000,000 ($1,000,000).
       example:
         description: Onboarding and setup
         line_type: add_on
@@ -8069,6 +8087,17 @@ components:
             webhook fires: 1000 means $10.00 of USD credit and €10.00 of EUR
             credit. Send null to turn it off. Answers leave it out while it
             is off.
+        topup_credit_valid_days:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 3650
+          description: |
+            How many days credit bought with a top-up stays usable after its
+            payment. A new top-up copies it onto its line
+            (`credit_valid_days`), so a change applies to top-ups created
+            after it. Send null for credit that never expires (the default);
+            answers leave it out then.
         tax_provider:
           type: string
           enum: [none, manual, stripe_tax]
@@ -8922,7 +8951,7 @@ components:
           properties:
             invoice_number:
               type: string
-              description: The number printed on the invoice, for example `HC-000042`.
+              description: The number printed on the invoice, for example `HC-000042`. Empty on an unpaid top-up, which is numbered when it is paid.
             status:
               $ref: "#/components/schemas/InvoiceStatus"
             payment_status:
@@ -9153,6 +9182,26 @@ components:
             to; `amount_below_minimum` when
             Stripe's latest answer refused the amount as below its minimum
             charge.
+        topup:
+          type: object
+          description: |
+            Sent only for a top-up (an invoice that sells prepaid credit):
+            the credit it sells, which the page shows in place of an amount
+            due. An unpaid top-up has no `invoice_number` (empty) and no
+            `due_at`.
+          required: [credit_cents, credit_valid_days, validity]
+          properties:
+            credit_cents:
+              type: integer
+              format: int64
+              description: The credit the payment adds to the customer's balance, in the currency's minor unit (cents for USD).
+            credit_valid_days:
+              type: integer
+              nullable: true
+              description: How many days the credit stays usable after the payment; null when it never expires.
+            validity:
+              type: string
+              description: The sentence that says so, such as "It never expires." or "It is valid for 12 months after payment."
         livemode:
           type: boolean
           description: False for a test-mode invoice. The page shows a test-mode banner.
@@ -9412,7 +9461,7 @@ components:
               commit_remaining_cents:
                 type: integer
                 format: int64
-                description: Remaining prepaid commit credit (`commit`), granted by finalized commit invoices, in the currency's minor unit.
+                description: Remaining prepaid commit credit (`commit`), granted by paid top-ups, in the currency's minor unit.
               promotional_remaining_cents:
                 type: integer
                 format: int64
@@ -18824,6 +18873,20 @@ paths:
         due date that finalize moves to the moment of finalizing. Tax is not
         calculated here. It is calculated when the invoice is finalized, so
         totals equal the subtotal until then.
+
+        A top-up: send one line with `commit_granted_cents` and nothing else
+        (no `subscription_id`; `net_payment_term_days` does not apply). The invoice gets
+        billing reason `topup` and stays a draft that takes no other line,
+        with no number and no due date. Its tax is decided now: buying
+        credit is untaxed (`tax_reason` `prepaid_credit_purchase`), and the
+        usage the credit pays for is taxed when it is invoiced. It has its
+        hosted-page `public_token` at once, and its line keeps the account's
+        `topup_credit_valid_days` as `credit_valid_days`. Charge the saved
+        card with `POST /v1/invoices/{id}/collect`, email the customer the
+        link with `POST /v1/invoices/{id}/send`, or record money received
+        another way with `POST /v1/invoices/{id}/record-payment`; the
+        payment numbers it, issues it and grants the credit. To withdraw an
+        unpaid one, void it. Finalize refuses it.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -18903,8 +18966,8 @@ paths:
           description: |
             Validation error: missing `customer_id`, an unsupported currency,
             a subscription of another customer, an invalid line item (the
-            message names the line number, `param` the field), a commit
-            expiry in the past, more than one commit line, line items whose
+            message names the line number, `param` the field), a commit line
+            beside another line, a top-up with a `subscription_id`, line items whose
             total does not fit 64-bit cents (`param` is `line_items`), or an
             unknown field (`param` names it; the body must use only the
             fields listed here).
@@ -19281,6 +19344,11 @@ paths:
         A draft or voided invoice is refused with 409, and so is an invoice
         whose charge is still unresolved.
 
+        An unpaid top-up is the one draft this sends: its email, "Buy
+        prepaid credit from <your company>", offers the credit for its price
+        with a "Buy credit" button to its hosted page, says nothing is owed
+        until the customer pays, and attaches no PDF.
+
         `email` is the recipient. `additional_emails` sets who is copied:
         - absent: the customer's stored `additional_emails` are copied,
           leaving out any that equals `email`;
@@ -19464,8 +19532,8 @@ paths:
         "409":
           description: |
             `invoice_not_manual`: the draft was made by the billing engine
-            for a subscription, so it keeps its lines and tax. Create a
-            separate invoice for a one-off charge.
+            for a subscription, so it keeps its lines and tax, or it is a
+            top-up, which is created whole. Create a separate invoice.
           content:
             application/json:
               schema:
@@ -19482,7 +19550,7 @@ paths:
           description: |
             Validation error: the invoice is not a draft, a line field is
             invalid (for example a quantity of 0, `param` names the field),
-            a second commit line, or the body has an unknown field (`param`
+            a commit line (only a new top-up takes one), or the body has an unknown field (`param`
             names it; the body must use only the fields listed here).
           content:
             application/json:
@@ -19915,6 +19983,10 @@ paths:
         from. The optional `note` is stored in the audit log, cut to 500
         bytes.
 
+        On a top-up still a draft, the payment numbers it, issues it, marks
+        it paid and grants its credit, all at once; `recovered_from` is
+        `draft`.
+
         On a written-off invoice, read its `recovery_warning` first: it says
         when the payment will not reconcile on its own. The payment is still
         recorded.
@@ -20196,6 +20268,16 @@ paths:
         the invoice's `payment_status` becomes `failed`, and dunning starts
         when the customer's policy is enabled. Check
         `payment_status` on the returned invoice.
+
+        A top-up (`billing_reason` `topup`) is charged here while it is a
+        draft. No credit balance is applied to it: it is what buys credit.
+        A payment that succeeds numbers it, issues it, marks it paid and
+        grants its credit, all at once. A declined card leaves it an
+        unnumbered draft that can be charged again, and sends the customer
+        no email. Your own code can call this route, for example when a
+        customer's balance runs low: send an `Idempotency-Key`, and a retry
+        with the same key answers what the first call answered and never
+        charges twice.
 
         A written-off (`uncollectible`) invoice cannot be charged here.
         Record an offline payment or issue a new invoice instead. The route
@@ -21715,10 +21797,11 @@ paths:
         - Refuses with 409 while tax cannot be calculated (`tax_status`
           `pending`): the invoice stays a draft. See
           `POST /v1/invoices/{id}/retry-tax`.
+        - Refuses a top-up (`billing_reason` `topup`) with 409: its payment
+          issues it.
         - Moves the invoice to `finalized`, copies the customer and company
           details onto it (`bill_to_snapshot`, `supplier_snapshot`,
-          `footer`), grants the credit of a prepaid commit line, issues any
-          credit note held on the draft, creates the
+          `footer`), issues any credit note held on the draft, creates the
           hosted-page `public_token`, and records the tax with Stripe Tax
           when that is the provider.
         - Sends the `invoice.finalized` webhook event. Its
@@ -21842,7 +21925,9 @@ paths:
           description: |
             The invoice cannot be finalized now, and nothing changed. Code
             `invalid_state`: it is not a draft, or its tax is still pending
-            (the message says whether Hardcount retries it or you must act).
+            (the message says whether Hardcount retries it or you must act),
+            or it is a top-up, which its payment issues: "A top-up is issued
+            when it is paid: collect it, send it, or record a payment."
             Code `tax_calculation_expired`: its Stripe Tax calculation
             expires within 1 hour or has expired, and its tax was never
             recorded with Stripe (Stripe keeps a calculation for 90 days);

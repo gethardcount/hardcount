@@ -214,6 +214,7 @@ export * from './hostedInvoiceCreditNotesItem';
 export * from './hostedInvoiceInvoice';
 export * from './hostedInvoiceLineItemsItem';
 export * from './hostedInvoicePayUnavailableReason';
+export * from './hostedInvoiceTopup';
 export * from './idempotencyKeyParameter';
 export * from './ingestLitellmSpendBody';
 export * from './instantiateRecipeBody';

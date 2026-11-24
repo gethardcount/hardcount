@@ -883,6 +883,12 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	// the same settings read.
 	dueAt := domain.AddDaysIn(now, netDays, billingLoc)
 
+	// One commit line and nothing else is a top-up (the store refuses a
+	// commit line beside another line).
+	if len(items) == 1 && items[0].IsCommitLine() {
+		return s.createTopup(ctx, tenantID, input, ts, billingLoc, periodStart, periodEnd, items[0])
+	}
+
 	inv := domain.Invoice{
 		CustomerID:         input.CustomerID,
 		SubscriptionID:     input.SubscriptionID,
@@ -930,6 +936,43 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	inv.TotalAmountCents = subtotal
 	inv.AmountDueCents = subtotal
 	return s.store.CreateNumberedAudited(ctx, tenantID, inv, items, number, s.createEmission(ctx, len(items)))
+}
+
+// createTopup creates a top-up: a draft that sells prepaid credit, frozen at
+// create. It has no number (the payment issues and numbers it), no due date,
+// and its hosted-page token, so it can be paid at once. Its tax is decided
+// here: buying credit is an advance payment, untaxed
+// (TaxReasonPrepaidCreditPurchase), and the usage it pays for is taxed when
+// invoiced. The line keeps the tenant's credit validity as it is now, so a
+// later change of the setting leaves this top-up as it was.
+//
+// It takes no subscription, which would put it among a period's invoices for
+// relief and credit notes. Payment terms do not apply: nothing is owed until
+// it is paid, so it is stored with none.
+func (s *Service) createTopup(ctx context.Context, tenantID string, input CreateInput, ts domain.TenantSettings, billingLoc *time.Location, periodStart, periodEnd time.Time, line domain.InvoiceLineItem) (domain.Invoice, error) {
+	if input.SubscriptionID != "" {
+		return domain.Invoice{}, errs.Invalid("subscription_id", "a top-up buys credit for the customer, so it takes no subscription_id")
+	}
+	line.TaxabilityReason = domain.TaxReasonPrepaidCreditPurchase
+	line.CreditValidDays = ts.TopupCreditValidDays
+	inv := domain.Invoice{
+		CustomerID:         input.CustomerID,
+		SubscriptionID:     input.SubscriptionID,
+		BillingTimezone:    billingLoc.String(),
+		Status:             domain.InvoiceDraft,
+		PaymentStatus:      domain.PaymentPending,
+		Currency:           line.Currency,
+		BillingPeriodStart: periodStart,
+		BillingPeriodEnd:   periodEnd,
+		TaxInclusive:       ts.TaxInclusive,
+		Memo:               strings.TrimSpace(input.Memo),
+		BillingReason:      domain.BillingReasonTopup,
+		SubtotalCents:      line.AmountCents,
+		TotalAmountCents:   line.AmountCents,
+		AmountDueCents:     line.AmountCents,
+	}
+	inv.TaxStatus = domain.InvoiceTaxOK
+	return s.store.CreateNumberedAudited(ctx, tenantID, inv, []domain.InvoiceLineItem{line}, nil, s.createEmission(ctx, 1))
 }
 
 // createEmission builds the in-tx audit emission for an operator/API invoice
@@ -1407,9 +1450,10 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	}
 	// Prepaid-commit exposure: credit this invoice already handed the customer
 	// while the cash never arrived (ADR-078 D3 fast-follow). Read per row, but
-	// behind the tightest guard of any attention read — commit lines
-	// are manual-invoice-only and funded at finalize (ADR-078 D2/D3), so a
-	// draft or a subscription-cycle invoice can never carry a live grant, and
+	// behind the tightest guard of any attention read — commit lines are on
+	// operators' invoices only, funded at finalize or, on a top-up, at
+	// payment (ADR-078 D2/D3), so a draft or a subscription-cycle invoice can
+	// never carry a live grant, and
 	// a paid one has nothing to report (the cash arrived); none of them pays
 	// for the lookup, except the paid case below. What remains is one hit on
 	// the unique partial index idx_credit_ledger_commit_fund_dedup.
@@ -1428,7 +1472,7 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	// the credit note a commit invoice refuses. Only paid invoices with a lost
 	// dispute pay for it, which is almost none.
 	if s.commitGrants != nil && inv.ID != "" &&
-		inv.BillingReason == domain.BillingReasonManual &&
+		(inv.BillingReason == domain.BillingReasonManual || inv.BillingReason == domain.BillingReasonTopup) &&
 		(inv.Status == domain.InvoiceFinalized || inv.Status == domain.InvoiceUncollectible ||
 			(inv.Status == domain.InvoicePaid && atc.LostDispute != nil)) {
 		if drawable, consumed, err := s.commitGrants.CommitGrantExposure(ctx, inv.TenantID, inv.ID, s.clock.Now(ctx)); err == nil {
@@ -1547,6 +1591,9 @@ func (s *Service) Finalize(ctx context.Context, tenantID, id string) (domain.Inv
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
+	}
+	if inv.BillingReason == domain.BillingReasonTopup {
+		return domain.Invoice{}, errs.InvalidState("A top-up is issued when it is paid: collect it, send it, or record a payment.")
 	}
 	if inv.Status != domain.InvoiceDraft {
 		return domain.Invoice{}, errs.InvalidState(fmt.Sprintf("can only finalize draft invoices, current status: %s", inv.Status))
@@ -2280,7 +2327,10 @@ func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note s
 	case domain.InvoiceVoided:
 		return domain.Invoice{}, errs.InvalidState("cannot record payment on a voided invoice")
 	case domain.InvoiceDraft:
-		return domain.Invoice{}, errs.InvalidState("finalize the invoice before recording a payment")
+		// An unpaid top-up is issued by the payment it records.
+		if !inv.UnpaidTopup() {
+			return domain.Invoice{}, errs.InvalidState("finalize the invoice before recording a payment")
+		}
 	}
 	if b := domain.PaymentBlocksAction(inv, domain.ActionRecordOfflinePayment); b.Blocked {
 		return domain.Invoice{}, errs.InvalidState(b.Message).WithCode(b.Code)
@@ -2448,10 +2498,10 @@ type AddLineItemInput struct {
 	UnitAmountCents int64  `json:"unit_amount_cents"`
 
 	// CommitGrantedCents marks the line as a prepaid-commit purchase
-	// (ADR-078): when the invoice finalizes, a credit block of this many
-	// cents is granted (may differ from the line price — discounted
-	// commits). Bought credit never expires. An add_on line on a manual
-	// invoice, alone on it (invoice-level rules enforced in the store, in-tx).
+	// (ADR-078). An invoice created with this line alone is a top-up: when
+	// it is paid, a credit block of this many cents is granted (may differ
+	// from the line price — discounted commits). An add_on line, alone on
+	// its invoice (invoice-level rules enforced in the store, in-tx).
 	CommitGrantedCents *int64 `json:"commit_granted_cents,omitempty"`
 }
 

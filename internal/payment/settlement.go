@@ -287,10 +287,12 @@ func customerFailureReason(f PaymentFailure) string {
 // failureEmailSuppressed reports whether a failure of a PaymentIntent with
 // this purpose skips the generic "payment failed" email. A dunning-retry
 // attempt already sent its own warning or escalation (Stripe Smart Retries /
-// Lago shape: one email per attempt). One helper, so the charge response,
-// the webhook and the reconciler cannot drift apart on who gets emailed.
+// Lago shape: one email per attempt). A top-up's charge owes nothing until it
+// succeeds, so its decline is the operator's to see, not a bill to chase. One
+// helper, so the charge response, the webhook and the reconciler cannot drift
+// apart on who gets emailed.
 func failureEmailSuppressed(purpose string) bool {
-	return purpose == piPurposeDunningRetry
+	return purpose == piPurposeDunningRetry || purpose == piPurposeTopup
 }
 
 // SettleFailed records a payment failure and fires its side effects once per
@@ -631,9 +633,23 @@ func (s *Stripe) buildReceiptHook(ctx context.Context, tenantID string, inv doma
 			"invoice_id", inv.ID, "customer_id", inv.CustomerID, "error", err)
 		return nil
 	}
+	// A top-up's receipt says what credit was added. Its line was frozen when
+	// the top-up was created, so this read before the settle is current. A
+	// failed read sends the receipt without that line.
+	var credit *domain.TopupCredit
+	if inv.UnpaidTopup() {
+		items, err := s.invoices.ListLineItems(ctx, tenantID, inv.ID)
+		if c, ok := domain.TopupCreditOf(items); err == nil && ok {
+			credit = &c
+		} else {
+			slog.WarnContext(ctx, "payment receipt: the top-up's credit could not be read; the receipt leaves out the credit added",
+				"invoice_id", inv.ID, "error", err)
+		}
+	}
+	// The number is the paid row's: a top-up takes its number in the settle.
 	return func(tx *sql.Tx, fresh domain.Invoice) error {
 		return s.emailReceipt.SendPaymentReceiptTx(ctx, tx, tenantID, email, cc, name,
-			inv.InvoiceNumber, receiptAmountCents(capturedCents, fresh), inv.Currency, inv.PublicToken)
+			fresh.InvoiceNumber, receiptAmountCents(capturedCents, fresh), inv.Currency, inv.PublicToken, credit)
 	}
 }
 

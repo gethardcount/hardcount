@@ -28,10 +28,6 @@ func TestGrantCap_MessageNamesTheCapInTheFieldsUnit(t *testing.T) {
 			_, err := svc.GrantTx(ctx, nil, "tnt_1", GrantInput{CustomerID: "cus_1", Currency: "USD", AmountCents: over, Description: "x"})
 			return err
 		},
-		"GrantCommitForInvoiceTx": func() error {
-			_, err := svc.GrantCommitForInvoiceTx(ctx, nil, "tnt_1", "cus_1", "inv_1", "INV-1", "USD", over)
-			return err
-		},
 		"GrantForCreditNoteTx": func() error {
 			_, err := svc.GrantForCreditNoteTx(ctx, nil, "tnt_1", "cn_1", CreditNoteReturnInput{CustomerID: "cus_1", Currency: "USD", AmountCents: over, Description: "x", InvoiceID: "inv_1"})
 			return err

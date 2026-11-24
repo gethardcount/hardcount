@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { invoiceLabel } from '@/lib/invoiceDocument'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, AlertCircle, Info, ExternalLink, Calendar } from 'lucide-react'
@@ -377,7 +378,7 @@ function UpdatePaymentMethodButton({ variant, display, invoice }: { variant: 'de
         onOpenChange={setOpen}
         customerId={invoice.customer_id}
         customerEmail={customer?.email}
-        invoiceContext={{ invoiceNumber: invoice.invoice_number, amountDueLabel }}
+        invoiceContext={{ invoiceNumber: invoiceLabel(invoice), amountDueLabel }}
       />
     </>
   )

@@ -6,6 +6,7 @@ import { api, downloadPDF, formatCents } from '@/lib/api'
 import { startOfDayInTZ, endOfDayInTZ } from '@/lib/dates'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import type { Customer, Invoice } from '@/lib/api'
+import { invoiceLabel } from '@/lib/invoiceDocument'
 import { showApiError } from '@/lib/formErrors'
 import { downloadServerCSV } from '@/lib/csv'
 import { useSortable, type SortDir } from '@/hooks/useSortable'
@@ -410,6 +411,9 @@ export default function InvoicesPage() {
                 <TableBody>
                   {sorted.map((inv: Invoice) => {
                     const now = resolveNow(inv)
+                    // An unpaid top-up has no number until its payment issues
+                    // it, and keeps none once withdrawn.
+                    const name = invoiceLabel(inv)
                     const badge = invoiceStatus(inv, now)
                     const chip = invoicePaymentChip(inv)
                     const customerName = customerMap[inv.customer_id]?.display_name || unknownCustomer
@@ -437,7 +441,7 @@ export default function InvoicesPage() {
                         {phone && <div className="space-y-1.5">
                           <div className="flex items-baseline justify-between gap-3">
                             <div className="min-w-0 truncate text-sm">
-                              <Link to={`/invoices/${inv.id}`} className="font-medium text-foreground hover:text-primary">{inv.invoice_number}</Link>
+                              <Link to={`/invoices/${inv.id}`} className="font-medium text-foreground hover:text-primary">{name}</Link>
                               <span className="text-muted-foreground"> · {customerName}</span>
                             </div>
                             <span className="shrink-0 tabular-nums font-mono text-sm">{amount}</span>
@@ -454,9 +458,9 @@ export default function InvoicesPage() {
                           <Link
                             to={`/invoices/${inv.id}`}
                             className="text-sm font-medium text-foreground hover:text-primary transition-colors whitespace-nowrap"
-                            title={inv.invoice_number}
+                            title={name}
                           >
-                            {inv.invoice_number}
+                            {name}
                           </Link>
                           <AttentionDot attention={inv.attention} />
                         </div>}
@@ -507,12 +511,12 @@ export default function InvoicesPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          aria-label={`Download PDF for ${inv.invoice_number}`}
+                          aria-label={`Download PDF for ${name}`}
                           title="Download PDF"
                           onClick={async (e) => {
                             e.stopPropagation()
                             try {
-                              await downloadPDF(inv.id, inv.invoice_number)
+                              await downloadPDF(inv.id, name)
                             } catch (err) {
                               showApiError(err, 'Failed to download PDF')
                             }

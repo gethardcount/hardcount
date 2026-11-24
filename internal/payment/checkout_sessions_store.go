@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
@@ -80,18 +81,20 @@ func (s *CheckoutSessionStore) ClaimOpenAudited(ctx context.Context, tenantID, i
 	// UPDATE paid-flip. A session minted after expire-on-settle already ran
 	// would otherwise survive on a paid invoice with no remaining expire
 	// trigger.
-	var status, paymentStatus string
+	var openForPayment bool
+	var paymentStatus string
 	var amountDue int64
 	var charging bool
 	err = tx.QueryRowContext(ctx, `
-		SELECT status, payment_status, amount_due_cents,
+		SELECT `+domain.OpenForPaymentSQL("invoices")+`, payment_status, amount_due_cents,
 		       auto_charge_claimed_until IS NOT NULL
 		FROM invoices WHERE id = $1 FOR SHARE
-	`, invoiceID).Scan(&status, &paymentStatus, &amountDue, &charging)
+	`, invoiceID).Scan(&openForPayment, &paymentStatus, &amountDue, &charging)
 	if err != nil {
 		return CheckoutClaim{}, false, fmt.Errorf("payable re-check: %w", err)
 	}
-	if status != "finalized" || amountDue <= 0 {
+	// A finalized invoice, or an unpaid top-up, which the payment issues.
+	if !openForPayment || amountDue <= 0 {
 		return CheckoutClaim{}, false, ErrInvoiceNotPayable
 	}
 	// IsInFlight semantics, not just 'processing' (domain.InvoicePaymentStatus.
@@ -417,7 +420,7 @@ func (s *CheckoutSessionStore) ListHostedToReconcile(ctx context.Context, checke
 		      AND EXISTS (
 		        SELECT 1 FROM invoices i
 		        WHERE i.id = cs.invoice_id
-		          AND i.status = 'finalized'
+		          AND `+domain.OpenForPaymentSQL("i")+`
 		          AND i.payment_status <> 'succeeded'
 		      ))
 		  )

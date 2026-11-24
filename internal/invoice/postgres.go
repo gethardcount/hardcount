@@ -28,6 +28,7 @@ type PostgresStore struct {
 	enc                 *crypto.Encryptor
 	outbox              OutboxEnqueuer
 	commitFunder        CommitFunder
+	numberer            InvoiceNumberer
 	dunningPauseRelease DunningPauseReleaser
 }
 
@@ -52,15 +53,16 @@ type OutboxEnqueuer interface {
 func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
 
 // CommitFunder grants a prepaid-commit credit block, in the funding invoice's
-// currency (ADR-129), on the caller's tx —
-// FinalizeWithDates calls it inside the finalize coordinator tx so the status
-// flip and the grant are both-or-neither (ADR-078 D2). Satisfied by
-// *credit.Service; declared consumer-side so the invoice store needs no
-// credit import. Unlike the outbox, this dependency is NOT optional when a
-// commit line exists: FinalizeWithDates fails loud on a commit invoice with
-// no funder wired.
+// currency (ADR-129), on the caller's tx, expiring at expiresAt (nil: never).
+// A top-up's payment calls it inside the settle transaction
+// (issueAndPayTopupLockedTx), and FinalizeWithDates inside the finalize
+// transaction, so the grant commits or rolls back with the money write
+// (ADR-078 D2). Satisfied by *credit.Service; declared consumer-side so the
+// invoice store needs no credit import. Unlike the outbox, this dependency is
+// NOT optional when a commit line exists: both writers fail loud with no
+// funder wired.
 type CommitFunder interface {
-	GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber, currency string, amountCents int64) (domain.CreditLedgerEntry, error)
+	GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber, currency string, amountCents int64, expiresAt *time.Time) (domain.CreditLedgerEntry, error)
 }
 
 // errCommitLineAlone refuses a commit line beside any other line: an invoice
@@ -69,8 +71,12 @@ func errCommitLineAlone() error {
 	return errs.Invalid("commit_granted_cents", "a commit line must be the only line on its invoice; put other charges on a separate invoice")
 }
 
-// SetCommitFunder wires commit-grant funding at finalize (ADR-078).
+// SetCommitFunder wires commit-grant funding (ADR-078).
 func (s *PostgresStore) SetCommitFunder(f CommitFunder) { s.commitFunder = f }
+
+// SetInvoiceNumberer wires the number a top-up takes when its payment issues
+// it. Unwired, paying a top-up fails loud and nothing is written.
+func (s *PostgresStore) SetInvoiceNumberer(n InvoiceNumberer) { s.numberer = n }
 
 // DunningPauseReleaser lifts a dunning collection pause in the transaction
 // that marks the invoice it was set for paid (ADR-036 amendment
@@ -228,7 +234,7 @@ func mapInvoiceUniqueViolation(err error, inv domain.Invoice) error {
 			postgres.UniqueViolationConstraint(err))).WithCode("invoice_unique_violation")
 }
 
-const invCols = `id, tenant_id, customer_id, COALESCE(subscription_id,''), invoice_number, status,
+const invCols = `id, tenant_id, customer_id, COALESCE(subscription_id,''), COALESCE(invoice_number,''), status,
 	payment_status, currency, subtotal_cents, discount_cents, tax_amount_cents, tax_rate,
 	COALESCE(tax_name,''), COALESCE(tax_country,''), COALESCE(tax_id,''),
 	total_amount_cents, amount_due_cents, amount_paid_cents, credits_applied_cents,
@@ -716,7 +722,7 @@ func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id stri
 			return domain.Invoice{}, fmt.Errorf("invoice %s carries a commit line but no commit funder is wired", id)
 		}
 		if _, ferr := s.commitFunder.GrantCommitForInvoiceTx(ctx, tx, tenantID,
-			inv.CustomerID, inv.ID, inv.InvoiceNumber, inv.Currency, commitCents.Int64); ferr != nil {
+			inv.CustomerID, inv.ID, inv.InvoiceNumber, inv.Currency, commitCents.Int64, nil); ferr != nil {
 			return domain.Invoice{}, fmt.Errorf("fund commit grant at finalize: %w", ferr)
 		}
 	}
@@ -902,7 +908,7 @@ func (s *PostgresStore) StampChargeOutcome(ctx context.Context, tenantID, id str
 //
 // attemptSeq is the seq CAS of StampChargeOutcome (P13): the write is refused,
 // applied=false with the row as it stands, when another outcome was recorded
-// during the call. Nothing moves an invoice that is no longer finalized.
+// during the call. Nothing moves an invoice no longer open for payment.
 func (s *PostgresStore) StampBelowMinimum(ctx context.Context, tenantID, id string, attemptSeq int64, lastPaymentError string) (domain.Invoice, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -917,7 +923,7 @@ func (s *PostgresStore) StampBelowMinimum(ctx context.Context, tenantID, id stri
 		UPDATE invoices SET payment_status = 'pending', stripe_payment_intent_id = NULL,
 			last_payment_error = $1, auto_charge_pending = FALSE, below_minimum_at = $2, updated_at = $2,
 			charge_attempt_seq = charge_attempt_seq + 1
-		WHERE id = $3 AND charge_attempt_seq = $4 AND status = 'finalized'
+		WHERE id = $3 AND charge_attempt_seq = $4 AND `+openForPaymentSQL+`
 		RETURNING `+invCols,
 		postgres.NullableString(lastPaymentError), now, id, attemptSeq,
 	).Scan(s.scanInvDest(&inv)...)
@@ -1276,6 +1282,10 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 	//
 	// Re-paying an already-paid invoice is allowed (idempotent — the
 	// PaymentSucceeded webhook can fire twice on legitimate retries).
+	//
+	// An unpaid top-up is the one draft that may be paid: its line, tax and
+	// credit validity were decided when it was created, and this payment
+	// issues it (issueAndPayTopupLockedTx).
 	if err := s.lockDunningPauseTx(ctx, tx, id); err != nil {
 		return domain.Invoice{}, false, err
 	}
@@ -1285,10 +1295,11 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 	// subscription lock that closer holds (the dunning-pause release), so
 	// the closer must not wait for it.
 	var status, taxStatus string
+	var reason sql.NullString
 	var amountDue int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT status, tax_status, amount_due_cents FROM invoices WHERE id = $1 FOR NO KEY UPDATE`, id,
-	).Scan(&status, &taxStatus, &amountDue); err != nil {
+		`SELECT status, tax_status, amount_due_cents, billing_reason FROM invoices WHERE id = $1 FOR NO KEY UPDATE`, id,
+	).Scan(&status, &taxStatus, &amountDue, &reason); err != nil {
 		if err == sql.ErrNoRows {
 			return domain.Invoice{}, false, errs.ErrNotFound
 		}
@@ -1305,9 +1316,17 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 			return domain.Invoice{}, false, err
 		}
 	}
+	topup := domain.Invoice{Status: domain.InvoiceStatus(status), BillingReason: domain.InvoiceBillingReason(reason.String)}.UnpaidTopup()
 	switch domain.InvoiceStatus(status) {
 	case domain.InvoiceFinalized, domain.InvoiceUncollectible:
 		// ok — transition to paid below.
+	case domain.InvoiceDraft:
+		if !topup {
+			return domain.Invoice{}, false, errs.InvalidState(fmt.Sprintf(
+				"cannot mark invoice paid from status %q — finalize the invoice first (tax-pending invoices stay draft until tax resolves; voided invoices are terminal)",
+				status,
+			))
+		}
 	case domain.InvoicePaid:
 		// Already paid: re-marking is a legitimate idempotent event. The
 		// payment_intent.succeeded webhook and the ambiguous-charge reconciler
@@ -1367,7 +1386,12 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 		}
 		mismatch = stamped
 	}
-	inv, err := s.markPaidLockedTx(ctx, tx, tenantID, id, stripePaymentIntentID, paidAt, kind)
+	var inv domain.Invoice
+	if topup {
+		inv, err = s.issueAndPayTopupLockedTx(ctx, tx, tenantID, id, stripePaymentIntentID, paidAt, kind)
+	} else {
+		inv, err = s.markPaidLockedTx(ctx, tx, tenantID, id, stripePaymentIntentID, paidAt, kind)
+	}
 	if err != nil {
 		return domain.Invoice{}, false, err
 	}
@@ -1412,6 +1436,85 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 		return domain.Invoice{}, false, err
 	}
 	return inv, true, nil
+}
+
+// issueAndPayTopupLockedTx issues an unpaid top-up and pays it on tx, the
+// settle's transaction, then grants the credit it sells. The caller holds the
+// invoice row lock and has read the row as an unpaid top-up. In order:
+//
+//  1. the full row lock, then the tenant's number row (NextInvoiceNumberTx);
+//  2. the issue: the number, issued_at = paidAt, due_at left NULL (a top-up
+//     has no due date), the issued parties, and invoice.finalized;
+//  3. markPaidLockedTx, the paid flip every payment takes;
+//  4. the grant of the line's commit_granted_cents, expiring
+//     credit_valid_days after paidAt (never when NULL).
+//
+// Nothing here can be refused: the line, its tax and its validity were
+// decided when the top-up was created, so a payment that arrives is always
+// recorded. Its errors are plain, never ErrInvalidState or ErrNotFound, so a
+// failure rolls the whole payment back and the payment is retried, not
+// recorded as an anomaly or acknowledged. The fund-once index
+// (idx_credit_ledger_commit_fund_dedup) aborts a second grant for the invoice.
+//
+// Lock order: invoice row, then number row. No writer takes the number row
+// and then an invoice row.
+func (s *PostgresStore) issueAndPayTopupLockedTx(ctx context.Context, tx *sql.Tx, tenantID, id, stripePaymentIntentID string, paidAt time.Time, kind settleKind) (domain.Invoice, error) {
+	if s.numberer == nil || s.commitFunder == nil {
+		return domain.Invoice{}, fmt.Errorf("pay top-up %s: no invoice numberer or commit funder is wired", id)
+	}
+	// Writing invoice_number, a unique-key column, needs the full row lock.
+	// Take it now, before the number row, so this transaction never waits on
+	// the invoice row while it holds the number row.
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM invoices WHERE id = $1 FOR UPDATE`, id); err != nil {
+		return domain.Invoice{}, fmt.Errorf("pay top-up %s: lock the invoice: %v", id, err)
+	}
+	number, err := s.numberer.NextInvoiceNumberTx(ctx, tx, tenantID)
+	if err != nil {
+		return domain.Invoice{}, fmt.Errorf("pay top-up %s: number it: %v", id, err)
+	}
+	var inv domain.Invoice
+	if err := tx.QueryRowContext(ctx, `
+		UPDATE invoices SET status = 'finalized', invoice_number = $1, issued_at = $2, updated_at = $3
+		WHERE id = $4 AND status = 'draft' AND billing_reason = 'topup'
+		RETURNING `+invCols,
+		number, paidAt, clock.Now(ctx), id,
+	).Scan(s.scanInvDest(&inv)...); err != nil {
+		return domain.Invoice{}, fmt.Errorf("pay top-up %s: issue it: %v", id, err)
+	}
+	if err := s.stampIssuedPartiesTx(ctx, tx, &inv); err != nil {
+		return domain.Invoice{}, fmt.Errorf("pay top-up %s: %v", id, err)
+	}
+	if _, err := s.finalizedTx(ctx, tx, tenantID, inv); err != nil {
+		return domain.Invoice{}, fmt.Errorf("pay top-up %s: %v", id, err)
+	}
+	paid, err := s.markPaidLockedTx(ctx, tx, tenantID, id, stripePaymentIntentID, paidAt, kind)
+	if err != nil {
+		return domain.Invoice{}, fmt.Errorf("pay top-up %s: %v", id, err)
+	}
+	var granted int64
+	var validDays sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT commit_granted_cents, credit_valid_days FROM invoice_line_items
+		WHERE invoice_id = $1 AND commit_granted_cents IS NOT NULL
+	`, id).Scan(&granted, &validDays); err != nil {
+		return domain.Invoice{}, fmt.Errorf("pay top-up %s: read its commit line: %v", id, err)
+	}
+	var expiresAt *time.Time
+	if validDays.Valid {
+		t := domain.AddDaysIn(paidAt, int(validDays.Int64), domain.LoadLocationOrUTC(paid.BillingTimezone))
+		expiresAt = &t
+	}
+	if _, err := s.commitFunder.GrantCommitForInvoiceTx(ctx, tx, tenantID, paid.CustomerID, paid.ID,
+		paid.InvoiceNumber, paid.Currency, granted, expiresAt); err != nil {
+		return domain.Invoice{}, topupGrantError(id, err)
+	}
+	return paid, nil
+}
+
+// topupGrantError keeps a failed top-up grant's text and drops its identity,
+// so no sentinel inside it reaches the settle (see issueAndPayTopupLockedTx).
+func topupGrantError(invoiceID string, err error) error {
+	return fmt.Errorf("pay top-up %s: grant its credit: %v", invoiceID, err)
 }
 
 // markPaidLockedTx writes the finalized/uncollectible → paid transition on tx
@@ -1806,7 +1909,8 @@ func (s *PostgresStore) ListLineItemsTx(ctx context.Context, tx *sql.Tx, _ strin
 			total_amount_cents, currency, COALESCE(pricing_mode,''),
 			COALESCE(price_id,''), billing_period_start, billing_period_end,
 			metadata, created_at, tax_jurisdiction, tax_code, tax_reason, quantity_decimal,
-			commit_granted_cents, nominal_unit_amount_decimal, COALESCE(meter_unit,''), dimension_match
+			commit_granted_cents, nominal_unit_amount_decimal, COALESCE(meter_unit,''), dimension_match,
+			credit_valid_days
 		FROM invoice_line_items WHERE invoice_id = $1
 		ORDER BY created_at ASC, id ASC
 	`, invoiceID)
@@ -1826,7 +1930,7 @@ func (s *PostgresStore) ListLineItemsTx(ctx context.Context, tx *sql.Tx, _ strin
 			&item.Currency, &item.PricingMode, &item.PriceID,
 			&item.BillingPeriodStart, &item.BillingPeriodEnd, &metaJSON, &item.CreatedAt,
 			&item.TaxJurisdiction, &item.TaxCode, &item.TaxabilityReason, &item.QuantityDecimal,
-			&item.CommitGrantedCents, &nominal, &item.MeterUnit, &match); err != nil {
+			&item.CommitGrantedCents, &nominal, &item.MeterUnit, &match, &item.CreditValidDays); err != nil {
 			return nil, err
 		}
 		item.NominalUnitAmountDecimal = scanNominalRate(nominal)
@@ -1939,17 +2043,23 @@ func (s *PostgresStore) AddLineItemAtomicAudited(
 	// committed when the draft was built left it out of the tax reported.
 	// Checked under the row lock, against the stored reason. The engine
 	// writes its lines when it creates the invoice, never through here.
-	if reason := domain.InvoiceBillingReason(billingReason.String); reason != "" && reason != domain.BillingReasonManual {
+	// A top-up is frozen: its one commit line is what the customer buys, and
+	// its hosted page may already be open.
+	switch reason := domain.InvoiceBillingReason(billingReason.String); {
+	case reason == domain.BillingReasonTopup:
+		return domain.InvoiceLineItem{}, domain.Invoice{}, errLinesOnTopup()
+	case reason != "" && reason != domain.BillingReasonManual:
 		return domain.InvoiceLineItem{}, domain.Invoice{}, errLinesOnBillingDraft()
 	}
 
 	// Invoice-level commit rules (ADR-078), enforced under the row lock so
-	// they can't race a concurrent add: a commit line lives only on a manual
-	// invoice, and alone on it, so the invoice buys credit and nothing else
-	// (the per-invoice fund-once index depends on one commit line).
-	if item.IsCommitLine() && domain.InvoiceBillingReason(billingReason.String) != domain.BillingReasonManual {
+	// they can't race a concurrent add: a commit line lives only on a top-up,
+	// which is created with it and takes no line after, so the invoice buys
+	// credit and nothing else (the per-invoice fund-once index depends on one
+	// commit line).
+	if item.IsCommitLine() && domain.InvoiceBillingReason(billingReason.String) != domain.BillingReasonTopup {
 		return domain.InvoiceLineItem{}, domain.Invoice{},
-			errs.Invalid("commit_granted_cents", "commit purchase lines are only supported on manual invoices")
+			errs.Invalid("commit_granted_cents", "commit purchase lines are only supported on top-up invoices: create the top-up with its one commit line")
 	}
 	var hasLine, hasCommit bool
 	if err := tx.QueryRowContext(ctx, `
@@ -2081,6 +2191,12 @@ func lineIDsMatchTx(ctx context.Context, tx *sql.Tx, invoiceID string, want []st
 // subscription (AddLineItemAtomicAudited).
 func errLinesOnBillingDraft() error {
 	return errs.InvalidState("Lines can be added only to an invoice you create. This draft was made by billing for a subscription, so it keeps billing's lines and tax. For a one-off charge, create a separate invoice.").
+		WithCode("invoice_not_manual")
+}
+
+// errLinesOnTopup refuses a line added to a top-up (AddLineItemAtomicAudited).
+func errLinesOnTopup() error {
+	return errs.InvalidState("A top-up is created whole and takes no other line. To sell a different amount, withdraw it and create another.").
 		WithCode("invoice_not_manual")
 }
 
@@ -2383,8 +2499,10 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 	// and in finalizedTx, for a draft that is finalized. A generation
 	// failure here is non-fatal: the row still inserts, and an operator can
 	// repair it with the rotate endpoint.
+	// An unpaid top-up gets its token at create too: its hosted page is how
+	// the customer pays it.
 	publicToken := inv.PublicToken
-	if publicToken == "" && inv.Status == domain.InvoiceFinalized {
+	if publicToken == "" && (inv.Status == domain.InvoiceFinalized || inv.UnpaidTopup()) {
 		if t, tokenErr := GeneratePublicToken(); tokenErr == nil {
 			publicToken = t
 		}
@@ -2408,7 +2526,7 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 			billing_timezone, auto_charge_pending, tax_inclusive)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,'{}',$27,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47)
 		RETURNING `+invCols,
-		id, tenantID, inv.CustomerID, postgres.NullableString(inv.SubscriptionID), inv.InvoiceNumber,
+		id, tenantID, inv.CustomerID, postgres.NullableString(inv.SubscriptionID), invoiceNumberArg(inv),
 		inv.Status, inv.PaymentStatus, inv.Currency,
 		inv.SubtotalCents, inv.DiscountCents, inv.TaxAmountCents, inv.TaxRate,
 		inv.TaxName,
@@ -2447,20 +2565,23 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 	}
 
 	// Invoice-level commit rules (ADR-078): a commit line lives only on a
-	// manual invoice, and alone on it. Enforced here so the
-	// composer's atomic create-with-lines path carries the same rules as
-	// AddLineItemAtomicAudited (buildLineItem validates only line-local rules).
+	// top-up, alone on it, and a top-up has exactly that line, so its payment
+	// grants exactly one block. Enforced here for every create
+	// (buildLineItem validates only line-local rules).
 	commitLines := 0
 	for i := range items {
 		if items[i].IsCommitLine() {
 			commitLines++
 		}
 	}
-	if commitLines > 0 && inv.BillingReason != domain.BillingReasonManual {
-		return domain.Invoice{}, errs.Invalid("commit_granted_cents", "commit purchase lines are only supported on manual invoices")
+	if commitLines > 0 && inv.BillingReason != domain.BillingReasonTopup {
+		return domain.Invoice{}, errs.Invalid("commit_granted_cents", "commit purchase lines are only supported on top-up invoices")
 	}
 	if commitLines > 0 && len(items) > 1 {
 		return domain.Invoice{}, errCommitLineAlone()
+	}
+	if inv.BillingReason == domain.BillingReasonTopup && commitLines != 1 {
+		return domain.Invoice{}, errs.Invalid("line_items", "a top-up has exactly one line, its commit line")
 	}
 
 	// Create all line items within the same transaction
@@ -2478,8 +2599,8 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 				tax_amount_cents, total_amount_cents, currency, pricing_mode,
 				price_id, billing_period_start, billing_period_end, metadata, created_at,
 				tax_jurisdiction, tax_code, tax_reason, quantity_decimal,
-				commit_granted_cents, nominal_unit_amount_decimal, meter_unit, dimension_match)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
+				commit_granted_cents, nominal_unit_amount_decimal, meter_unit, dimension_match, credit_valid_days)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
 		`, itemID, inv.ID, tenantID, items[i].LineType, postgres.NullableString(items[i].MeterID),
 			items[i].Description, items[i].Quantity, items[i].UnitAmountCents, items[i].AmountCents,
 			items[i].TaxRate, items[i].TaxAmountCents, items[i].TotalAmountCents,
@@ -2489,6 +2610,7 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 			itemMetaJSON, now, items[i].TaxJurisdiction, items[i].TaxCode, items[i].TaxabilityReason, items[i].QuantityDecimal,
 			items[i].CommitGrantedCents,
 			nominalRateArg(items[i].NominalUnitAmountDecimal), postgres.NullableString(items[i].MeterUnit), matchArg(items[i].DimensionMatch),
+			items[i].CreditValidDays,
 		)
 		if err != nil {
 			return domain.Invoice{}, fmt.Errorf("create line item %d: %w", i, err)
@@ -2515,10 +2637,23 @@ func collectionQueuedAtFinalize(status domain.InvoiceStatus, paymentStatus domai
 	return status == domain.InvoiceFinalized && paymentStatus == domain.PaymentPending
 }
 
+// invoiceNumberArg is the invoice_number an INSERT writes: NULL for an unpaid
+// top-up, which takes its number when it is paid (issueAndPayTopupLockedTx).
+func invoiceNumberArg(inv domain.Invoice) any {
+	if inv.UnpaidTopup() {
+		return nil
+	}
+	return inv.InvoiceNumber
+}
+
 // noLiveHostedPageSQL keeps every Hardcount charge off an invoice the customer
 // may be paying on the hosted page: one payer at a time
 // (domain.HostedCheckoutLiveSQL says when a page counts as live).
 var noLiveHostedPageSQL = domain.NoLiveHostedPageSQL("invoices")
+
+// openForPaymentSQL admits a finalized invoice and an unpaid top-up, the two
+// a charge may be sent for (domain.Invoice.OpenForPayment).
+var openForPaymentSQL = domain.OpenForPaymentSQL("invoices")
 
 // lockInvoiceForChargeClaim takes the invoice row lock before a charge
 // claim's UPDATE. Without it the UPDATE could miss a hosted session created
@@ -2830,8 +2965,9 @@ func (s *PostgresStore) ChargeHoldStateOf(ctx context.Context, tenantID, id stri
 // ConfirmChargeHold is the charge's re-check right before it sends
 // (ADR-127): true only while the owner's hold is still the one it wrote and
 // has at least domain.ChargeSendMargin left, the charge counter is still the
-// one its idempotency key was built from, and the invoice is still finalized
-// and unpaid. The charge sends nothing on false.
+// one its idempotency key was built from, and the invoice is still open for
+// payment (finalized, or an unpaid top-up) and unpaid. The charge sends
+// nothing on false.
 //
 //   - Hold: a charger that stalled past its hold (the sweep cleared it and
 //     another owner may be charging) must not send. With the send budget
@@ -2857,7 +2993,7 @@ func (s *PostgresStore) ConfirmChargeHold(ctx context.Context, tenantID, id stri
 			auto_charge_claimed_until = $2
 			AND auto_charge_claimed_until > clock_timestamp() + make_interval(secs => $3)
 			AND charge_attempt_seq = $4
-			AND status = 'finalized' AND payment_status IN ('pending', 'failed'),
+			AND `+openForPaymentSQL+` AND payment_status IN ('pending', 'failed'),
 			false)
 		FROM invoices WHERE id = $1
 	`, id, hold.Until, domain.ChargeSendMargin.Seconds(), attemptSeq).Scan(&ok)
@@ -2905,10 +3041,11 @@ func (s *PostgresStore) ClaimChargeForDunningRetry(ctx context.Context, tenantID
 // invoice is settleable by RECORDING writers only (offline payment, the
 // stale-hold sweep's settle) — nothing initiates money against
 // it. Kept a separate function from the dunning claim so a future divergence
-// is a deliberate edit, not a shared-hold accident.
+// is a deliberate edit, not a shared-hold accident. It admits an unpaid
+// top-up too, the one draft a charge may be sent for: its payment issues it.
 func (s *PostgresStore) ClaimChargeForManualCollect(ctx context.Context, tenantID, id string) (domain.ChargeHold, error) {
 	return s.claimChargeHold(ctx, tenantID, id, chargeClaimWhere(`payment_status IN ('pending', 'failed')
-		  AND status = 'finalized'
+		  AND `+openForPaymentSQL+`
 		  AND amount_due_cents > 0`))
 }
 
@@ -2982,7 +3119,7 @@ func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, ski
 		  AND i.livemode = $2
 		  AND (i.provider_synced_at IS NULL OR i.provider_synced_at < now() - make_interval(secs => $3))
 		  AND NOT (i.id = ANY(COALESCE($5::text[], '{}')))
-		ORDER BY (i.status = 'finalized' AND i.payment_status IN ('pending', 'failed')) DESC,
+		ORDER BY (`+domain.OpenForPaymentSQL("i")+` AND i.payment_status IN ('pending', 'failed')) DESC,
 		         i.provider_synced_at ASC NULLS FIRST, i.auto_charge_claimed_until ASC, i.id ASC
 		LIMIT $4
 	`, domain.StaleChargeHoldWait.Seconds(), live, staleHoldRecheckAfter.Seconds(), limit, skip)
@@ -3026,7 +3163,7 @@ func (s *PostgresStore) ClearStaleChargeHold(ctx context.Context, tenantID, id s
 			UPDATE invoices
 			SET auto_charge_claimed_until = NULL, charge_attempt_seq = charge_attempt_seq + 1
 			WHERE id = $1 AND auto_charge_claimed_until = $2 AND charge_attempt_seq = $3
-			  AND status = 'finalized' AND payment_status IN ('pending', 'failed')
+			  AND `+openForPaymentSQL+` AND payment_status IN ('pending', 'failed')
 		`, id, hold, attemptSeq)
 	} else {
 		res, err = tx.ExecContext(ctx, `
@@ -3112,7 +3249,7 @@ func (s *PostgresStore) EndAttemptWithoutPayment(ctx context.Context, tenantID, 
 				ORDER BY a.created_at DESC, a.id DESC LIMIT 1) = 'dunning_retry'
 			THEN 'failed' ELSE 'pending' END
 		WHERE id = $1 AND payment_status = 'unknown' AND stripe_payment_intent_id = $2
-		  AND status IN ('finalized', 'uncollectible')
+		  AND (`+openForPaymentSQL+` OR status = 'uncollectible')
 		RETURNING payment_status
 	`, id, paymentIntentID).Scan(&status)
 	if err == sql.ErrNoRows {
@@ -4723,7 +4860,7 @@ func (s *PostgresStore) StampPendingConfirm(ctx context.Context, tenantID string
 			charge_attempt_seq = charge_attempt_seq + 1
 		WHERE id = $1 AND charge_attempt_seq = $4
 		  AND auto_charge_claimed_until = $5 AND auto_charge_claimed_until > clock_timestamp()
-		  AND status = 'finalized' AND payment_status IN ('pending', 'failed')
+		  AND `+openForPaymentSQL+` AND payment_status IN ('pending', 'failed')
 		  AND amount_due_cents = $6
 		RETURNING `+invCols,
 		a.InvoiceID, a.StripePaymentIntentID, clock.Now(ctx), attemptSeq, hold.Until, a.AmountCents,

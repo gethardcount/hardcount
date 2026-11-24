@@ -415,21 +415,20 @@ func TestCreditCurrency_DerivedRowsTakeTheInvoiceCurrency(t *testing.T) {
 		}
 	})
 
-	t.Run("commit grant and its void retire take the funding invoice currency", func(t *testing.T) {
+	t.Run("a top-up's commit grant takes its currency", func(t *testing.T) {
 		cust := e.customer(t, "ccy-derived-commit")
-		inv := finalized(cust, []map[string]any{{
-			"description": "Prepaid commit", "line_type": "add_on", "quantity": 1,
-			"unit_amount_cents": 9000, "commit_granted_cents": 10000,
-		}})
+		inv := flowStr(e.call(t, "POST", "/v1/invoices", map[string]any{
+			"customer_id": cust, "currency": "EUR", "line_items": []map[string]any{{
+				"description": "Prepaid commit", "line_type": "add_on", "quantity": 1,
+				"unit_amount_cents": 9000, "commit_granted_cents": 10000,
+			}},
+		}).want(t, 201, "create EUR top-up").body, "id")
+		e.call(t, "POST", "/v1/invoices/"+inv+"/record-payment", map[string]any{"note": "wire"}).want(t, 200, "record payment")
 		if c := e.ledgerCurrency(t, "commit grant", "source_invoice_id = $1 AND grant_kind = 'commit'", inv); c != "EUR" {
 			t.Errorf("commit grant currency %q, want EUR", c)
 		}
-		e.call(t, "POST", "/v1/invoices/"+inv+"/void", nil).want(t, 200, "void commit invoice")
-		if c := e.ledgerCurrency(t, "void retire", "metadata->>'reason' = 'commit_void_retire' AND metadata->>'funding_invoice_id' = $1", inv); c != "EUR" {
-			t.Errorf("void-retire currency %q, want EUR", c)
-		}
-		if got := e.balances(t, cust); got["EUR"] != 0 {
-			t.Errorf("balances %v, want EUR 0 after the void", got)
+		if got := e.balances(t, cust); got["EUR"] != 10000 || len(got) != 1 {
+			t.Errorf("balances %v, want EUR 10000", got)
 		}
 	})
 }
@@ -478,8 +477,8 @@ func TestCreditCurrency_CostDashboardCommitAndPromoPerCurrency(t *testing.T) {
 			"description": "Prepaid commit", "line_type": "add_on", "quantity": 1,
 			"unit_amount_cents": 9000, "commit_granted_cents": 10000,
 		}},
-	}).want(t, 201, "create EUR commit invoice").body, "id")
-	e.call(t, "POST", "/v1/invoices/"+commitInv+"/finalize", nil).want(t, 200, "finalize EUR commit invoice")
+	}).want(t, 201, "create EUR top-up").body, "id")
+	e.call(t, "POST", "/v1/invoices/"+commitInv+"/record-payment", map[string]any{"note": "Wire"}).want(t, 200, "pay the EUR top-up")
 	e.call(t, "POST", "/v1/credits/grant", map[string]any{
 		"customer_id": cust, "currency": "USD", "amount_cents": 700, "description": "welcome", "grant_kind": "promotional",
 	}).want(t, 201, "grant USD promotional")

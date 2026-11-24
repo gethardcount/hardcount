@@ -103,6 +103,8 @@ func TestOutboxMessage_EveryPayloadKeyIsClassified(t *testing.T) {
 		"escalation_outcome": true, "operator_note": true, "inviter_email": true,
 		"tenant_name": true, "invoice_written_off": true,
 		"invitee_has_account": true,
+		// A top-up's credit amount and validity: facts, no link or token.
+		"credit_cents": true, "credit_valid_days": true,
 		// A yes/no on which warning copy was sent (#966): no link, no token.
 		"card_needs_replacing": true,
 		"decline_ask":          true,

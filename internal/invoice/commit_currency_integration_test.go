@@ -9,6 +9,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // T5 (commit relief): the relief retire row and its credit.commit_retired
@@ -21,12 +22,13 @@ func TestCommitRelief_RetireCarriesTheGrantCurrency(t *testing.T) {
 		CustomerID: h.custID, Currency: "EUR",
 		LineItems: []invoice.AddLineItemInput{{
 			Description: "Prepaid commit — EUR", LineType: "add_on", Quantity: 1,
-			UnitAmountCents: 9000, CommitGrantedCents: &grantCents,
+			UnitAmountCents: 9000,
 		}},
 	})
 	if err != nil {
 		t.Fatalf("create EUR commit invoice: %v", err)
 	}
+	testutil.MarkLegacyCommitLine(ctx, t, h.db, h.tenantID, inv.ID, grantCents)
 	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}

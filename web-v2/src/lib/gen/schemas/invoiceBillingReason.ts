@@ -28,6 +28,10 @@
  * - `manual`: an invoice you created with `POST /v1/invoices`.
  * - `threshold`: an early invoice because a spend threshold was
  *   crossed.
+ * - `topup`: a top-up, which sells prepaid credit: an invoice you
+ *   created with `POST /v1/invoices` and one `commit_granted_cents`
+ *   line, alone. It stays a draft with no `invoice_number` until it is
+ *   paid; the payment numbers it, issues it and grants the credit.
  */
 export type InvoiceBillingReason = typeof InvoiceBillingReason[keyof typeof InvoiceBillingReason];
 
@@ -39,4 +43,5 @@ export const InvoiceBillingReason = {
   subscription_update: 'subscription_update',
   manual: 'manual',
   threshold: 'threshold',
+  topup: 'topup',
 } as const;

@@ -17,6 +17,7 @@ import type { HostedInvoiceCreditNotesItem } from './hostedInvoiceCreditNotesIte
 import type { HostedInvoiceInvoice } from './hostedInvoiceInvoice';
 import type { HostedInvoiceLineItemsItem } from './hostedInvoiceLineItemsItem';
 import type { HostedInvoicePayUnavailableReason } from './hostedInvoicePayUnavailableReason';
+import type { HostedInvoiceTopup } from './hostedInvoiceTopup';
 
 /**
  * What the hosted invoice page shows, from
@@ -63,6 +64,13 @@ export interface HostedInvoice {
      * charge.
      */
   pay_unavailable_reason?: HostedInvoicePayUnavailableReason;
+  /**
+     * Sent only for a top-up (an invoice that sells prepaid credit):
+     * the credit it sells, which the page shows in place of an amount
+     * due. An unpaid top-up has no `invoice_number` (empty) and no
+     * `due_at`.
+     */
+  topup?: HostedInvoiceTopup;
   /** False for a test-mode invoice. The page shows a test-mode banner. */
   livemode: boolean;
 }

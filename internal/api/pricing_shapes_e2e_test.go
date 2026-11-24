@@ -366,9 +366,9 @@ usage "calls (units)" qty=250 amount=250 price=calls`)
 }
 
 // TestPricingShapes_6_PrepaidCommit: a customer pays 900c for 1,000c of
-// credit on a one-off invoice with a commit line (ADR-078). Finalizing it
-// grants the credit, and the period's usage invoice draws it down: 300 calls
-// at 1c are 300c, all paid from credit, and 700c of credit is left.
+// credit on a top-up (ADR-078). Its payment grants the credit, and the
+// period's usage invoice draws it down: 300 calls at 1c are 300c, all paid
+// from credit, and 700c of credit is left.
 func TestPricingShapes_6_PrepaidCommit(t *testing.T) {
 	r := newPPRig(t, "shape 6")
 	calls := r.meter("calls", "sum")
@@ -383,7 +383,7 @@ func TestPricingShapes_6_PrepaidCommit(t *testing.T) {
 			"unit_amount_cents": 900, "commit_granted_cents": 1000,
 		}},
 	}, http.StatusCreated)
-	r.must(time.Time{}, http.MethodPost, "/v1/invoices/"+flowStr(commit, "id")+"/finalize", nil, http.StatusOK)
+	r.must(time.Time{}, http.MethodPost, "/v1/invoices/"+flowStr(commit, "id")+"/record-payment", nil, http.StatusOK)
 
 	r.ingest(time.Time{}, "shape-6", "calls", 300, recent(p0), nil)
 	r.run(p1.Add(time.Hour))

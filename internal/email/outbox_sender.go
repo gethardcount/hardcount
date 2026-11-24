@@ -45,6 +45,10 @@ const (
 	// email (ADR-082 rider). No CHECK constraint exists on
 	// email_outbox.email_type, so appending a type needs no migration.
 	TypeCreditNote = "credit_note"
+	// TypeTopupOffer is the link to buy prepaid credit on an unpaid top-up.
+	// It is not action-required: the staleness gate looks invoices up by
+	// number, and a top-up has none until it is paid.
+	TypeTopupOffer = "topup_offer"
 )
 
 // outboxMessage is the union payload persisted to email_outbox.payload. Each
@@ -65,6 +69,11 @@ type outboxMessage struct {
 	CreditNoteNumber string `json:"credit_note_number,omitempty"`
 	AmountCents      int64  `json:"amount_cents,omitempty"`
 	Currency         string `json:"currency,omitempty"`
+	// CreditCents and CreditValidDays are the credit a top-up sells, on its
+	// offer and its receipt (domain.TopupCredit). A receipt row without
+	// credit_cents is an ordinary invoice's receipt.
+	CreditCents     int64 `json:"credit_cents,omitempty"`
+	CreditValidDays *int  `json:"credit_valid_days,omitempty"`
 	// Trigger names WHY this row was enqueued, for rows whose cause an
 	// operator cannot infer from the row itself. Two setup-link emails on
 	// one invoice — the finalize-time one and an operator's Resend — were
@@ -145,6 +154,15 @@ func (m outboxMessage) declineAsk() domain.DeclineAsk {
 		return domain.DeclineAskNewCard
 	}
 	return m.DeclineAsk
+}
+
+// topupCredit is the credit a receipt names: nil unless the row is a
+// top-up's receipt.
+func (m outboxMessage) topupCredit() *domain.TopupCredit {
+	if m.CreditCents == 0 {
+		return nil
+	}
+	return &domain.TopupCredit{CreditCents: m.CreditCents, ValidDays: m.CreditValidDays}
 }
 
 // scrubbedPayloadKeys are the outboxMessage keys removed from a row's
@@ -290,6 +308,22 @@ func (s *OutboxSender) SendInvoice(ctx context.Context, tenantID, to string, cc 
 	})
 }
 
+// SendTopupOffer enqueues the link to buy prepaid credit on an unpaid top-up.
+// It carries no PDF: a top-up has no document until it is paid. Satisfies
+// invoice.EmailSender.
+func (s *OutboxSender) SendTopupOffer(ctx context.Context, tenantID, to string, cc []string, customerName string, payCents int64, credit domain.TopupCredit, currency, publicToken string) error {
+	return s.enqueue(ctx, tenantID, TypeTopupOffer, outboxMessage{
+		To:              to,
+		Cc:              cc,
+		CustomerName:    customerName,
+		AmountCents:     payCents,
+		Currency:        currency,
+		CreditCents:     credit.CreditCents,
+		CreditValidDays: credit.ValidDays,
+		PublicToken:     publicToken,
+	})
+}
+
 // SendDunningWarningTx enqueues a dunning-warning email on the caller's
 // transaction, so the dunning reschedule and its email commit together
 // (ADR-040). Satisfies dunning.EmailNotifier.
@@ -325,9 +359,10 @@ func (s *OutboxSender) SendDunningEscalationTx(ctx context.Context, tx *sql.Tx, 
 
 // SendPaymentReceiptTx enqueues a receipt email on the caller's transaction,
 // so the paid-flip and its receipt commit together (ADR-040 amendment).
+// credit is set only for a top-up, whose receipt says what credit was added.
 // Satisfies payment.EmailReceipt.
-func (s *OutboxSender) SendPaymentReceiptTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string) error {
-	return s.enqueueTx(ctx, tx, tenantID, TypePaymentReceipt, outboxMessage{
+func (s *OutboxSender) SendPaymentReceiptTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string, credit *domain.TopupCredit) error {
+	msg := outboxMessage{
 		To:            to,
 		Cc:            cc,
 		CustomerName:  customerName,
@@ -335,7 +370,11 @@ func (s *OutboxSender) SendPaymentReceiptTx(ctx context.Context, tx *sql.Tx, ten
 		AmountCents:   amountCents,
 		Currency:      currency,
 		PublicToken:   publicToken,
-	})
+	}
+	if credit != nil {
+		msg.CreditCents, msg.CreditValidDays = credit.CreditCents, credit.ValidDays
+	}
+	return s.enqueueTx(ctx, tx, tenantID, TypePaymentReceipt, msg)
 }
 
 // SendPaymentFailedTx enqueues a payment-failed email on the caller's

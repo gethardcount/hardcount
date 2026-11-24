@@ -192,6 +192,10 @@ type capturingEmailSender struct {
 	called      bool
 }
 
+func (c *capturingEmailSender) SendTopupOffer(context.Context, string, string, []string, string, int64, domain.TopupCredit, string, string) error {
+	return nil
+}
+
 func (c *capturingEmailSender) SendInvoice(_ context.Context, _, _ string, _ []string, _, _ string, totalCents int64, _ string, _ []byte, _ string, _ bool) error {
 	c.called = true
 	c.amountCents = totalCents

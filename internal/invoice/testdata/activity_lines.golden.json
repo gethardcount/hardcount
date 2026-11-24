@@ -199,6 +199,40 @@
     ]
   },
   {
+    "case": "created/topup",
+    "line": {
+      "id": "created/topup",
+      "kind": "invoice.created",
+      "title": "Invoice created",
+      "detail": [
+        [
+          {
+            "text": "Prepaid credit"
+          }
+        ],
+        [
+          {
+            "link": {
+              "kind": "subscription",
+              "id": "hc_sub_1",
+              "label": "Starter"
+            }
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Invoice created",
+      "meta: Prepaid credit · Starter · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
     "case": "created/subscription_update/plan",
     "line": {
       "id": "created/subscription_update/plan",

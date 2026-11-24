@@ -152,7 +152,7 @@ func (h *PublicPaymentHandler) validateToken(w http.ResponseWriter, r *http.Requ
 	var invoiceNumber, currency, invoiceStatus string
 	var amountDueCents int64
 	err = tx.QueryRowContext(scopedCtx, `
-		SELECT invoice_number, amount_due_cents, currency, status FROM invoices WHERE id = $1
+		SELECT COALESCE(invoice_number, ''), amount_due_cents, currency, status FROM invoices WHERE id = $1
 	`, token.InvoiceID).Scan(&invoiceNumber, &amountDueCents, &currency, &invoiceStatus)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

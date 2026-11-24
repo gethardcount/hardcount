@@ -3,6 +3,7 @@
 // tests/actionOutcomes.test.ts; the pages only render the result.
 
 import { errorSentence, outcomeUnknown } from './errorCopy'
+import { invoiceLabel } from './invoiceDocument'
 
 export type OutcomeTone = 'success' | 'info' | 'warning' | 'error'
 
@@ -19,12 +20,13 @@ export interface Outcome {
 // as-is (it can be a failure). Declines arrive as API errors, not here.
 export function collectOutcome(inv: {
   invoice_number: string
+  billing_reason?: string
   status: string
   payment_status: string
   amount_paid_cents: number
   stripe_payment_intent_id?: string | null
 }): Outcome {
-  const n = inv.invoice_number
+  const n = invoiceLabel(inv)
   if (inv.status === 'paid' || inv.payment_status === 'succeeded') {
     // Only a credit-covered settle records no payment at all: it pays with no
     // PaymentIntent and leaves amount_paid at zero. amount_paid alone is not
@@ -74,12 +76,16 @@ export function writeOffOutcome(
 // newInvoiceOutcome: the one message after the one-off invoice composer.
 // Finalizing and emailing are separate steps; when the email step does not
 // happen, the invoice is still finalized (not a draft), and that is said once.
+// A top-up is never finalized: its payment issues it, so Save & send creates
+// it and sends its link, and a send that does not happen leaves the draft.
 export type NewInvoiceResult =
   | { kind: 'draft' }
   | { kind: 'sent' }
   | { kind: 'email_failed'; recipient: string }
   | { kind: 'no_email' }
   | { kind: 'email_not_configured' }
+  | { kind: 'topup_sent' }
+  | { kind: 'topup_not_sent'; reason: string }
 
 // emailStepAfterFinalize: what Save & send still has to do once the invoice
 // is finalized. Without Stripe, finalizing a card-less customer's invoice
@@ -96,6 +102,10 @@ export function emailStepAfterFinalize(
 
 export function newInvoiceOutcome(invoiceNumber: string, result: NewInvoiceResult): Outcome {
   switch (result.kind) {
+    case 'topup_sent':
+      return { tone: 'success', title: 'Top-up created and its link sent' }
+    case 'topup_not_sent':
+      return { tone: 'warning', title: 'Top-up draft created, link not sent', description: result.reason }
     case 'sent':
       return { tone: 'success', title: `Invoice ${invoiceNumber} sent` }
     case 'email_failed':

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"reflect"
@@ -26,6 +27,9 @@ import (
 var invoicePrefixPattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,20}$`)
 
 var settingsPhonePattern = regexp.MustCompile(`^[\+\d\s\-\(\)]{7,20}$`)
+
+// maxTopupCreditValidDays caps topup_credit_valid_days at ten years.
+const maxTopupCreditValidDays = 3650
 
 // brandColorPattern accepts the lowercase 7-char hex form (#rrggbb). Short
 // form (#rgb), uppercase, and alpha (#rrggbbaa) are rejected so we keep the
@@ -96,7 +100,7 @@ const settingsColumns = `tenant_id, default_currency, timezone, invoice_prefix, 
 	COALESCE(company_email,''), COALESCE(company_phone,''), COALESCE(logo_url,''),
 	COALESCE(brand_color,''),
 	COALESCE(tax_id,''), COALESCE(support_url,''), COALESCE(invoice_footer,''),
-	credit_balance_low_threshold_cents, created_at, updated_at`
+	credit_balance_low_threshold_cents, topup_credit_valid_days, created_at, updated_at`
 
 func scanSettings(row *sql.Row) (domain.TenantSettings, error) {
 	var ts domain.TenantSettings
@@ -110,7 +114,7 @@ func scanSettings(row *sql.Row) (domain.TenantSettings, error) {
 		&ts.CompanyEmail, &ts.CompanyPhone, &ts.LogoURL,
 		&ts.BrandColor,
 		&ts.TaxID, &ts.SupportURL, &ts.InvoiceFooter,
-		&ts.CreditBalanceLowThresholdCents, &ts.CreatedAt, &ts.UpdatedAt)
+		&ts.CreditBalanceLowThresholdCents, &ts.TopupCreditValidDays, &ts.CreatedAt, &ts.UpdatedAt)
 	return ts, err
 }
 
@@ -186,7 +190,7 @@ func (s *SettingsStore) Update(ctx context.Context, tenantID string, change func
 			company_email = $20, company_phone = $21,
 			logo_url = $22, brand_color = $23,
 			tax_id = $24, support_url = $25, invoice_footer = $26,
-			credit_balance_low_threshold_cents = $27, updated_at = $28
+			credit_balance_low_threshold_cents = $27, topup_credit_valid_days = $28, updated_at = $29
 		WHERE tenant_id = $1
 		RETURNING `+settingsColumns,
 		tenantID, ts.DefaultCurrency, ts.Timezone, ts.InvoicePrefix, ts.CreditNotePrefix,
@@ -199,7 +203,7 @@ func (s *SettingsStore) Update(ctx context.Context, tenantID string, change func
 		postgres.NullableString(ts.CompanyEmail), postgres.NullableString(ts.CompanyPhone),
 		postgres.NullableString(ts.LogoURL), postgres.NullableString(ts.BrandColor),
 		postgres.NullableString(ts.TaxID), postgres.NullableString(ts.SupportURL), postgres.NullableString(ts.InvoiceFooter),
-		ts.CreditBalanceLowThresholdCents, time.Now().UTC(),
+		ts.CreditBalanceLowThresholdCents, ts.TopupCreditValidDays, time.Now().UTC(),
 	))
 	if err != nil {
 		return domain.TenantSettings{}, err
@@ -431,13 +435,17 @@ func (h *SettingsHandler) upsert(w http.ResponseWriter, r *http.Request) {
 	var before domain.TenantSettings
 	result, err := h.store.Update(r.Context(), tenantID, func(ts *domain.TenantSettings) error {
 		before = *ts
-		// The threshold is a pointer, and decoding a number into a non-nil
-		// pointer writes into the int64 it points at. before gets its own
-		// copy, or it would read the new amount and the diff would miss the
-		// change.
+		// The threshold and the validity are pointers, and decoding a number
+		// into a non-nil pointer writes into the value it points at. before
+		// gets its own copy, or it would read the new value and the diff would
+		// miss the change.
 		if p := ts.CreditBalanceLowThresholdCents; p != nil {
 			v := *p
 			before.CreditBalanceLowThresholdCents = &v
+		}
+		if p := ts.TopupCreditValidDays; p != nil {
+			v := *p
+			before.TopupCreditValidDays = &v
 		}
 		if err := respond.DecodeValue(body, ts, respond.ReadOnly("tenant_id", "created_at", "updated_at")); err != nil {
 			return err
@@ -575,6 +583,12 @@ func validateSettings(ts *domain.TenantSettings) error {
 	if ts.CreditBalanceLowThresholdCents != nil && *ts.CreditBalanceLowThresholdCents <= 0 {
 		return errs.Invalid("credit_balance_low_threshold_cents",
 			"must be greater than 0 when set (send null to turn low-balance alerts off; depletion has its own event)")
+	}
+	// A top-up's grant expires this many days after its payment. The cap
+	// keeps that instant one Postgres can store, so a payment never fails on it.
+	if d := ts.TopupCreditValidDays; d != nil && (*d < 1 || *d > maxTopupCreditValidDays) {
+		return errs.Invalid("topup_credit_valid_days",
+			fmt.Sprintf("must be from 1 to %d days when set (send null for credit that never expires)", maxTopupCreditValidDays))
 	}
 
 	// Canonical UPPERCASE before persisting — ValidateCurrency accepts

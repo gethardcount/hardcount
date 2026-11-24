@@ -165,25 +165,17 @@ func TestInvoiceCreate_CommitLineBesideAnotherUsesNoNumber(t *testing.T) {
 	e.wantNextNumber(t, cust, first)
 }
 
-// Adding a line keeps a commit line alone, in either order: a charge is
-// refused on an invoice that buys credit, and a commit line on an invoice
-// that already has a line.
+// A commit line is not added to a draft: only a new top-up carries one
+// (an invoice that buys credit takes no line at all: TestAddLineItem_TopupIsFrozen).
 func TestAddLineItem_CommitLineStaysAlone(t *testing.T) {
 	e := newInvoiceGuardEnv(t, "Invoice Add Commit Co")
 	cust := e.customer(t, "add-commit")
 	commit := map[string]any{"description": "Commit", "quantity": 1, "unit_amount_cents": 10000, "commit_granted_cents": 10000}
 	setup := map[string]any{"description": "Setup", "quantity": 1, "unit_amount_cents": 1000}
-	for name, c := range map[string]struct{ first, added map[string]any }{
-		"a charge after the commit line": {commit, setup},
-		"a commit line after a charge":   {setup, commit},
-	} {
-		t.Run(name, func(t *testing.T) {
-			id := flowStr(e.call(t, "POST", "/v1/invoices", map[string]any{
-				"customer_id": cust, "line_items": []map[string]any{c.first},
-			}).want(t, 201, "create draft").body, "id")
-			wantInvalid(t, e.call(t, "POST", "/v1/invoices/"+id+"/line-items", c.added), "commit_granted_cents", "add "+name)
-		})
-	}
+	id := flowStr(e.call(t, "POST", "/v1/invoices", map[string]any{
+		"customer_id": cust, "line_items": []map[string]any{setup},
+	}).want(t, 201, "create draft").body, "id")
+	wantInvalid(t, e.call(t, "POST", "/v1/invoices/"+id+"/line-items", commit), "commit_granted_cents", "add a commit line after a charge")
 }
 
 func TestAddLineItem_RefusesDiscountAndTaxLines(t *testing.T) {

@@ -1129,11 +1129,12 @@ func TestE2E_StripeRefund_PrepaidCommitInvoice(t *testing.T) {
 	db, ts, _, register := newRefundServer(t)
 	f := newRefundFlow(t, db, ts, "Refund commit Co")
 	register(f)
-	invID := f.finalizedInvoice("rf_commit", 0, map[string]any{
-		"description": "Prepaid credit", "quantity": 1, "unit_amount_cents": 5000, "commit_granted_cents": 5000,
-	})
+	invID := flowStr(f.call("POST", "/v1/invoices", map[string]any{
+		"customer_id": f.customerID,
+		"line_items":  []map[string]any{{"description": "Prepaid credit", "quantity": 1, "unit_amount_cents": 5000, "commit_granted_cents": 5000}},
+	}).want(t, 201, "create the top-up").body, "id")
 	const pi = "pi_rf_commit"
-	f.pay(invID, pi, 5000).want(t, 200, "pay the commit invoice")
+	f.pay(invID, pi, 5000).want(t, 200, "pay the top-up")
 	if got := flowStr(f.invoice(invID), "status"); got != "paid" {
 		t.Fatalf("commit invoice status %q, want paid", got)
 	}
