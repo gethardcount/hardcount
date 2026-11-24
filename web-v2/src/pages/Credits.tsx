@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { api, formatCents, formatCentsBare, formatDate, formatDateTime, getCurrencySymbol } from '@/lib/api'
 import { amountsByCurrencyText, sumByCurrency } from '@/lib/money'
+import { creditBalanceFilter, creditBalanceFilterLabels } from '@/lib/creditBalanceFilter'
 import { amountInputError, dollarsToWholeCents } from '@/lib/priceInput'
 import { CURRENCIES as GEO_CURRENCIES } from '@/lib/geo'
 import { useCustomerCurrency } from '@/hooks/useCustomerCurrency'
@@ -169,7 +170,9 @@ export default function CreditsPage() {
     page: '1',
     sort: 'created_at',
     dir: 'desc',
+    balance: '',
   })
+  const balanceFilter = creditBalanceFilter(urlState.balance)
   const selectedCustomerId = urlState.customer || null
   const entryTypeFilter = urlState.entryType
   const ledgerPage = Math.max(1, parseInt(urlState.page) || 1)
@@ -195,10 +198,17 @@ export default function CreditsPage() {
       api.listCustomersByIds(balanceCustomerIds),
     enabled: !balancesQuery.isLoading,
   })
+  // The table's rows under ?balance= (out or low). The page total and the
+  // customer detail keep reading every balance.
+  const filteredQuery = useQuery({
+    queryKey: ['credits', 'balances', balanceFilter],
+    queryFn: () => api.listBalances(balanceFilter),
+    enabled: !!balanceFilter,
+  })
   const balances = balancesQuery.data?.data ?? []
   const customers = customersQuery.data?.data ?? []
-  const loading = balancesQuery.isLoading || customersQuery.isLoading
-  const firstErr = balancesQuery.error ?? customersQuery.error
+  const loading = balancesQuery.isLoading || customersQuery.isLoading || filteredQuery.isLoading
+  const firstErr = balancesQuery.error ?? customersQuery.error ?? filteredQuery.error
   const error = firstErr instanceof Error ? firstErr.message : (firstErr ? 'Failed to load credits' : null)
   const loadData = () => {
     invalidateMoneySurfaces(queryClient)
@@ -531,13 +541,15 @@ export default function CreditsPage() {
   // ---- List View ----
   // One row per customer and currency: a customer with credit in two
   // currencies has two rows, each in its own currency.
-  const creditRows: { customer: Customer; balance: CreditBalance }[] = balances
+  const rowsOf = (list: CreditBalance[]): { customer: Customer; balance: CreditBalance }[] => list
     .filter(b => customerMap[b.customer_id])
     .map(b => ({ customer: customerMap[b.customer_id], balance: b }))
     .sort((a, b) => b.balance.balance_cents - a.balance.balance_cents
       || a.customer.display_name.localeCompare(b.customer.display_name)
       || a.balance.currency.localeCompare(b.balance.currency))
+  const creditRows = rowsOf(balances)
   const customersWithCredits = new Set(creditRows.map(r => r.customer.id))
+  const tableRows = balanceFilter ? rowsOf(filteredQuery.data?.data ?? []) : creditRows
 
   return (
     <>
@@ -560,8 +572,24 @@ export default function CreditsPage() {
         )}
       </div>
 
+      {balanceFilter && (
+        <div className="mt-4 flex">
+          <Badge variant="secondary" className="gap-1">
+            {creditBalanceFilterLabels(balanceFilter).chip}
+            <button
+              type="button"
+              onClick={() => setUrlState({ balance: '' })}
+              className="ml-0.5 hover:text-foreground"
+              aria-label="Clear balance filter"
+            >
+              ×
+            </button>
+          </Badge>
+        </div>
+      )}
+
       {/* Customer balances table */}
-      <Card className="mt-6">
+      <Card className={balanceFilter ? 'mt-4' : 'mt-6'}>
         <CardContent className="p-0">
           {error ? (
             <LoadError what="credits" error={firstErr} onRetry={loadData} />
@@ -583,6 +611,10 @@ export default function CreditsPage() {
                 onClick: () => { setModalCustomerId(''); setShowGrant(true) },
               }}
             />
+          ) : balanceFilter && tableRows.length === 0 ? (
+            <p className="px-5 py-8 text-center text-sm text-muted-foreground">
+              {creditBalanceFilterLabels(balanceFilter).empty}
+            </p>
           ) : (
             <Table>
               <TableHeader>
@@ -593,7 +625,7 @@ export default function CreditsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {creditRows.map(({ customer, balance }) => (
+                {tableRows.map(({ customer, balance }) => (
                   <TableRow
                     key={`${customer.id}:${balance.currency}`}
                     className="cursor-pointer hover:bg-muted/50 transition-colors"

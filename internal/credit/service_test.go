@@ -208,7 +208,12 @@ func (m *memStore) GetBalance(_ context.Context, _, customerID string) ([]domain
 	return out, nil
 }
 
-func (m *memStore) ListBalances(_ context.Context, _ string, limit, offset int) ([]domain.CreditBalance, int, error) {
+// ListBalances lists every balance. The balance filter is SQL
+// (domain.CreditBalanceFilterSQL) and is tested on the real store.
+func (m *memStore) ListBalances(_ context.Context, _ string, filter domain.CreditBalanceFilter, limit, offset int) ([]domain.CreditBalance, int, error) {
+	if filter != "" {
+		return nil, 0, fmt.Errorf("memStore: the balance filter %q is tested on the real store", filter)
+	}
 	byCustomer := map[string]*domain.CreditBalance{}
 	for _, e := range m.entries {
 		key := e.CustomerID + "/" + e.Currency

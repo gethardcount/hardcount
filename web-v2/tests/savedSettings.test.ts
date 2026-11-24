@@ -25,8 +25,8 @@ const currencyFigures = [
 // A read that does not depend on the default currency.
 const otherRead = ['customers']
 
-function settings(default_currency: string, timezone = 'UTC') {
-  return { default_currency, timezone } as TenantSettings
+function settings(default_currency: string, timezone = 'UTC', credit_balance_low_threshold_cents?: number) {
+  return { default_currency, timezone, credit_balance_low_threshold_cents } as TenantSettings
 }
 
 // A mode's cache with the settings (when given) and every read above loaded.
@@ -62,4 +62,15 @@ test('a save that keeps the default currency leaves those figures alone', () => 
   const open = modeCache(settings('USD'))
   writeSavedSettings([open], settings('USD', 'Asia/Kolkata'))
   for (const key of currencyFigures) assert.equal(stale(open, key), false, `${key.join('/')} is fresh`)
+})
+
+test('a new low-balance threshold marks stale the balances it picks, and nothing else', () => {
+  const lowReads = [['home-attention', 'lowOnCredit'], ['credits', 'balances', 'low']]
+  const open = modeCache(settings('USD', 'UTC', 1000))
+  for (const key of lowReads) open.setQueryData(key, { loaded: true })
+  writeSavedSettings([open], settings('USD', 'UTC', 1000))
+  for (const key of lowReads) assert.equal(stale(open, key), false, `${key.join('/')} is fresh`)
+  writeSavedSettings([open], settings('USD', 'UTC', 2500))
+  for (const key of lowReads) assert.equal(stale(open, key), true, `${key.join('/')} is stale`)
+  assert.equal(stale(open, otherRead), false)
 })

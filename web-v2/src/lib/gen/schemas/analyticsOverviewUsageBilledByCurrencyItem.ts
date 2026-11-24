@@ -11,12 +11,10 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { AnalyticsMrrMovementPoint } from './analyticsMrrMovementPoint';
-import type { AnalyticsMrrMovementTotals } from './analyticsMrrMovementTotals';
-import type { AnalyticsPeriod } from './analyticsPeriod';
 
-export type GetAnalyticsMrrMovement200 = {
-  period: AnalyticsPeriod;
-  data: AnalyticsMrrMovementPoint[];
-  totals: AnalyticsMrrMovementTotals;
+export type AnalyticsOverviewUsageBilledByCurrencyItem = {
+  /** Three-letter currency code, in upper case. */
+  currency: string;
+  /** Usage billed in this currency, in its minor unit (cents for USD). */
+  amount_cents: number;
 };

@@ -96,8 +96,6 @@ import type {
   ExportUsageEventsCsvParams,
   ExtendSubscriptionTrialBody,
   ForbiddenResponse,
-  GetAnalyticsMrrMovement200,
-  GetAnalyticsMrrMovementParams,
   GetAnalyticsOverviewParams,
   GetAnalyticsRevenueChart200,
   GetAnalyticsRevenueChartParams,
@@ -3482,7 +3480,7 @@ export const getListCreditBalancesUrl = (params?: ListCreditBalancesParams,) => 
  * entry, highest balance first.
  * `total_granted` is the sum of every credit added in that currency
  * (grants, positive adjustments, and what a void or credit note gave
- * back as new credit).
+ * back as new credit). `total` counts the rows `balance` picks.
  * @summary List credit balances
  */
 export const listCreditBalances = async (params?: ListCreditBalancesParams, options?: RequestInit): Promise<ListCreditBalances200> => {
@@ -3507,7 +3505,7 @@ export const getListCreditBalancesQueryKey = (params?: ListCreditBalancesParams,
     }
 
 
-export const getListCreditBalancesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListCreditBalancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListCreditBalancesQueryOptions = <TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(params?: ListCreditBalancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -3526,10 +3524,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListCreditBalancesQueryResult = NonNullable<Awaited<ReturnType<typeof listCreditBalances>>>
-export type ListCreditBalancesQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
+export type ListCreditBalancesQueryError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
 
 
-export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params: undefined |  ListCreditBalancesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCreditBalances>>,
@@ -3539,7 +3537,7 @@ export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCred
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListCreditBalancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listCreditBalances>>,
@@ -3549,7 +3547,7 @@ export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCred
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListCreditBalancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -3557,7 +3555,7 @@ export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCred
  * @summary List credit balances
  */
 
-export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
+export function useListCreditBalances<TData = Awaited<ReturnType<typeof listCreditBalances>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
  params?: ListCreditBalancesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listCreditBalances>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -14079,12 +14077,10 @@ export const getGetAnalyticsOverviewUrl = (params?: GetAnalyticsOverviewParams,)
  * makes sense.
  *
  * Money is in the minor unit (cents for USD) of the account's default
- * currency, named in `currency` (USD when none is set). Invoices and
- * plans in other currencies are left out, except in
- * `outstanding_by_currency` and `credit_balance_by_currency`, which
- * list each currency. MRR (monthly recurring revenue) counts
- * plan base fees only: base amount times quantity, with yearly
- * plans divided by 12. Usage charges are not included.
+ * currency, named in `currency` (USD when none is set). `revenue` and
+ * `paid_invoices` leave out invoices in other currencies. Each
+ * `..._by_currency` list names every currency, and amounts in two
+ * currencies are never added together.
  * @summary Get headline billing metrics
  */
 export const getAnalyticsOverview = async (params?: GetAnalyticsOverviewParams, options?: RequestInit): Promise<AnalyticsOverview> => {
@@ -14279,128 +14275,6 @@ export function useGetAnalyticsRevenueChart<TData = Awaited<ReturnType<typeof ge
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetAnalyticsRevenueChartQueryOptions(params,options)
-
-  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-
-
-
-
-
-
-export const getGetAnalyticsMrrMovementUrl = (params?: GetAnalyticsMrrMovementParams,) => {
-  const normalizedParams = new URLSearchParams();
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? 'null' : String(value))
-    }
-  });
-
-  const stringifiedParams = normalizedParams.toString();
-
-  return stringifiedParams.length > 0 ? `/v1/analytics/mrr-movement?${stringifiedParams}` : `/v1/analytics/mrr-movement`
-}
-
-/**
- * Used by the dashboard; not part of the integration API.
- *
- * Returns how MRR (monthly recurring revenue from plan base fees)
- * changed, per day, or per month for `12m`, with totals.
- *
- * - `new`: subscriptions activated in the bucket.
- * - `churned`: subscriptions canceled in the bucket.
- * - `expansion` and `contraction`: item adds, removals, and plan or
- *   quantity changes on subscriptions that were active for the whole
- *   window.
- *
- * Only plans in the account's default currency are counted; the
- * currency is the `currency` of `GET /v1/analytics/overview`.
- * Buckets with no movement are left out.
- * @summary Get MRR movement over time
- */
-export const getAnalyticsMrrMovement = async (params?: GetAnalyticsMrrMovementParams, options?: RequestInit): Promise<GetAnalyticsMrrMovement200> => {
-
-  return orvalClient<GetAnalyticsMrrMovement200>(getGetAnalyticsMrrMovementUrl(params),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getGetAnalyticsMrrMovementQueryKey = (params?: GetAnalyticsMrrMovementParams,) => {
-    return [
-    `/v1/analytics/mrr-movement`, ...(params ? [params] : [])
-    ] as const;
-    }
-
-
-export const getGetAnalyticsMrrMovementQueryOptions = <TData = Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(params?: GetAnalyticsMrrMovementParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getGetAnalyticsMrrMovementQueryKey(params);
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalyticsMrrMovement>>> = () => getAnalyticsMrrMovement(params, requestOptions);
-
-
-
-
-
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
-}
-
-export type GetAnalyticsMrrMovementQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalyticsMrrMovement>>>
-export type GetAnalyticsMrrMovementQueryError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
-
-
-export function useGetAnalyticsMrrMovement<TData = Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
- params: undefined |  GetAnalyticsMrrMovementParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError, TData>> & Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getAnalyticsMrrMovement>>,
-          TError,
-          Awaited<ReturnType<typeof getAnalyticsMrrMovement>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetAnalyticsMrrMovement<TData = Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
- params?: GetAnalyticsMrrMovementParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError, TData>> & Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getAnalyticsMrrMovement>>,
-          TError,
-          Awaited<ReturnType<typeof getAnalyticsMrrMovement>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetAnalyticsMrrMovement<TData = Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
- params?: GetAnalyticsMrrMovementParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Get MRR movement over time
- */
-
-export function useGetAnalyticsMrrMovement<TData = Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError = UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse>(
- params?: GetAnalyticsMrrMovementParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAnalyticsMrrMovement>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
- ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
-
-  const queryOptions = getGetAnalyticsMrrMovementQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

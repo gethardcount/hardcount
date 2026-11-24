@@ -284,7 +284,6 @@ var routeTable = map[routeKey]routeDecl{
 	{"GET", "/v1/exports/invoices.csv"}:      needs(invoiceRead).withAudit(explicit("api.exportsHandler.exportInvoices (auditExport, before the first byte)")),
 	{"GET", "/v1/exports/subscriptions.csv"}: needs(subscriptionRead).withAudit(explicit("api.exportsHandler.exportSubscriptions (auditExport, before the first byte)")),
 	{"GET", "/v1/exports/usage-events.csv"}:  needs(usageRead).withAudit(explicit("api.exportsHandler.exportUsageEvents (auditExport, before the first byte)")),
-	{"GET", "/v1/analytics/mrr-movement"}:    needs(invoiceRead),
 	{"GET", "/v1/analytics/overview"}:        needs(invoiceRead),
 	{"GET", "/v1/analytics/revenue-chart"}:   needs(invoiceRead),
 	{"GET", "/v1/analytics/usage"}:           needs(invoiceRead),

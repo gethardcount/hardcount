@@ -100,7 +100,11 @@ func (h *Handler) listBalances(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	balances, total, err := h.svc.ListBalances(r.Context(), tenantID, page.Limit, page.Offset)
+	balance, ok := respond.ParseFilter(w, r, "balance", domain.CreditBalanceOut, domain.CreditBalanceLow)
+	if !ok {
+		return
+	}
+	balances, total, err := h.svc.ListBalances(r.Context(), tenantID, balance, page.Limit, page.Offset)
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "list credit balances", "error", err)

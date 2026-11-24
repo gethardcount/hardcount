@@ -13,6 +13,7 @@ import type { APIKey } from './gen/schemas/aPIKey'
 import type { APIKeyCreated } from './gen/schemas/aPIKeyCreated'
 import type { APIKeyRotation } from './gen/schemas/aPIKeyRotation'
 import type { RecipeDetail } from './gen/schemas/recipeDetail'
+import type { ListCreditBalancesBalance } from './gen/schemas/listCreditBalancesBalance'
 import type { RecipePreviewResult } from './gen/schemas/recipePreviewResult'
 import type { RecipeInstance } from './gen/schemas/recipeInstance'
 import type { ActivityLine } from './gen/schemas/activityLine'
@@ -369,7 +370,13 @@ export const api = {
     apiRequest<{ to: string; subject: string }>('POST', `/customers/${customerId}/payment-methods/send-setup-email`, note ? { note } : {}),
 
   // Credits
-  listBalances: () => listAll<CreditBalance>('/credits/balances'),
+  // balance: only the balances that are out (zero or less) or low (below
+  // the account's low-balance setting).
+  listBalances: (balance?: ListCreditBalancesBalance) =>
+    listAll<CreditBalance>('/credits/balances', balance ? { balance } : undefined),
+  // How many balances a filter picks, without their rows.
+  listBalanceTotal: (query: string) =>
+    apiRequest<{ data: CreditBalance[]; total: number }>('GET', `/credits/balances?${query}&limit=1`),
   // One balance per currency the customer holds credit in (ADR-129).
   getBalance: (customerId: string) =>
     apiRequest<{ data: CreditBalance[] }>('GET', `/credits/balance/${customerId}`),
@@ -607,8 +614,6 @@ export const api = {
     apiRequest<AnalyticsOverview>('GET', `/analytics/overview${period ? `?period=${period}` : ''}`),
   getRevenueChart: (period: string) =>
     apiRequest<{ period: string; data: RevenueDataPoint[] }>('GET', `/analytics/revenue-chart?period=${period}`),
-  getMRRMovement: (period: string) =>
-    apiRequest<MRRMovementResponse>('GET', `/analytics/mrr-movement?period=${period}`),
   // Provider cost rates: the whole table.
   listProviderCosts: () => listAll<ProviderCostRate>('/provider-costs'),
 
@@ -1680,70 +1685,26 @@ export interface WebhookDeliveriesResponse {
 }
 
 // Matches OverviewResponse in internal/analytics/overview.go. All money is
-// in cents; rates are in [0, 1].
+// in cents.
 export interface AnalyticsOverview {
   period: string
-  // The tenant's default currency; mrr/arr/revenue/outstanding_ar are in it.
+  // The tenant's default currency; revenue and paid_invoices are in it.
   currency: string
-  mrr: number
-  mrr_prev: number
-  arr: number
-  arr_prev: number
   revenue: number
   revenue_prev: number
-  outstanding_ar: number
   // Amount due on the open invoices, one row per currency (default first).
-  // outstanding_ar alone is the default currency only.
   outstanding_by_currency: { currency: string; amount_cents: number }[]
-  avg_invoice_value: number
   // Credit customers hold, one row per currency (default first).
   credit_balance_by_currency: { currency: string; amount_cents: number }[]
-  // Customer records with status active (includes customers with no live
-  // subscription). Home shows live_customers instead.
-  active_customers: number
-  new_customers: number
-  // Customers with an active or trialing subscription, now and at the
-  // window start.
-  live_customers: number
-  live_customers_prev: number
-  active_subscriptions: number
-  trialing_subscriptions: number
+  // Credit granted by the top-ups paid in the period, per currency.
+  credit_sold_by_currency: { currency: string; amount_cents: number }[]
+  // Usage lines on the invoices issued in the period, per currency.
+  usage_billed_by_currency: { currency: string; amount_cents: number }[]
   paid_invoices: number
-  failed_payments: number
-  failed_payments_prev: number
   open_invoices: number
   dunning_active: number
   refunds_needing_attention: number
   usage_events: number
-  logo_churn_rate: number
-  revenue_churn_rate: number
-  nrr: number
-  dunning_recovery_rate: number
-  mrr_movement: MRRMovementTotals
-}
-
-export interface MRRMovementTotals {
-  new: number
-  expansion: number
-  contraction: number
-  churned: number
-  net: number
-}
-
-export interface MRRMovementPoint {
-  date: string
-  new: number
-  expansion: number
-  contraction: number
-  churned: number
-  net: number
-  [k: string]: unknown
-}
-
-export interface MRRMovementResponse {
-  period: string
-  data: MRRMovementPoint[]
-  totals: MRRMovementTotals
 }
 
 export interface RevenueDataPoint {

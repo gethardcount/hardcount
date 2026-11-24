@@ -5200,86 +5200,6 @@ components:
       enum: ["7d", "30d", "90d", "12m"]
       default: "30d"
 
-    AnalyticsMrrMovementTotals:
-      type: object
-      required: [new, expansion, contraction, churned, net]
-      description: |
-        How MRR (monthly recurring revenue from plan base fees) changed over
-        the whole window, in the minor unit of the account's default
-        currency (cents for USD). `churned` and `contraction` are positive
-        amounts. `net` = `new` + `expansion` - `contraction` - `churned`.
-        Expansion and contraction count only subscriptions that were active
-        for the whole window: a subscription activated or canceled inside
-        it counts only in `new` or `churned`.
-      properties:
-        new:
-          type: integer
-          format: int64
-          description: MRR of subscriptions activated in the window, in the currency's minor unit.
-        expansion:
-          type: integer
-          format: int64
-          description: MRR added by item adds and plan or quantity increases, in the currency's minor unit.
-        contraction:
-          type: integer
-          format: int64
-          description: MRR removed by item removals and plan or quantity decreases, as a positive amount in the currency's minor unit.
-        churned:
-          type: integer
-          format: int64
-          description: MRR of subscriptions canceled in the window, as a positive amount in the currency's minor unit.
-        net:
-          type: integer
-          format: int64
-          description: The overall change, `new` + `expansion` - `contraction` - `churned`, in the currency's minor unit. Can be negative.
-      example:
-        new: 4900
-        expansion: 2000
-        contraction: 0
-        churned: 1900
-        net: 5000
-
-    AnalyticsMrrMovementPoint:
-      type: object
-      description: |
-        MRR movement in one bucket of `GET /v1/analytics/mrr-movement`: a
-        UTC day, or a UTC month for `12m`. Amounts are in the minor unit of
-        the account's default currency (cents for USD). Expansion and
-        contraction count only subscriptions that were active for the whole
-        requested window.
-      required: [date, new, expansion, contraction, churned, net]
-      properties:
-        date:
-          type: string
-          description: Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC.
-        new:
-          type: integer
-          format: int64
-          description: MRR of subscriptions activated in the bucket, in the currency's minor unit.
-        expansion:
-          type: integer
-          format: int64
-          description: MRR added in the bucket by item adds and plan or quantity increases, in the currency's minor unit.
-        contraction:
-          type: integer
-          format: int64
-          description: MRR removed in the bucket by item removals and plan or quantity decreases, as a positive amount in the currency's minor unit.
-        churned:
-          type: integer
-          format: int64
-          description: MRR of subscriptions canceled in the bucket, as a positive amount in the currency's minor unit.
-        net:
-          type: integer
-          format: int64
-          description: "`new` + `expansion` - `contraction` - `churned` for the bucket, in the currency's minor unit."
-      example:
-        date: "2026-10-01"
-        new: 4900
-        expansion: 0
-        contraction: 0
-        churned: 0
-        net: 4900
-
     AnalyticsRevenuePoint:
       type: object
       description: |
@@ -5364,66 +5284,30 @@ components:
       required:
         - period
         - currency
-        - mrr
-        - mrr_prev
-        - arr
-        - arr_prev
         - revenue
         - revenue_prev
-        - outstanding_ar
         - outstanding_by_currency
-        - avg_invoice_value
         - credit_balance_by_currency
-        - active_customers
-        - new_customers
-        - live_customers
-        - live_customers_prev
-        - active_subscriptions
-        - trialing_subscriptions
+        - credit_sold_by_currency
+        - usage_billed_by_currency
         - paid_invoices
-        - failed_payments
-        - failed_payments_prev
         - open_invoices
         - dunning_active
         - refunds_needing_attention
         - usage_events
-        - logo_churn_rate
-        - revenue_churn_rate
-        - nrr
-        - dunning_recovery_rate
-        - mrr_movement
       description: |
         The dashboard's headline metrics, from `GET /v1/analytics/overview`.
         "The window" is the requested period, ending now. "The previous
         window" is the one of equal length before it. Money is in the minor
-        unit of `currency` (cents for USD). Rates are fractions, so 0.05
-        means 5%.
+        unit of `currency` (cents for USD), except in the lists that carry a
+        currency on each entry. Amounts in two currencies are never added
+        together.
       properties:
         period:
           $ref: "#/components/schemas/AnalyticsPeriod"
         currency:
           type: string
-          description: The account's default currency (USD when none is set). Every money field uses it, except `credit_balance_by_currency` and `outstanding_by_currency`, which carry their own.
-        mrr:
-          type: integer
-          format: int64
-          description: |
-            MRR now, from plan base fees only (base amount times quantity,
-            yearly plans divided by 12) on `active` subscriptions with plans
-            in `currency`. Trialing subscriptions and usage charges are not
-            counted.
-        mrr_prev:
-          type: integer
-          format: int64
-          description: MRR at the start of the window, rebuilt from item change history.
-        arr:
-          type: integer
-          format: int64
-          description: "`mrr` times 12."
-        arr_prev:
-          type: integer
-          format: int64
-          description: "`mrr_prev` times 12."
+          description: The account's default currency (USD when none is set). `revenue` and `paid_invoices` use it. Each `..._by_currency` list carries its own currency on each entry, with this one first.
         revenue:
           type: integer
           format: int64
@@ -5432,10 +5316,6 @@ components:
           type: integer
           format: int64
           description: "`revenue` for the previous window."
-        outstanding_ar:
-          type: integer
-          format: int64
-          description: Amount due on finalized invoices whose payment has not succeeded, in `currency` only.
         outstanding_by_currency:
           type: array
           description: |
@@ -5455,10 +5335,6 @@ components:
                 type: integer
                 format: int64
                 description: Amount due in this currency, in its minor unit (cents for USD).
-        avg_invoice_value:
-          type: integer
-          format: int64
-          description: Average total of invoices paid in the window.
         credit_balance_by_currency:
           type: array
           description: >
@@ -5476,38 +5352,44 @@ components:
                 type: integer
                 format: int64
                 description: Credit customers hold in this currency, in its minor unit (cents for USD).
-        active_customers:
-          type: integer
+        credit_sold_by_currency:
+          type: array
           description: |
-            Customer records with status `active`. Includes customers with
-            no subscription or only canceled ones; `live_customers` counts
-            the customers you bill.
-        new_customers:
-          type: integer
-          description: Customers created in the window.
-        live_customers:
-          type: integer
-          description: Customers with at least one `active` or `trialing` subscription now.
-        live_customers_prev:
-          type: integer
+            Credit granted by the top-ups paid in the window, one entry per
+            currency, `currency` first, then largest. It is the credit the
+            customer got, not what they paid: a top-up sold at a discount
+            (pay $90 for $100 of credit) counts $100 here and $90 in
+            `revenue`. An unpaid top-up is not counted.
+          items:
+            type: object
+            required: [currency, amount_cents]
+            properties:
+              currency:
+                type: string
+                description: Three-letter currency code, in upper case.
+              amount_cents:
+                type: integer
+                format: int64
+                description: Credit sold in this currency, in its minor unit (cents for USD).
+        usage_billed_by_currency:
+          type: array
           description: |
-            `live_customers` at the start of the window, rebuilt from
-            subscription start and cancel times.
-        active_subscriptions:
-          type: integer
-          description: Subscriptions with status `active`.
-        trialing_subscriptions:
-          type: integer
-          description: Subscriptions with status `trialing`.
+            Usage lines on the invoices issued in the window and not voided, one entry per currency, `currency` first, then
+            largest. A currency with no usage billed is left out.
+          items:
+            type: object
+            required: [currency, amount_cents]
+            properties:
+              currency:
+                type: string
+                description: Three-letter currency code, in upper case.
+              amount_cents:
+                type: integer
+                format: int64
+                description: Usage billed in this currency, in its minor unit (cents for USD).
         paid_invoices:
           type: integer
           description: Invoices in `currency` paid in the window.
-        failed_payments:
-          type: integer
-          description: Open invoices created in the window whose payment failed. A voided or written-off invoice is not counted. All currencies.
-        failed_payments_prev:
-          type: integer
-          description: "`failed_payments` for the previous window."
         open_invoices:
           type: integer
           description: Finalized invoices whose payment has not succeeded. All currencies.
@@ -5525,67 +5407,28 @@ components:
           type: integer
           format: int64
           description: Usage events with a timestamp in the window.
-        logo_churn_rate:
-          type: number
-          format: double
-          description: Subscriptions canceled in the window, divided by subscriptions active at its start. 0 when none were active.
-        revenue_churn_rate:
-          type: number
-          format: double
-          description: Churned MRR divided by `mrr_prev`. 0 when `mrr_prev` is 0.
-        nrr:
-          type: number
-          format: double
-          description: |
-            Net revenue retention: (`mrr_prev` + expansion - contraction -
-            churned) divided by `mrr_prev`. Can be above 1. 0 when
-            `mrr_prev` is 0.
-        dunning_recovery_rate:
-          type: number
-          format: double
-          description: Dunning runs opened in the window that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0), divided by all runs opened in the window. A run closed by a void, a write-off, or a credit note or customer credit that left nothing due is not recovered. 0 when none were opened.
-        mrr_movement:
-          $ref: "#/components/schemas/AnalyticsMrrMovementTotals"
       example:
         period: "30d"
         currency: USD
-        mrr: 24500
-        mrr_prev: 19600
-        arr: 294000
-        arr_prev: 235200
         revenue: 61850
         revenue_prev: 48200
-        outstanding_ar: 8650
         outstanding_by_currency:
           - currency: USD
             amount_cents: 8650
-        avg_invoice_value: 8836
         credit_balance_by_currency:
           - currency: USD
             amount_cents: 12000
-        active_customers: 6
-        new_customers: 1
-        live_customers: 5
-        live_customers_prev: 4
-        active_subscriptions: 5
-        trialing_subscriptions: 0
+        credit_sold_by_currency:
+          - currency: USD
+            amount_cents: 10000
+        usage_billed_by_currency:
+          - currency: USD
+            amount_cents: 41850
         paid_invoices: 7
-        failed_payments: 1
-        failed_payments_prev: 0
         open_invoices: 1
         dunning_active: 1
         refunds_needing_attention: 0
         usage_events: 48210
-        logo_churn_rate: 0.0
-        revenue_churn_rate: 0.0
-        nrr: 1.0
-        dunning_recovery_rate: 0.5
-        mrr_movement:
-          new: 4900
-          expansion: 0
-          contraction: 0
-          churned: 0
-          net: 4900
 
     InvoiceLineItemInput:
       type: object
@@ -13101,9 +12944,20 @@ paths:
         entry, highest balance first.
         `total_granted` is the sum of every credit added in that currency
         (grants, positive adjustments, and what a void or credit note gave
-        back as new credit).
+        back as new credit). `total` counts the rows `balance` picks.
       operationId: listCreditBalances
       parameters:
+        - name: balance
+          in: query
+          description: |
+            Only the balances that need attention, of customers who are not
+            archived. `out`: a balance of zero or less. `low`: above zero and
+            below the account's `credit_balance_low_threshold_cents`; with no
+            threshold set, the list is empty. Any other value is a 422 with
+            `param: balance`.
+          schema:
+            type: string
+            enum: [out, low]
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
       responses:
@@ -13137,7 +12991,22 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "422":
-          $ref: "#/components/responses/InvalidPage"
+          description: |
+            `balance` is not one of its values, `limit` or `offset` is out
+            of range or not a whole number, or the request sends the removed
+            `after` cursor. `param` names it, and for `balance` the message
+            lists the allowed values.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  type: invalid_request_error
+                  code: validation_error
+                  message: balance must be one of out, low
+                  request_id: req_dbjg652q3gpgqfoq5cd0
+                  param: balance
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -25105,12 +24974,10 @@ paths:
         makes sense.
 
         Money is in the minor unit (cents for USD) of the account's default
-        currency, named in `currency` (USD when none is set). Invoices and
-        plans in other currencies are left out, except in
-        `outstanding_by_currency` and `credit_balance_by_currency`, which
-        list each currency. MRR (monthly recurring revenue) counts
-        plan base fees only: base amount times quantity, with yearly
-        plans divided by 12. Usage charges are not included.
+        currency, named in `currency` (USD when none is set). `revenue` and
+        `paid_invoices` leave out invoices in other currencies. Each
+        `..._by_currency` list names every currency, and amounts in two
+        currencies are never added together.
       parameters:
         - name: period
           in: query
@@ -25127,43 +24994,25 @@ paths:
               example:
                 period: "30d"
                 currency: USD
-                mrr: 24500
-                mrr_prev: 19600
-                arr: 294000
-                arr_prev: 235200
                 revenue: 61850
                 revenue_prev: 48200
-                outstanding_ar: 8650
                 outstanding_by_currency:
                   - currency: USD
                     amount_cents: 8650
-                avg_invoice_value: 8836
                 credit_balance_by_currency:
                   - currency: USD
                     amount_cents: 12000
-                active_customers: 6
-                new_customers: 1
-                live_customers: 5
-                live_customers_prev: 4
-                active_subscriptions: 5
-                trialing_subscriptions: 0
+                credit_sold_by_currency:
+                  - currency: USD
+                    amount_cents: 10000
+                usage_billed_by_currency:
+                  - currency: USD
+                    amount_cents: 41850
                 paid_invoices: 7
-                failed_payments: 1
-                failed_payments_prev: 0
                 open_invoices: 1
                 dunning_active: 1
                 refunds_needing_attention: 0
                 usage_events: 48210
-                logo_churn_rate: 0.0
-                revenue_churn_rate: 0.0
-                nrr: 1.0
-                dunning_recovery_rate: 0.5
-                mrr_movement:
-                  new: 4900
-                  expansion: 0
-                  contraction: 0
-                  churned: 0
-                  net: 4900
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -25214,78 +25063,6 @@ paths:
                   - date: "2026-11-01"
                     revenue_cents: 8650
                     invoice_count: 1
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "429":
-          $ref: "#/components/responses/RateLimited"
-
-  /v1/analytics/mrr-movement:
-    get:
-      tags: [Dashboard]
-      x-internal: true
-      summary: Get MRR movement over time
-      operationId: getAnalyticsMrrMovement
-      description: |
-        Used by the dashboard; not part of the integration API.
-
-        Returns how MRR (monthly recurring revenue from plan base fees)
-        changed, per day, or per month for `12m`, with totals.
-
-        - `new`: subscriptions activated in the bucket.
-        - `churned`: subscriptions canceled in the bucket.
-        - `expansion` and `contraction`: item adds, removals, and plan or
-          quantity changes on subscriptions that were active for the whole
-          window.
-
-        Only plans in the account's default currency are counted; the
-        currency is the `currency` of `GET /v1/analytics/overview`.
-        Buckets with no movement are left out.
-      parameters:
-        - name: period
-          in: query
-          description: The window. Any other value is treated as `30d`. `12m` is 365 days.
-          schema:
-            $ref: "#/components/schemas/AnalyticsPeriod"
-      responses:
-        "200":
-          description: MRR movement series and totals.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [period, data, totals]
-                properties:
-                  period:
-                    $ref: "#/components/schemas/AnalyticsPeriod"
-                  data:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/AnalyticsMrrMovementPoint"
-                  totals:
-                    $ref: "#/components/schemas/AnalyticsMrrMovementTotals"
-              example:
-                period: "30d"
-                data:
-                  - date: "2026-10-14"
-                    new: 4900
-                    expansion: 0
-                    contraction: 0
-                    churned: 0
-                    net: 4900
-                  - date: "2026-10-22"
-                    new: 0
-                    expansion: 2000
-                    contraction: 0
-                    churned: 1900
-                    net: 100
-                totals:
-                  new: 4900
-                  expansion: 2000
-                  contraction: 0
-                  churned: 1900
-                  net: 5000
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
