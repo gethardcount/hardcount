@@ -18,10 +18,10 @@ func stuckDraft(id, customerID, code string) domain.Invoice {
 	}
 }
 
-// The connect fan-out is detached from the connect request and outlives it,
-// so it starts on no instant (the connect route is decidedIn: the door binds
-// none), and each invoice binds its own. In both modes each invoice is
-// retried and settled on its own read of the server's clock.
+// The connect fan-out outlives the connect request, so it drops the
+// request's instant (tenantstripe.Service.startPostConnectRetry) and each
+// invoice binds its own. In both modes each invoice is retried and settled
+// on its own read of the server's clock.
 func TestRetryProviderConfigErrors_EachInvoiceReadsItsOwnTime(t *testing.T) {
 	past := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 	for name, live := range map[string]bool{"test mode": false, "live mode": true} {

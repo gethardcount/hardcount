@@ -499,8 +499,8 @@ func (a *instantCapturingAudit) LogInTx(ctx context.Context, _ *sql.Tx, _ audit.
 	return nil
 }
 
-// A create runs on the instant its ctx carries (the API's door bound it):
-// the row and its audit row both carry it.
+// A create runs on the instant its ctx carries (its request's): the row and
+// its audit row both carry it.
 func TestCreate_RunsOnTheBoundInstant(t *testing.T) {
 	at := time.Date(2026, 7, 8, 9, 10, 11, 0, time.UTC)
 	svc := NewService(newMemoryStore())

@@ -16,8 +16,8 @@ import (
 	"github.com/gethardcount/hardcount/internal/usage"
 )
 
-// The margin report runs on the instant the API's door bound: the default
-// window ends at it.
+// The margin report runs on the request's instant: the default window ends
+// at it.
 func TestMarginHandler_OneInstantForTheReport(t *testing.T) {
 	f := newCustomerUsageFixture(t, "Margin One Instant")
 	base := postgres.WithLivemode(context.Background(), false)

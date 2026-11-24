@@ -169,8 +169,8 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	// (settleFailedIssue). A server stop between the create and the issue
 	// still leaves a draft and logs nothing; it shows as a draft in the
 	// credit notes list. A plain create is one transaction on the request.
-	// The create and the issue run on the instant the API's door bound; the
-	// detached context below (for auto_issue) carries it with it.
+	// The create and the issue run on the request's instant; the detached
+	// context below (for auto_issue) carries it with it.
 	ctx := r.Context()
 	if input.AutoIssue {
 		var cancel context.CancelFunc

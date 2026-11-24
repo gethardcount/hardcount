@@ -24,6 +24,7 @@ original text.
 ### Changed
 
 - **A prepaid commit's credit never expires, and its line is the only line on its invoice.** `commit_expires_at` is removed from invoice lines: a request that sends it is refused with `422`. Creating an invoice, or adding a line, refuses a commit line beside any other line with `422`; put other charges on a separate invoice. To sell credit that expires, grant it by hand with `expires_at` (`POST /v1/credits/grant`). A commit already finalized keeps the expiry on its credit ([#1907](https://github.com/gethardcount/hardcount/pull/1907)).
+- **The events of one usage request share one time.** Events sent in one `POST /v1/usage-events/batch` with no `timestamp` are all dated when Hardcount receives the request, and so are the calls of one LiteLLM spend request that carry no time. Before, each read the clock in turn. A `last` meter bills the event with the latest `timestamp`, so if the events of one request must have an order, send each one's `timestamp`.
 
 ### Removed
 

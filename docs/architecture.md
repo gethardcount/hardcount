@@ -17,7 +17,9 @@ Each step queues its webhook events and emails for the [background jobs](#backgr
 
 ## The path of a request
 
-Every request passes the root chain, then its group's chain, then its handler. Inside `/v1`, authentication and the route's permission check come before the group's steps. `internal/api/router.go` builds all of it, and this section lists each step and says why the record (the one object per request that holds its route, client address and status), the metrics, the access log and the door (the clock door, which binds the instant the request runs on) sit where they do. In a chain, *above* means earlier: a step wraps every step below it, so it sees the request before them and their answer after.
+**Time has one rule:** a request's time is bound by the middleware that ends its group; work that outlives a request, and every job, binds one per row.
+
+Every request passes the root chain, then its group's chain, then its handler. Inside `/v1`, authentication and the route's permission check come before the group's steps. `internal/api/router.go` builds all of it, and this section lists each step and says why the record (the one object per request that holds its route, client address and status), the metrics, the access log and the request's time (the instant the request runs on) sit where they do. In a chain, *above* means earlier: a step wraps every step below it, so it sees the request before them and their answer after.
 
 **The root chain**, in order:
 
@@ -34,22 +36,22 @@ Every request passes the root chain, then its group's chain, then its handler. I
 11. **Security headers.**
 12. **Audit detector** (`mw.AuditCoverage`) only observes: it reports a mutating 2xx that wrote no audit row and is not declared exempt.
 
-**The groups.** chi then routes the request into one group, which adds its own steps. Each group ends with **the clock door**. It binds the instant the request runs on: one read of the server's clock, unless the route's entry in the [route table](#the-route-table) names a function that works through many records and binds one instant for each (`decidedIn`). The handler reads that instant from the context.
+**The groups.** chi then routes the request into one group, which adds its own steps. Each group ends with **the request's time** (`bindRequestTime`). It binds the instant the request runs on: one read of the server's clock. Money work reads that instant from the context; a key's expiry, a session and an audit row's `created_at` record when something happened in the world and read the machine's clock.
 
 | Group | Steps, in order |
 |---|---|
-| `/health`, `/metrics` | the clock door (`/metrics` also checks its token) |
-| `/v1/bootstrap` | bootstrap rate limit, 30 s, the clock door |
-| `/v1/auth` | CSRF guard, sign-in rate limit, 30 s, the clock door |
-| `/v1/webhooks` | 30 s, the clock door; each provider's own check (Stripe's signature, Postmark's credentials) runs in its handler |
-| `/v1/public/…` (hosted invoice, payment update, cost dashboard) | public-page rate limit, 30 s, the clock door |
+| `/health`, `/metrics` | the request's time (`/metrics` also checks its token) |
+| `/v1/bootstrap` | bootstrap rate limit, 30 s, the request's time |
+| `/v1/auth` | CSRF guard, sign-in rate limit, 30 s, the request's time |
+| `/v1/webhooks` | 30 s, the request's time; each provider's own check (Stripe's signature, Postmark's credentials) runs in its handler |
+| `/v1/public/…` (hosted invoice, payment update, cost dashboard) | public-page rate limit, 30 s, the request's time |
 | every other `/v1` route: | CSRF guard, authentication, the route's permission, then one of: |
-| — ordinary | general rate limit, Idempotency, 30 s, the clock door |
-| — usage ingest | ingest rate limit, 30 s, the clock door |
-| — exports | general rate limit, 5 minutes, the clock door |
-| — the event stream | general rate limit, the clock door |
+| — ordinary | general rate limit, Idempotency, 30 s, the request's time |
+| — usage ingest | ingest rate limit, 30 s, the request's time |
+| — exports | general rate limit, 5 minutes, the request's time |
+| — the event stream | general rate limit, the request's time |
 
-The door is last, so the instant is read just before the handler runs: a request that waits in an earlier step, such as Idempotency's wait for the first request with its key, does not run on a time read before the wait, and a replayed request never reads the clock.
+The request's time is bound last, so it is read just before the handler runs: a request that waits in an earlier step, such as Idempotency's wait for the first request with its key, does not run on a time read before the wait, and a replayed request never reads the clock.
 
 ### The record
 
@@ -63,7 +65,6 @@ The door is last, so the instant is read just before the handler runs: a request
 
 `internal/api/route_table.go` has one line per route, saying:
 - who may call it: `needs(…)` with a permission, a dashboard session only or any caller, or `outsideAuth()` for a route outside authentication (the permission check reads this);
-- whether a named function binds its times, one per record, instead of the clock door: `decidedIn(…)` (the door reads this);
 - where its audit evidence comes from, when it changes state or exports (the audit detector);
 - whether its answer carries a secret shown once (Idempotency never keeps that answer).
 
@@ -77,7 +78,6 @@ The door is last, so the instant is read just before the handler runs: a request
    {"POST", "/v1/invoices/{id}/finalize"}: needs(invoiceWrite).withAudit(explicit("invoice.Service.Finalize (LogInTx)")),
    ```
    - who may call it: `needs(…)` with a permission value (`invoiceRead`, `invoiceWrite`, …), `membersSession`, `settingsSession` or `anyCaller`; or `outsideAuth()` for a route outside `/v1`'s authentication;
-   - `decidedIn("package.Type.Method")` before it, only when that function works through many records and binds one instant for each, so the door binds none;
    - where its audit row comes from, if it changes state or exports: `.withAudit(explicit("…"))`, naming the function that writes it, or `.withAudit(exempt(reason, "…"))`, saying why it writes none;
    - `.withShowOnce()`, when its answer carries a secret shown once.
 3. **Describe it in `api/openapi.yaml`** ([OpenAPI workflow](dev/openapi-workflow.md)).
@@ -86,7 +86,7 @@ The door is last, so the instant is read just before the handler runs: a request
    - no entry: the server does not start, and `TestRouteTable_MatchesLiveRoutes` fails;
    - no `needs(…)` or `outsideAuth()`: the entry does not compile;
    - no audit on a route that changes state: `TestRouteTable_MatchesLiveRoutes` fails;
-   - an explicit note or a `decidedIn` naming a function that does not exist: `TestRouteTable_DeclarationsAreWhole` fails;
+   - an explicit note naming a function that does not exist: `TestRouteTable_DeclarationsAreWhole` fails;
    - a handler that never writes the audit row its entry declares: `internal/api`'s `TestMain` fails the end-to-end run, naming the route, when a test drives it;
    - no `api/openapi.yaml` entry: `TestOpenAPISpec_MatchesRouter` fails;
    - a new any-caller or session-only route: `TestRouteTable_AnyCallerStaysSmall` or `TestRouteTable_SessionOnlyRoutesAreListed` fails;
@@ -103,7 +103,7 @@ The access log and the metrics name each request by its route's pattern when it 
 | `403` cross-site request blocked | the CSRF guard | a write from another site, unless it carries a Bearer key and no session cookie |
 | `401` | authentication | `missing credentials`: no key, and no session cookie that is still signed in (an expired or signed-out session included); `invalid or expired API key`: a key that is not valid |
 | `503 authentication_unavailable` | authentication | the session or key store could not be read |
-| `403`, `500` | the route's permission check | `403`: the caller lacks the route's permission, or the route takes only a dashboard session; it comes before the rate limit, Idempotency and the door. `500`: the route's entry names no caller, a fault in the table |
+| `403`, `500` | the route's permission check | `403`: the caller lacks the route's permission, or the route takes only a dashboard session; it comes before the rate limit, Idempotency and the request's time. `500`: the route's entry names no caller, a fault in the table |
 | `429` | the group's rate limit | over the bucket, or any request while a fail-closed limiter cannot reach Redis |
 | `409 conflict_idempotency` | Idempotency | the first request with the key is still running after the wait |
 | `409 conflict_idempotency_unresolved` | Idempotency | the first request's owner died before it stored an answer, so the outcome is unknown |

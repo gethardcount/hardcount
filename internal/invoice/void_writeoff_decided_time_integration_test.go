@@ -15,8 +15,8 @@ import (
 )
 
 // A void and a write-off stamp voided_at and uncollectible_at at the instant
-// their caller bound, not at a later read of the server's clock: the API's
-// door binds one instant for each request.
+// their caller bound, not at a later read of the server's clock: the API
+// binds one instant for each request.
 func TestVoidAndWriteOff_StampTheDecidedTime(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)

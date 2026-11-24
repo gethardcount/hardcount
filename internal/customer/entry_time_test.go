@@ -61,8 +61,8 @@ func newCustTimeSvc(t *testing.T) (*Service, *instantStore, string) {
 	return NewService(store), store, cust.ID
 }
 
-// A change to a customer runs on the instant the API's door bound for it:
-// the row is stamped at the bound instant.
+// A change to a customer runs on its request's instant: the row is stamped
+// at the bound instant.
 func TestCustomerEntryPoints_RunOnTheBoundInstant(t *testing.T) {
 	boundAt := time.Date(2027, 3, 4, 10, 0, 0, 0, time.UTC)
 	for _, e := range custEntries() {

@@ -232,10 +232,10 @@ type Service struct {
 	audit    AuditEmitter
 	// clock is the server's clock: the router's clk, the one the engine
 	// bills by. Who binds a credit-note action's time:
-	//   - a request, the API's door (api.clockDoor), with one read of the
+	//   - a request, the API (api.bindRequestTime), with one read of the
 	//     server's clock;
-	//   - a Stripe refund event, the door on the webhook route; with none
-	//     bound (the restore catch-up), the service itself, with one read of
+	//   - a Stripe refund event, its request's on the webhook route; with
+	//     none bound (the restore catch-up), the service itself, with one read of
 	//     this clock (RecordStripeRefund, ApplyRefundWebhook);
 	//   - the relief at a subscription's cancel or plan swap and a
 	//     subscription's clawback drafts, the subscription action's time; a

@@ -49,14 +49,9 @@ func (c *callSpy) IngestCallResolvingHeld(ctx context.Context, tenantID string, 
 	return c.heldMemStore.IngestCallResolvingHeld(ctx, tenantID, call, after)
 }
 
-// Each ingest entry binds its time itself when ctx carries none, once per
-// event (a LiteLLM call, once for the call), and everything below reads it.
-// Every row runs from three contexts: nothing bound, which is what the batch
-// and LiteLLM routes get from the door; an instant dropped
-// (clock.WithoutInstant, what a scheduled job runs on); and an instant bound
-// above the service, as the door binds one for Ingest.
-// The event is stamped at one read of the server's clock, or at the real
-// instant when one is bound.
+// Every ingest entry runs on the instant bound above the service, as the API
+// binds a request's: each event is stamped at it, and nothing reads the
+// server's clock.
 func TestUsageEntries_StampOneInstant(t *testing.T) {
 	serverAt := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
 	realAt := time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC)
@@ -74,8 +69,6 @@ func TestUsageEntries_StampOneInstant(t *testing.T) {
 		want        time.Time
 		serverReads int
 	}{
-		{"nothing bound", testMode, serverAt, 1},
-		{"an instant dropped", func() context.Context { return clock.WithoutInstant(testMode()) }, serverAt, 1},
 		{"a real instant bound above", func() context.Context { return clock.WithEffectiveNow(testMode(), realAt) }, realAt, 0},
 	} {
 		t.Run("Ingest, from "+base.name, func(t *testing.T) {
@@ -113,8 +106,8 @@ func TestUsageEntries_StampOneInstant(t *testing.T) {
 	}
 }
 
-// A held release runs on the instant the API's door bound: rows stamped
-// after it stay held.
+// A held release runs on the request's instant: rows stamped after it stay
+// held.
 func TestRelease_NotAfterIsTheBoundInstant(t *testing.T) {
 	at := time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC)
 	store := &releaseSpy{heldMemStore: &heldMemStore{memStore: newMemStore()}}
@@ -140,41 +133,5 @@ func TestBackfill_TheFutureIsAfterTheBoundInstant(t *testing.T) {
 	later := at.Add(time.Second)
 	if _, err := svc.Backfill(ctx, "t1", IngestInput{CustomerID: "cus_n", MeterID: "mtr_1", Quantity: dec(1), Timestamp: &later}); err == nil {
 		t.Error("a backfill a second after the bound instant was accepted; want it refused as in the future")
-	}
-}
-
-// One instant per action: a LiteLLM call reads the server's clock once for
-// all its events, and a backfill once for its check and its ingest.
-func TestUsage_OneInstantPerAction(t *testing.T) {
-	now := time.Now().UTC()
-	past := now.Add(-time.Hour)
-	for _, c := range []struct {
-		name string
-		act  func(*Service) error
-	}{
-		{"a LiteLLM call with three events", func(s *Service) error {
-			ev := func(key string) CallEvent { return CallEvent{Quantity: dec(1), IdempotencyKey: key} }
-			_, err := s.IngestCall(testMode(), "t1", CallInput{
-				CustomerID: "cus_1", MeterID: "mtr_1",
-				Events: []CallEvent{ev("c:input"), ev("c:output"), ev("c:cache_write_5m")},
-			})
-			return err
-		}},
-		{"a backfill", func(s *Service) error {
-			_, err := s.Backfill(testMode(), "t1", IngestInput{CustomerID: "cus_1", MeterID: "mtr_1", Quantity: dec(1), Timestamp: &past})
-			return err
-		}},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			svc := NewService(&heldMemStore{memStore: newMemStore()})
-			server := &usageSteppingClock{at: now}
-			svc.SetClock(server)
-			if err := c.act(svc); err != nil {
-				t.Fatalf("act: %v", err)
-			}
-			if server.reads != 1 {
-				t.Errorf("%d server reads; want one for the action", server.reads)
-			}
-		})
 	}
 }

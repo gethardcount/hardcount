@@ -186,7 +186,7 @@ type Service struct {
 	store Store
 	// clock is the server's clock: the router's clk, the one the engine
 	// bills by. Every invoice action runs on a time bound before it reaches
-	// the service: a request's by the API's door (api.clockDoor), with one
+	// the service: a request's by the API (api.bindRequestTime), with one
 	// read of the server's clock; a job's row, its own; dunning's final
 	// action, its run's. Each entry point keeps that time. Work that arrives
 	// with no instant bound (a job's row, or the connect fan-out's) reads this
@@ -845,8 +845,8 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		netDays = ts.NetPaymentTerms
 	}
 
-	// The create runs on the instant the API's door bound: the store's
-	// created_at reads it as the period, issue and due dates do.
+	// The create runs on the request's instant: the store's created_at reads
+	// it as the period, issue and due dates do.
 	now := s.clock.Now(ctx)
 
 	// Validate and build every line before the create transaction opens.
@@ -2719,7 +2719,7 @@ func (s *Service) RetryProviderConfigErrors(ctx context.Context, tenantID string
 	if err != nil {
 		return 0, []error{fmt.Errorf("list stuck provider-config invoices: %w", err)}
 	}
-	return s.retryStuck(ctx, tenantID, stuck, true)
+	return s.retryStuck(ctx, tenantID, stuck)
 }
 
 // RetryCustomerDataErrors fans out a tax retry across every draft
@@ -2746,18 +2746,18 @@ func (s *Service) RetryCustomerDataErrors(ctx context.Context, tenantID, custome
 	if err != nil {
 		return 0, []error{fmt.Errorf("list customer-data-invalid invoices: %w", err)}
 	}
-	return s.retryStuck(ctx, tenantID, stuck, false)
+	return s.retryStuck(ctx, tenantID, stuck)
 }
 
 // retryStuck is the shared per-row body of RetryProviderConfigErrors
 // and RetryCustomerDataErrors. The candidate list shape differs by
 // trigger; the per-invoice retry call is identical.
 //
-// With ownTime, each invoice binds its own instant (one read of the service's
-// clock) when its retry starts, so a connect fan-out that runs for minutes
-// never dates all its invoices at its start. Without it, every retry keeps
-// the request's instant (the billing-profile fan-out, bound by its route).
-func (s *Service) retryStuck(ctx context.Context, tenantID string, stuck []domain.Invoice, ownTime bool) (int, []error) {
+// Each retry keeps the instant ctx carries: the billing-profile fan-out
+// runs on its request's. With none (the connect fan-out, which drops its
+// request's), each invoice binds its own when its retry starts, so a
+// fan-out that runs for minutes never dates all its invoices at its start.
+func (s *Service) retryStuck(ctx context.Context, tenantID string, stuck []domain.Invoice) (int, []error) {
 	var (
 		processed int
 		errs      []error
@@ -2771,11 +2771,7 @@ func (s *Service) retryStuck(ctx context.Context, tenantID string, stuck []domai
 		if err := ctx.Err(); err != nil {
 			return processed, append(errs, fmt.Errorf("stopped before %d of %d invoices: %w", len(stuck)-i, len(stuck), err))
 		}
-		rowCtx := ctx
-		if ownTime {
-			rowCtx = clock.EnsureEffectiveNow(ctx, s.clock)
-		}
-		if _, retryErr := s.RetryTax(rowCtx, tenantID, inv.ID); retryErr != nil {
+		if _, retryErr := s.RetryTax(clock.EnsureEffectiveNow(ctx, s.clock), tenantID, inv.ID); retryErr != nil {
 			errs = append(errs, fmt.Errorf("invoice %s: %w", inv.ID, retryErr))
 			continue
 		}

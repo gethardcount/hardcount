@@ -22,7 +22,7 @@ import (
 
 // reliefThroughTheRoute pays a commit invoice and sends its commit relief
 // through the credit note route on real stores, with at bound on the request
-// as the API's door binds it, and returns the note.
+// as the API binds a request's instant, and returns the note.
 func reliefThroughTheRoute(t *testing.T, name string, at time.Time) domain.CreditNote {
 	t.Helper()
 	db := testutil.SetupTestDB(t)

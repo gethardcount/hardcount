@@ -1607,7 +1607,7 @@ func (s *Stripe) processEvent(ctx context.Context, tenantID string, event domain
 
 // bindEvent binds one read of the server's clock for an event that carries
 // no instant, so every action the event runs reads one instant. A webhook
-// delivery keeps the instant the API's door bound; the restore catch-up
+// delivery keeps its request's instant; the restore catch-up
 // (CatchUp) works through many events and binds none, so each binds here.
 func (s *Stripe) bindEvent(ctx context.Context) context.Context {
 	return clock.EnsureEffectiveNow(ctx, s.clock)

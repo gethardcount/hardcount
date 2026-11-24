@@ -33,8 +33,8 @@ func (a *atRecordingApplier) ApplyToInvoiceAt(ctx context.Context, tenantID, cus
 	return a.fakeInvCreditApplier.ApplyToInvoiceAt(ctx, tenantID, customerID, invoiceID, amountCents, at, extra...)
 }
 
-// Each invoice entry point runs on the time its caller decided (the API's
-// door, a sweep, a fan-out) and reads no clock of its own. The writes it
+// Each invoice entry point runs on the time its caller decided (a request, a
+// sweep, a fan-out) and reads no clock of its own. The writes it
 // makes, which the database store and the audit row stamp from their ctx,
 // run on that time too.
 func TestEntryPoints_RunOnTheDecidedTime(t *testing.T) {

@@ -25,7 +25,7 @@ New and changed code follows this page. Older code does not all follow it yet; s
 - **Tenant data goes through a tenant transaction:** `db.BeginTx(ctx, postgres.TxTenant, tenantID)`. The exceptions are in [Architecture](../architecture.md#design-rules).
 - API JSON fields are `snake_case`, and an ID carries its type: `postgres.NewID("hc_cus")` gives `hc_cus_...`.
 - A store returns `errs.ErrNotFound` for a missing row. `sql.ErrNoRows` never leaves the store.
-- **Work binds its one instant before it reads the clock:** the API's door binds a request's, and other work calls `clock.EnsureEffectiveNow`. A job reads the clock once before any bind, for the cutoff of its due list only, and each row it then works binds its own.
+- **Work binds its one instant before it reads the clock:** the API binds a request's, and other work calls `clock.EnsureEffectiveNow`. A job reads the clock once before any bind, for the cutoff of its due list only, and each row it then works binds its own.
 
 ### Wiring and config
 
@@ -46,7 +46,7 @@ New and changed code follows this page. Older code does not all follow it yet; s
 
 ### Work that outlives a request
 
-Work that must finish after its request ends runs on `context.WithoutCancel(ctx)` with a timeout. `context.Background()` drops the request ID and the tenant.
+Work that must finish after its request ends runs on `context.WithoutCancel(ctx)` with a timeout. `context.Background()` drops the request ID and the tenant. Work that runs through many rows after its request has answered also drops the request's instant (`clock.WithoutInstant`), so each row binds its own.
 
 A cancel during COMMIT can apply the commit and still return an error. So a transaction whose follow-up steps must run takes its own `commitBudget` context (30s) just before it starts, and nothing else runs on it:
 

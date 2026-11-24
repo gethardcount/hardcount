@@ -1,8 +1,8 @@
-// Package clock gives code the current time. One piece of work reads one
-// time: the instant bound on its ctx, which Clock.Now and Now return. The
-// API's door binds a request's instant before its handler runs; a job, or a
-// request that fans out over many records, binds one per record
-// (EnsureEffectiveNow). With none bound, they read the machine's time.
+// Package clock gives code the current time, by one rule: a request's time
+// is bound by the API's middleware (api.bindRequestTime), and work that
+// outlives a request, and every job, binds one per row (EnsureEffectiveNow).
+// One piece of work reads one time: the instant bound on its ctx, which
+// Clock.Now and Now return. With none bound, they read the machine's time.
 //
 // The one exception is AtArrival: a charge's result, and the invoice's writes
 // that follow it, are dated when Stripe's answer arrives.
@@ -141,8 +141,8 @@ func Now(ctx context.Context) time.Time {
 }
 
 // WithoutInstant drops any instant ctx carries: Now(ctx) then reads machine
-// time. A job's tick starts this way, so each row it works binds its own
-// instant.
+// time. A job's tick starts this way, and so does work a request starts and
+// leaves running, so each row it works binds its own instant.
 func WithoutInstant(ctx context.Context) context.Context {
 	return context.WithValue(ctx, instantKey, time.Time{})
 }

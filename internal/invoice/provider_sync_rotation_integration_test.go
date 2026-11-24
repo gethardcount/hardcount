@@ -197,3 +197,66 @@ func TestRecordProviderSyncTouchesOnlyTheObservation(t *testing.T) {
 		t.Error("provider_synced_at not set — without it the sweep cannot order by least-recently-observed and the starvation returns")
 	}
 }
+
+// The unknown and processing sweeps share one list, which waits out a
+// cool-off since the invoice's last write, so the webhook can settle it first.
+// updated_at and the cutoff are on one clock (the server's in production; the
+// database's here, for both), so a row written inside the cool-off is not
+// listed, and neither is one dated ahead of that clock.
+func TestInflightSweeps_ListOnlyRowsPastTheCoolOff(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Sweep Cool-off")
+	cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{ExternalID: "cus_cool", DisplayName: "Cool-off"})
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	store := invoice.NewPostgresStore(db)
+	now := time.Now().UTC()
+
+	// unknownAt makes an unknown invoice whose last write is at the
+	// database's now() minus age.
+	unknownAt := func(num string, age time.Duration) string {
+		inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
+			CustomerID: cust.ID, InvoiceNumber: num, Status: domain.InvoiceFinalized,
+			PaymentStatus: domain.PaymentUnknown, Currency: "USD",
+			SubtotalCents: 1000, TotalAmountCents: 1000, AmountDueCents: 1000,
+			BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
+		}, nil)
+		if err != nil {
+			t.Fatalf("create %s: %v", num, err)
+		}
+		stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentUnknown, "pi_"+num, "")
+		tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer postgres.Rollback(tx)
+		if _, err := tx.ExecContext(ctx, `UPDATE invoices SET updated_at = now() - make_interval(secs => $1) WHERE id = $2`, age.Seconds(), inv.ID); err != nil {
+			t.Fatalf("age %s: %v", num, err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+		return inv.ID
+	}
+	past := unknownAt("INV-PAST", 2*time.Hour)
+	unknownAt("INV-RECENT", 0)
+	unknownAt("INV-AHEAD", -time.Minute)
+
+	var cutoff time.Time
+	if err := db.Pool.QueryRowContext(ctx, `SELECT now() - interval '1 minute'`).Scan(&cutoff); err != nil {
+		t.Fatalf("read the cutoff: %v", err)
+	}
+	got, err := store.ListUnknownPayments(ctx, cutoff, 10)
+	if err != nil {
+		t.Fatalf("ListUnknownPayments: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != past {
+		ids := make([]string, len(got))
+		for i, inv := range got {
+			ids[i] = inv.InvoiceNumber
+		}
+		t.Errorf("listed %v; want only INV-PAST, the one past the cool-off", ids)
+	}
+}

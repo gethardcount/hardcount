@@ -30,13 +30,13 @@ func readsFixture() (*CustomerUsageService, *raterSpy, *fakeSubLister) {
 	return cu, spy, subs
 }
 
-// boundCtx is a test-mode context carrying the instant the API's door bound.
+// boundCtx is a test-mode context carrying the request's instant.
 func boundCtx(at time.Time) context.Context {
 	return clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), at)
 }
 
-// The customer usage read runs on the instant the API's door bound: the
-// rater rates at it.
+// The customer usage read runs on the request's instant: the rater rates at
+// it.
 func TestCustomerUsage_ReadsTheBoundInstant(t *testing.T) {
 	bound := time.Date(2026, 4, 12, 9, 0, 0, 0, time.UTC)
 	cu, spy, _ := readsFixture()
@@ -75,8 +75,8 @@ func TestCustomerUsage_TheWindowIsPickedAtTheBoundInstant(t *testing.T) {
 	}
 }
 
-// The public cost dashboard runs on the instant the API's door bound, and
-// the whole page reads it: the live credit figure and the usage view.
+// The public cost dashboard runs on the request's instant, and the whole
+// page reads it: the live credit figure and the usage view.
 func TestCostDashboard_ReadsTheBoundInstant(t *testing.T) {
 	bound := time.Date(2026, 4, 12, 9, 0, 0, 0, time.UTC)
 	cu, spy, subs := readsFixture()

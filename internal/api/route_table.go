@@ -9,8 +9,8 @@ import (
 )
 
 // The route table has one entry per route the router serves: who may call it,
-// who binds its time, where its audit row comes from, and whether its
-// answer shows a secret once (docs/architecture.md#the-route-table).
+// where its audit row comes from, and whether its answer shows a secret once
+// (docs/architecture.md#the-route-table).
 // TestRouteTable_MatchesLiveRoutes fails on a route with no entry, an entry
 // with no route, and a missing or stray audit.
 
@@ -21,18 +21,13 @@ type routeKey struct {
 }
 
 // routeDecl is one route's entry, built in steps. needs or outsideAuth says
-// who may call it, which makes the entry; decidedIn before it says that a
-// named function, not the door, binds the route's times. Then withAudit adds
-// its audit, and withShowOnce marks its answer.
+// who may call it, which makes the entry. Then withAudit adds its audit, and
+// withShowOnce marks its answer.
 type routeDecl struct {
 	// access is who may call the route, which auth.RequirePermission checks;
 	// it is zero on a route outside authentication.
 	access      auth.Access
 	outsideAuth bool
-	// decidedIn is the function that binds the route's times, one per
-	// record, as package.Type.Method; empty when the door binds the route's
-	// one instant (clockDoor).
-	decidedIn string
 	// audit is zero on a route that neither changes state nor exports.
 	audit    auditDecl
 	showOnce bool
@@ -83,20 +78,6 @@ func needs(access auth.Access) routeDecl {
 // cookie (sign-out, the mode switch), a token, a signature or a password.
 func outsideAuth() routeDecl {
 	return routeDecl{outsideAuth: true}
-}
-
-// decidedIn marks a route whose function, named as package.Type.Method,
-// works through many records and binds one instant for each, so the door
-// binds none. needs then makes the entry.
-func decidedIn(function string) decider { return decider{function: function} }
-
-// decider is a route decidedIn a function, before needs.
-type decider struct{ function string }
-
-func (d decider) needs(access auth.Access) routeDecl {
-	e := needs(access)
-	e.decidedIn = d.function
-	return e
 }
 
 // permission is the access of a route that needs p.
@@ -275,8 +256,6 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/api-keys/{id}/rotate"}:        needs(apikeyWrite).withAudit(explicit("auth.Service.RotateKey (LogInTx)")).withShowOnce(),
 
 	// --- inbound webhooks -----------------------------------------------
-	// The endpoint names the tenant and mode; the record is known only once
-	// the event is read.
 	// Accepted loss: a card settlement or dispute writes no audit_log row; the
 	// invoice (a settlement) or its invoice_disputes row (a dispute), the
 	// outbox events and stripe_webhook_events record it. Close it with a row
@@ -288,8 +267,7 @@ var routeTable = map[routeKey]routeDecl{
 	// events record them.
 	{"POST", "/v1/webhooks/postmark"}: outsideAuth().withAudit(exempt(reasonWebhookOwned, "Postmark's delivery reports, behind Basic Auth; the tenant comes from the stored outbox row (ADR-098).")),
 
-	// --- public pages: the token names the record, and the mode is not
-	// known until it is read ----------------------------------------------
+	// --- public pages ---------------------------------------------------
 	{"GET", "/v1/public/invoices/{token}"}:                  outsideAuth(),
 	{"POST", "/v1/public/invoices/{token}/checkout"}:        outsideAuth().withAudit(explicit("api.hostedInvoiceStripeAdapter.CreateInvoicePaymentSession (LogInTx)")),
 	{"GET", "/v1/public/invoices/{token}/pdf"}:              outsideAuth(),
@@ -314,37 +292,35 @@ var routeTable = map[routeKey]routeDecl{
 	{"GET", "/v1/audit-log/filters"}:         needs(apikeyRead),
 
 	// --- pricing, settings and tooling -----------------------------------
-	{"GET", "/v1/meters"}:                          needs(pricingRead),
-	{"POST", "/v1/meters"}:                         needs(pricingWrite).withAudit(explicit("pricing.Handler.createMeter (Log)")),
-	{"GET", "/v1/meters/{id}"}:                     needs(pricingRead),
-	{"PATCH", "/v1/meters/{id}"}:                   needs(pricingWrite).withAudit(explicit("pricing.Service.UpdateMeter (LogInTx)")),
-	{"GET", "/v1/plans"}:                           needs(pricingRead),
-	{"POST", "/v1/plans"}:                          needs(pricingWrite).withAudit(explicit("pricing.Handler.createPlan (Log)")),
-	{"GET", "/v1/plans/{id}"}:                      needs(pricingRead),
-	{"PATCH", "/v1/plans/{id}"}:                    needs(pricingWrite).withAudit(explicit("pricing.Handler.updatePlan (Log)")),
-	{"GET", "/v1/plans/{id}/prices"}:               needs(pricingRead),
-	{"POST", "/v1/plans/{id}/prices"}:              needs(pricingWrite).withAudit(explicit("pricing.Service.AddPrice (LogInTx)")),
-	{"PATCH", "/v1/plans/{id}/prices/{price_id}"}:  needs(pricingWrite).withAudit(explicit("pricing.Service.EditPrice (LogInTx)")),
-	{"DELETE", "/v1/plans/{id}/prices/{price_id}"}: needs(pricingWrite).withAudit(explicit("pricing.Service.RemovePrice (LogInTx)")),
-	{"GET", "/v1/price-overrides"}:                 needs(pricingWrite),
-	{"POST", "/v1/price-overrides"}:                needs(pricingWrite).withAudit(explicit("pricing.Handler.createOverride (Log)")),
-	{"DELETE", "/v1/price-overrides/{id}"}:         needs(pricingWrite).withAudit(explicit("pricing.Handler.deleteOverride (Log)")),
-	{"GET", "/v1/provider-costs"}:                  needs(usageRead),
-	{"PUT", "/v1/provider-costs"}:                  needs(usageWrite).withAudit(explicit("usage.ProviderCostHandler.upsert (LogInTx)")),
-	{"DELETE", "/v1/provider-costs/{id}"}:          needs(usageWrite).withAudit(explicit("usage.ProviderCostHandler.delete (LogInTx)")),
-	{"GET", "/v1/recipes"}:                         needs(pricingWrite),
-	{"GET", "/v1/recipes/instances"}:               needs(pricingWrite),
-	{"GET", "/v1/recipes/{key}"}:                   needs(pricingWrite),
-	{"POST", "/v1/recipes/{key}/instantiate"}:      needs(pricingWrite).withAudit(explicit("recipe.Service.Instantiate (LogInTx)")),
-	{"POST", "/v1/recipes/{key}/preview"}:          needs(pricingWrite).withAudit(exempt(reasonNonMutatingPreview, "Renders what instantiate would create and writes nothing (recipe.Handler calls audit.MarkSkip).")),
-	{"GET", "/v1/settings"}:                        needs(apikeyWrite),
-	{"PUT", "/v1/settings"}:                        needs(settingsSession).withAudit(explicit("tenant.SettingsHandler.upsert (Log)")),
-	{"GET", "/v1/settings/email"}:                  needs(apikeyWrite),
-	{"POST", "/v1/settings/email/test"}:            needs(apikeyWrite).withAudit(explicit("api.emailSettingsHandler.sendTest (Log)")),
-	{"GET", "/v1/settings/stripe"}:                 needs(apikeyWrite),
-	// Connecting Stripe retries every invoice stuck on the missing key, each
-	// on its own instant.
-	{"POST", "/v1/settings/stripe"}:                                                 decidedIn("invoice.Service.RetryProviderConfigErrors").needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.connect (Log)")),
+	{"GET", "/v1/meters"}:                                                           needs(pricingRead),
+	{"POST", "/v1/meters"}:                                                          needs(pricingWrite).withAudit(explicit("pricing.Handler.createMeter (Log)")),
+	{"GET", "/v1/meters/{id}"}:                                                      needs(pricingRead),
+	{"PATCH", "/v1/meters/{id}"}:                                                    needs(pricingWrite).withAudit(explicit("pricing.Service.UpdateMeter (LogInTx)")),
+	{"GET", "/v1/plans"}:                                                            needs(pricingRead),
+	{"POST", "/v1/plans"}:                                                           needs(pricingWrite).withAudit(explicit("pricing.Handler.createPlan (Log)")),
+	{"GET", "/v1/plans/{id}"}:                                                       needs(pricingRead),
+	{"PATCH", "/v1/plans/{id}"}:                                                     needs(pricingWrite).withAudit(explicit("pricing.Handler.updatePlan (Log)")),
+	{"GET", "/v1/plans/{id}/prices"}:                                                needs(pricingRead),
+	{"POST", "/v1/plans/{id}/prices"}:                                               needs(pricingWrite).withAudit(explicit("pricing.Service.AddPrice (LogInTx)")),
+	{"PATCH", "/v1/plans/{id}/prices/{price_id}"}:                                   needs(pricingWrite).withAudit(explicit("pricing.Service.EditPrice (LogInTx)")),
+	{"DELETE", "/v1/plans/{id}/prices/{price_id}"}:                                  needs(pricingWrite).withAudit(explicit("pricing.Service.RemovePrice (LogInTx)")),
+	{"GET", "/v1/price-overrides"}:                                                  needs(pricingWrite),
+	{"POST", "/v1/price-overrides"}:                                                 needs(pricingWrite).withAudit(explicit("pricing.Handler.createOverride (Log)")),
+	{"DELETE", "/v1/price-overrides/{id}"}:                                          needs(pricingWrite).withAudit(explicit("pricing.Handler.deleteOverride (Log)")),
+	{"GET", "/v1/provider-costs"}:                                                   needs(usageRead),
+	{"PUT", "/v1/provider-costs"}:                                                   needs(usageWrite).withAudit(explicit("usage.ProviderCostHandler.upsert (LogInTx)")),
+	{"DELETE", "/v1/provider-costs/{id}"}:                                           needs(usageWrite).withAudit(explicit("usage.ProviderCostHandler.delete (LogInTx)")),
+	{"GET", "/v1/recipes"}:                                                          needs(pricingWrite),
+	{"GET", "/v1/recipes/instances"}:                                                needs(pricingWrite),
+	{"GET", "/v1/recipes/{key}"}:                                                    needs(pricingWrite),
+	{"POST", "/v1/recipes/{key}/instantiate"}:                                       needs(pricingWrite).withAudit(explicit("recipe.Service.Instantiate (LogInTx)")),
+	{"POST", "/v1/recipes/{key}/preview"}:                                           needs(pricingWrite).withAudit(exempt(reasonNonMutatingPreview, "Renders what instantiate would create and writes nothing (recipe.Handler calls audit.MarkSkip).")),
+	{"GET", "/v1/settings"}:                                                         needs(apikeyWrite),
+	{"PUT", "/v1/settings"}:                                                         needs(settingsSession).withAudit(explicit("tenant.SettingsHandler.upsert (Log)")),
+	{"GET", "/v1/settings/email"}:                                                   needs(apikeyWrite),
+	{"POST", "/v1/settings/email/test"}:                                             needs(apikeyWrite).withAudit(explicit("api.emailSettingsHandler.sendTest (Log)")),
+	{"GET", "/v1/settings/stripe"}:                                                  needs(apikeyWrite),
+	{"POST", "/v1/settings/stripe"}:                                                 needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.connect (Log)")),
 	{"DELETE", "/v1/settings/stripe/{mode}"}:                                        needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.delete (Log)")),
 	{"PATCH", "/v1/settings/stripe/{mode}/webhook"}:                                 needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.setWebhook (Log)")),
 	{"GET", "/v1/dunning/policies"}:                                                 needs(dunningRead),
@@ -391,8 +367,7 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/customers/{customer_id}/payment-methods/{pmID}/default"}:   needs(customerWrite).withAudit(explicit("paymentmethods.Service.SetDefault (Log)")),
 
 	// --- subscriptions ----------------------------------------------------
-	{"GET", "/v1/subscriptions"}: needs(subscriptionRead),
-	// the body names the customer
+	{"GET", "/v1/subscriptions"}:                                       needs(subscriptionRead),
 	{"POST", "/v1/subscriptions"}:                                      needs(subscriptionWrite).withAudit(explicit("subscription.Handler.create (Log)")),
 	{"GET", "/v1/subscriptions/{id}"}:                                  needs(subscriptionRead),
 	{"PUT", "/v1/subscriptions/{id}/billing-thresholds"}:               needs(subscriptionWrite).withAudit(explicit("subscription.Handler.setBillingThresholds (Log)")),
@@ -414,14 +389,12 @@ var routeTable = map[routeKey]routeDecl{
 	// --- usage --------------------------------------------------------------
 	// Sending usage needs only usage:ingest, the one permission an ingest key
 	// holds (ADR-133); backfill, the reads and the held-usage actions need
-	// more. The body names the customer by its external id; a batch or a
-	// LiteLLM callback names many, each decided per event. Accepted loss, for
-	// all three: which key sent an event, since usage_events has no key_id.
-	// Close it with that column at the first billing dispute that turns on
-	// which key sent usage.
+	// more. Accepted loss, for the three routes that send usage: which key
+	// sent an event, since usage_events has no key_id. Close it with that
+	// column at the first billing dispute that turns on which key sent usage.
 	{"POST", "/v1/usage-events"}:               needs(usageIngest).withAudit(exempt(reasonMachineIngest, "usage_events is the record, and a row per call would double the writes of the busiest path.")),
-	{"POST", "/v1/usage-events/batch"}:         decidedIn("usage.Service.BatchIngest").needs(usageIngest).withAudit(exempt(reasonMachineIngest, "The batch form of the same ingest.")),
-	{"POST", "/v1/integrations/litellm/spend"}: decidedIn("usage.Service.IngestCall").needs(usageIngest).withAudit(exempt(reasonMachineIngest, "LiteLLM's spend callback, which writes usage events like the ingest above.")),
+	{"POST", "/v1/usage-events/batch"}:         needs(usageIngest).withAudit(exempt(reasonMachineIngest, "The batch form of the same ingest.")),
+	{"POST", "/v1/integrations/litellm/spend"}: needs(usageIngest).withAudit(exempt(reasonMachineIngest, "LiteLLM's spend callback, which writes usage events like the ingest above.")),
 	// Backfill is audited, unlike the ingest above: an operator's backdated
 	// usage changes what a customer is billed.
 	{"POST", "/v1/usage-events/backfill"}: needs(usageWrite).withAudit(explicit("usage.Service.Backfill (LogInTx)")),
@@ -435,10 +408,8 @@ var routeTable = map[routeKey]routeDecl{
 	{"GET", "/v1/usage-events/held"}:          needs(usageRead),
 
 	// --- invoices -----------------------------------------------------------
-	{"GET", "/v1/invoices"}: needs(invoiceRead),
-	// the body names the customer
-	{"POST", "/v1/invoices"}: needs(invoiceWrite).withAudit(explicit("invoice.Service.Create (LogInTx)")),
-	// the body names the customer
+	{"GET", "/v1/invoices"}:                                                 needs(invoiceRead),
+	{"POST", "/v1/invoices"}:                                                needs(invoiceWrite).withAudit(explicit("invoice.Service.Create (LogInTx)")),
 	{"POST", "/v1/invoices/create_preview"}:                                 needs(invoiceRead).withAudit(exempt(reasonNonMutatingPreview, "Computes an estimate and writes nothing (billing.CreatePreviewHandler calls audit.MarkSkip).")),
 	{"GET", "/v1/invoices/{id}"}:                                            needs(invoiceRead),
 	{"POST", "/v1/invoices/{id}/collect"}:                                   needs(invoiceWrite).withAudit(explicit("invoice.Handler.collectPayment (Log)")),
@@ -459,9 +430,8 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/invoices/{id}/void"}:                                      needs(invoiceWrite).withAudit(explicit("invoice.Service.Void (LogInTx)")),
 
 	// --- credit notes -------------------------------------------------------
-	{"GET", "/v1/credit-notes"}:       needs(invoiceWrite),
-	{"GET", "/v1/credit-notes/stats"}: needs(invoiceWrite),
-	// the body names the invoice
+	{"GET", "/v1/credit-notes"}:                            needs(invoiceWrite),
+	{"GET", "/v1/credit-notes/stats"}:                      needs(invoiceWrite),
 	{"POST", "/v1/credit-notes"}:                           needs(invoiceWrite).withAudit(explicit("creditnote.Service.Create (LogInTx)")),
 	{"GET", "/v1/credit-notes/{id}"}:                       needs(invoiceWrite),
 	{"POST", "/v1/credit-notes/{id}/attach-stripe-refund"}: needs(invoiceWrite).withAudit(explicit("creditnote.Service.AttachStripeRefund (LogInTx)")),
@@ -472,10 +442,8 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/credit-notes/{id}/void"}:                 needs(invoiceWrite).withAudit(explicit("creditnote.Service.Void (LogInTx)")),
 
 	// --- credits ------------------------------------------------------------
-	{"GET", "/v1/credits/balances"}: needs(customerWrite),
-	// the body names the customer
-	{"POST", "/v1/credits/grant"}: needs(customerWrite).withAudit(explicit("credit.Service.Grant (LogInTx)")),
-	// the body names the customer
+	{"GET", "/v1/credits/balances"}:                   needs(customerWrite),
+	{"POST", "/v1/credits/grant"}:                     needs(customerWrite).withAudit(explicit("credit.Service.Grant (LogInTx)")),
 	{"POST", "/v1/credits/adjust"}:                    needs(customerWrite).withAudit(explicit("credit.Service.Adjust (LogInTx)")),
 	{"GET", "/v1/credits/balance/{customer_id}"}:      needs(customerWrite),
 	{"GET", "/v1/credits/balance/{customer_id}/live"}: needs(customerWrite),

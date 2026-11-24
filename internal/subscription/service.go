@@ -134,7 +134,7 @@ type Service struct {
 	store Store
 	// clock is the server's clock: the router's clk, the one the engine
 	// bills by. Who binds a subscription action's time:
-	//   - a request, the API's door (api.clockDoor), with one read of the
+	//   - a request, the API (api.bindRequestTime), with one read of the
 	//     server's clock;
 	//   - the billing run and this service's jobs (trial expiry, pause
 	//     resume), each subscription its own instant;
@@ -659,7 +659,7 @@ type CreateInput struct {
 
 // Create creates a subscription that starts now, or starts its trial now,
 // and bills its first in-advance period when it has no trial. Its caller
-// binds the time first (the API's door does, for the create route), and
+// binds the time first (the API does, for the create route), and
 // Create reads every instant from ctx, so all its writes share one.
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.Subscription, error) {
 	code := strings.TrimSpace(input.Code)
@@ -2248,8 +2248,8 @@ func (s *Service) CancelForDunning(ctx context.Context, tenantID, id string) (do
 const cancelAttempts = 2
 
 // cancel runs cancelOnce up to cancelAttempts times, each on the caller's
-// instant (the door's or dunning's), so a second attempt
-// cancels at the same instant as the first.
+// instant (a request's or dunning's), so a second attempt cancels at the
+// same instant as the first.
 func (s *Service) cancel(ctx context.Context, tenantID, id string, grace time.Duration) (domain.Subscription, int64, error) {
 	var err error
 	for attempt := 1; attempt <= cancelAttempts; attempt++ {
@@ -2351,7 +2351,7 @@ func (s *Service) cancelOnce(ctx context.Context, tenantID, id string, grace tim
 		return domain.Subscription{}, 0, errAlreadyTerminated(sub.Status)
 	}
 
-	// The cancel instant is the caller's (the door's or dunning's). Priced
+	// The cancel instant is the caller's (a request's or dunning's). Priced
 	// from a row whose period starts after it, the final invoice would bill
 	// nothing and the relief would skip the new period's prebill, while the
 	// compare-and-set passes on that row: the subscription would be canceled

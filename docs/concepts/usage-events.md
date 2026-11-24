@@ -66,6 +66,11 @@ A batch is stored whole or not at all. When a batch gets no answer, a
 back as `deduplicated`. A `422` names the bad events in `errors[]` and
 fails the same way again, so fix those events first.
 
+Events sent with no `timestamp` share the request's time: a batch's are all
+dated when Hardcount receives it. A `last` meter bills the event with the
+latest `timestamp`, so if the events of one request must have an order, send
+each one's `timestamp`.
+
 The usage routes ignore the `Idempotency-Key` header that other write
 routes take. On these routes, the `idempotency_key` in each event is the
 only key. [Idempotency](../api/idempotency.md) explains both kinds of key,

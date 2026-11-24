@@ -422,7 +422,8 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	customerUsageSvc.SetRater(engine)
 	creditSvc.SetLiveBalanceReader(engine)
 	costDashboardSvc.SetLiveBalanceReader(engine)
-	// The services that bind their own instant read the server's clock.
+	// Usage reads through the server's clock: the request's instant when ctx
+	// carries one, else a read of that clock.
 	usageSvc.SetClock(clk)
 	usageSvc.SetOpenPeriodReader(usageOpenPeriods{subs: subStore, pricing: pricingStore, thresholds: invoiceStore})
 	subH.SetTenantLocator(engine)

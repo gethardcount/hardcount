@@ -273,7 +273,7 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigO
 }
 
 // cancel is the operator's or API's immediate cancel at cancelAt, unchecked,
-// bound to that instant as the API's door binds it.
+// bound to that instant as the API binds a request's.
 func (r *reliefCancelRig) cancel() (domain.Subscription, int64, error) {
 	return r.subSvc.Cancel(clock.WithEffectiveNow(r.ctx, r.cancelAt), r.tenantID, r.subID)
 }

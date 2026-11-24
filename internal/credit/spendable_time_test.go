@@ -20,8 +20,8 @@ func (s *atStore) GetSpendableBalance(ctx context.Context, tenantID, customerID 
 	return s.memStore.GetSpendableBalance(ctx, tenantID, customerID, at)
 }
 
-// A spendable balance judges expiry at the time its caller bound (the API's
-// door, or the engine's work that reads it), not at a read of its own.
+// A spendable balance judges expiry at the time its caller bound (its
+// request's, or the engine's work that reads it), not at a read of its own.
 func TestSpendableBalance_JudgesExpiryAtTheDecidedTime(t *testing.T) {
 	decidedAt := time.Date(2027, 3, 4, 10, 0, 0, 0, time.UTC)
 	store := &atStore{memStore: newMemStore()}

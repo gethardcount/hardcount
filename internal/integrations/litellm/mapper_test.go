@@ -334,7 +334,7 @@ func TestMapPayload_TimestampSourcing(t *testing.T) {
 		Usage: &Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150},
 	}
 
-	t.Run("no start/end leaves nil timestamp (service applies the call's instant)", func(t *testing.T) {
+	t.Run("no start/end leaves nil timestamp (service applies the request's instant)", func(t *testing.T) {
 		out, err := mapEvents(base) // StartTime/EndTime both zero
 		if err != nil {
 			t.Fatalf("unexpected: %v", err)
@@ -344,7 +344,7 @@ func TestMapPayload_TimestampSourcing(t *testing.T) {
 		}
 		for _, e := range out {
 			if e.Timestamp != nil {
-				t.Errorf("timestamp must be nil when payload omits start/end (got %v) — usage stamps the call's own instant", *e.Timestamp)
+				t.Errorf("timestamp must be nil when payload omits start/end (got %v) — usage stamps the request's instant", *e.Timestamp)
 			}
 		}
 	})

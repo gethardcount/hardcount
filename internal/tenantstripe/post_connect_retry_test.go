@@ -9,6 +9,7 @@ import (
 	"time"
 
 	hardcountauth "github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -20,6 +21,7 @@ type seenCtx struct {
 	errAfterRequest  error
 	deadline         time.Time
 	hasDeadline      bool
+	instant          bool
 }
 
 // observingRetrier records the ctx RetryProviderConfigErrors runs on, after
@@ -33,9 +35,11 @@ func (r *observingRetrier) RetryProviderConfigErrors(ctx context.Context, _ stri
 	<-r.requestDone
 	live, err := postgres.Livemode(ctx)
 	dl, ok := ctx.Deadline()
+	_, instant := clock.EffectiveNow(ctx)
 	r.seen <- seenCtx{
 		userID: hardcountauth.CallerOf(ctx).UserID, tenantID: hardcountauth.TenantID(ctx),
 		livemode: live, modeErr: err, errAfterRequest: ctx.Err(), deadline: dl, hasDeadline: ok,
+		instant: instant,
 	}
 	return 0, nil
 }
@@ -83,6 +87,28 @@ func TestPostConnectRetry_KeepsTheRequestsActorAndOutlivesIt(t *testing.T) {
 	}
 	if !got.hasDeadline || got.deadline.After(before.Add(PostConnectRetryTimeout+time.Minute)) {
 		t.Errorf("retry deadline = %v (set %v), want within PostConnectRetryTimeout", got.deadline, got.hasDeadline)
+	}
+}
+
+// The retry drops the request's instant: it runs for minutes after the
+// request has answered, so each invoice it retries binds its own
+// (invoice.Service.RetryProviderConfigErrors).
+func TestPostConnectRetry_DropsTheRequestsInstant(t *testing.T) {
+	retrier := &observingRetrier{requestDone: make(chan struct{}), seen: make(chan seenCtx, 1)}
+	close(retrier.requestDone)
+	svc := NewService(nil, nil)
+	svc.SetStuckRetrier(retrier)
+
+	req := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC))
+	svc.startPostConnectRetry(req, "hc_ten_pcr", false, 1)
+
+	select {
+	case got := <-retrier.seen:
+		if got.instant {
+			t.Error("the retry's ctx carries the request's instant; want none, so each invoice binds its own")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the post-connect retry did not run")
 	}
 }
 

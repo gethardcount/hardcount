@@ -3429,12 +3429,7 @@ func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+invCols+` FROM invoices
 		WHERE payment_status = $1
-		  -- The cool-off since the invoice's last write. That write is dated
-		  -- on the server's clock, which can run ahead of the database's: a
-		  -- last write in the future is listed at once, in both sweeps that
-		  -- share this list (an unknown charge, and a processing payment). A
-		  -- confirm still in flight is protected by its hold, below.
-		  AND (updated_at < $2 OR updated_at > now())
+		  AND updated_at < $2
 		  AND livemode = $3
 		  -- This sweep resolves by reading the PaymentIntent by id. A charge
 		  -- saves its PaymentIntent before confirming, so an unclear outcome
