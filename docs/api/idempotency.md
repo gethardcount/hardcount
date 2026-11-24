@@ -84,8 +84,7 @@ runs again and gets `409` too. Use an `external_id` you have not used yet.
   key gets `422` `idempotency_error`. Read the resource to see whether the
   change happened.
 - **Hardcount matches a retry on its caller, its method, its path, its
-  query string and its body.** The query string and the body must be the
-  same byte for byte, so `?a=1&b=2` and `?b=2&a=1` are different requests.
+  query string and its body.** The body must be the same byte for byte.
 
 ### What a retry with the same key gets
 

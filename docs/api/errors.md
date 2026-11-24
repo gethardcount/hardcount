@@ -217,7 +217,7 @@ the credit ledger, and report it if the state looks wrong:
 
 | `code` | When | What to do |
 |---|---|---|
-| `validation_error` | A field failed a rule, such as a missing `external_id`, a bad `limit`, a list `sort` or `dir` the list does not take, or a field the operation does not take. A list filter that takes a fixed set of values got another, such as `status` on the invoice list. `param` names it. | Fix the field |
+| `validation_error` | A field failed a rule, such as a missing `external_id`, a bad `limit`, a list `sort` or `dir` the list does not take, a field the operation does not take, or a query parameter it does not take. A list filter that takes a fixed set of values got another, such as `status` on the invoice list. `param` names it. | Fix the field |
 | `batch_rejected` | At least one event of a usage batch failed. Nothing was stored. The body lists each failure in `errors`. | Fix the events named, then send the whole batch again |
 | `idempotency_error` | An `Idempotency-Key` was first used by another caller (another API key or dashboard user) or with a different method, path, query string or body | Use a new key for a new request |
 | `customer_has_no_subscription` | An invoice preview or a usage summary for a customer with no active subscription | Send `subscription_id`, or a period with `from` and `to` |
@@ -338,6 +338,22 @@ Bodies are limited to 1 MB, LiteLLM callback bodies to 32 MB, and Stripe
 webhook bodies to 64 KB. A larger body gets `413`: `batch_too_large` from
 the usage batch and the LiteLLM callback, `payload_too_large` from the
 other routes. The Postmark webhook is the exception below.
+
+## Query parameters
+
+A query string may hold only the parameters its operation lists in the
+[API reference](../api-surface.md#the-full-reference).
+
+- Any other is refused with `422` `validation_error`, `param` naming it and
+  the message `unknown query parameter "<name>"`. That includes a misspelled
+  filter, such as `staus` for `status`. When several are unknown, `param`
+  names the first in sorted order.
+- A parameter sent with an empty value, such as `status=`, is still one the
+  operation takes.
+- A query string that does not parse (a bad `%` escape, or `;` between
+  parameters) is refused whole, with no `param`.
+- The Stripe and Postmark webhooks and the cost dashboard's public link
+  take any query string.
 
 ## Answers in another shape
 

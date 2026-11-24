@@ -163,10 +163,11 @@ func (s *Server) routes() chi.Router {
 	// /v1's authentication (ADR-090).
 	r.Use(mw.AuditCoverage(auditRoute))
 
-	// Public
-	r.With(requestTime).Get("/health", handleHealth)
-	r.With(requestTime).Get("/health/ready", handleDeepHealth(s.db))
-	r.With(requestTime).Handle("/metrics", mw.MetricsAuth(s.opts.appEnv, s.settings.MetricsToken, mw.MetricsHandler()))
+	// Public. Every group refuses a query parameter its route does not take
+	// (refuseUnknownQuery), right after its rate limit, where it has one.
+	r.With(refuseUnknownQuery, requestTime).Get("/health", handleHealth)
+	r.With(refuseUnknownQuery, requestTime).Get("/health/ready", handleDeepHealth(s.db))
+	r.With(refuseUnknownQuery, requestTime).Handle("/metrics", mw.MetricsAuth(s.opts.appEnv, s.settings.MetricsToken, mw.MetricsHandler()))
 
 	// Bootstrap, the one-time setup, takes no auth. RunBootstrap writes no
 	// audit row when deps.Audit is nil, and it mints a live secret key, so
@@ -182,6 +183,7 @@ func (s *Server) routes() chi.Router {
 	bootstrapH := tenant.NewBootstrapHandler(s.db, bootstrapDeps)
 	r.Group(func(r chi.Router) {
 		r.Use(s.bootstrapLimiter.Middleware())
+		r.Use(refuseUnknownQuery)
 		r.Use(mw.Timeout(requestTimeout))
 		r.Use(requestTime)
 		r.Mount("/v1/bootstrap", bootstrapH.Routes())
@@ -194,6 +196,7 @@ func (s *Server) routes() chi.Router {
 	r.Route("/v1/auth", func(r chi.Router) {
 		r.Use(mw.CSRFGuard(allowedOrigins))
 		r.Use(s.authLimiter.Middleware())
+		r.Use(refuseUnknownQuery)
 		r.Use(mw.Timeout(requestTimeout))
 		r.Use(requestTime)
 		s.membersH.RegisterPublicRoutes(r)
@@ -204,6 +207,7 @@ func (s *Server) routes() chi.Router {
 	// signature and Postmark's Basic Auth. The static Postmark route wins
 	// over the mount's wildcard.
 	r.Group(func(r chi.Router) {
+		r.Use(refuseUnknownQuery)
 		r.Use(mw.Timeout(requestTimeout))
 		r.Use(requestTime)
 		r.Mount("/v1/webhooks", s.webhookH.Routes())
@@ -215,6 +219,7 @@ func (s *Server) routes() chi.Router {
 	// tight per-address bucket, so guessing a token is not free.
 	r.Group(func(r chi.Router) {
 		r.Use(s.publicPageLimiter.Middleware())
+		r.Use(refuseUnknownQuery)
 		r.Use(mw.Timeout(requestTimeout))
 		r.Use(requestTime)
 		r.Mount("/v1/public/payment-updates", s.publicPaymentH.Routes())
@@ -243,6 +248,7 @@ func (s *Server) routes() chi.Router {
 		// (event_stream_route.go).
 		r.Group(func(r chi.Router) {
 			r.Use(s.rateLimiter.Middleware())
+			r.Use(refuseUnknownQuery)
 			r.Use(requestTime)
 			r.Route("/webhook_events/stream", eventStreamRoute(s.webhookOutH, s.sessionSvc, s.authSvc, webhook.StreamHeartbeatInterval))
 		})
@@ -251,6 +257,7 @@ func (s *Server) routes() chi.Router {
 		// Idempotency (GET only).
 		r.Group(func(r chi.Router) {
 			r.Use(s.rateLimiter.Middleware())
+			r.Use(refuseUnknownQuery)
 			r.Use(mw.Timeout(exportTimeout))
 			r.Use(requestTime)
 			exportsH := newExportsHandler(s.customerStore, s.invoiceStore, s.subStore, s.usageStore, s.auditLogger, s.auditLogger)
@@ -264,6 +271,7 @@ func (s *Server) routes() chi.Router {
 		// held (route_table.go's usage entries say what held usage is).
 		r.Group(func(r chi.Router) {
 			r.Use(s.ingestLimiter.Middleware())
+			r.Use(refuseUnknownQuery)
 			r.Use(mw.Timeout(requestTimeout))
 			r.Use(requestTime)
 			r.Post("/usage-events/backfill", s.usageH.Backfill)
@@ -274,6 +282,7 @@ func (s *Server) routes() chi.Router {
 		// Ordinary routes: replayable by Idempotency-Key, 30 s.
 		r.Group(func(r chi.Router) {
 			r.Use(s.rateLimiter.Middleware())
+			r.Use(refuseUnknownQuery)
 			// keepsNoKey says which requests Idempotency holds no key for.
 			r.Use(mw.Idempotency(s.db, keepsNoKey))
 			r.Use(mw.Timeout(requestTimeout))

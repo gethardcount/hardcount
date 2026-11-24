@@ -81,6 +81,7 @@ var (
 	timeoutMW     = chainStep{"the timeout", is[mw.TimeLimit]}
 	idempotencyMW = chainStep{"Idempotency", is[mw.IdempotencyGuard]}
 	limiterMW     = chainStep{"the rate limit", is[mw.RateLimited]}
+	queryMW       = chainStep{"the query check", is[queryChecked]}
 	requestTimeMW = chainStep{"the request's time", is[requestTimeBound]}
 )
 
@@ -128,7 +129,8 @@ func TestRouter_AV1RequestWithNoCredentialsIs401BeforeTheRateLimit(t *testing.T)
 
 // On every route the chain runs in this order, each step where the route has
 // it: the CSRF guard, authentication, the permission check, the rate limit,
-// Idempotency, the timeout, then binding the request's time. Each
+// the query check, Idempotency, the timeout, then binding the request's time.
+// Every route has the query check. Each
 // authenticated route is in one of the four /v1 groups, read from its
 // limiter, its Idempotency and its time limit: the ingest, export and stream
 // groups hold exactly the routes listed here, and every other authenticated
@@ -157,8 +159,8 @@ func TestRouter_ChainsRunInOrderAndEachRouteIsInOneGroup(t *testing.T) {
 		},
 		stream: {"GET /v1/webhook_events/stream"},
 	}
-	steps := []chainStep{csrfMW, authMW, permissionMW, limiterMW, idempotencyMW, timeoutMW, requestTimeMW}
-	const csrf, authn, perm, limit, idem, timeout, requestTime = 0, 1, 2, 3, 4, 5, 6
+	steps := []chainStep{csrfMW, authMW, permissionMW, limiterMW, queryMW, idempotencyMW, timeoutMW, requestTimeMW}
+	const csrf, authn, perm, limit, query, idem, timeout, requestTime = 0, 1, 2, 3, 4, 5, 6, 7
 	got := map[group][]string{}
 	if err := chi.Walk(srv.router, func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
 		key := method + " " + canonicalRoute(route)
@@ -173,8 +175,11 @@ func TestRouter_ChainsRunInOrderAndEachRouteIsInOneGroup(t *testing.T) {
 			}
 			last, lastName = at[i], step.name
 		}
+		if at[query] < 0 {
+			t.Errorf("%s: without %s", key, steps[query].name)
+		}
 		if at[authn] < 0 {
-			return nil // a public route: only the order applies
+			return nil // a public route: only the order and the query check apply
 		}
 		for _, i := range []int{csrf, perm, limit, requestTime} {
 			if at[i] < 0 {

@@ -16,11 +16,12 @@ import (
 // user, that made the request. Every caller that holds the route's
 // permission reaches the idempotency layer, so a stored answer must go back
 // only to the caller that made the request: a secret key's retry replays it,
-// while another secret key, a dashboard user, or the same key with another
-// query string gets the key-reuse 422 and none of the stored body. A
+// while another secret key or a dashboard user gets the key-reuse 422 and
+// none of the stored body. A
 // dashboard user who signs in again is still the same caller, so the retry
-// replays. A request refused by its route's permission, or one that matched
-// no route, holds no key: the next caller's request with it runs.
+// replays. A request refused by its route's permission or for a query
+// parameter its route does not take, or one that matched no route, holds no
+// key: the next request with it runs.
 func TestE2E_IdempotencyKey_AnswersOnlyTheCallerThatMadeTheRequest(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "idem-caller-bootstrap")
@@ -69,12 +70,6 @@ func TestE2E_IdempotencyKey_AnswersOnlyTheCallerThatMadeTheRequest(t *testing.T)
 	reuse(create(flowReq{cookie: owner}, "/v1/customers", "k-cred"), "dashboard session reusing the secret key's key", firstID)
 	replay(create(flowReq{bearer: secret}, "/v1/customers", "k-cred"), "secret key retrying", first)
 
-	// The query string is part of the request.
-	firstQ := create(flowReq{bearer: secret}, "/v1/customers?source=a", "k-query").want(t, 201, "secret key creates with a query string")
-	replay(create(flowReq{bearer: secret}, "/v1/customers?source=a", "k-query"), "same query string", firstQ)
-	reuse(create(flowReq{bearer: secret}, "/v1/customers?source=b", "k-query"), "another query string", flowStr(firstQ.body, "id"))
-	reuse(create(flowReq{bearer: secret}, "/v1/customers", "k-query"), "no query string", flowStr(firstQ.body, "id"))
-
 	// A dashboard user who signs in again is the same caller.
 	firstS := create(flowReq{cookie: owner}, "/v1/customers", "k-session").want(t, 201, "dashboard session creates a customer")
 	again := login(t, ts, email, password)
@@ -108,6 +103,17 @@ func TestE2E_IdempotencyKey_AnswersOnlyTheCallerThatMadeTheRequest(t *testing.T)
 	}
 	firstR := create(flowReq{bearer: secret}, "/v1/customers", "k-refused").want(t, 201, "secret key after the refused request")
 	replay(create(flowReq{bearer: secret}, "/v1/customers", "k-refused"), "secret key retrying after the refusal", firstR)
+
+	// A query parameter the route does not take is refused before
+	// Idempotency (refuseUnknownQuery), so nothing is reserved: the corrected
+	// request with the key runs.
+	if r := create(flowReq{bearer: secret}, "/v1/customers?source=a", "k-query"); r.status != 422 || flowStr(r.body, "error", "param") != "source" {
+		t.Fatalf("secret key creating with an unknown query parameter: %d %s, want 422 naming source", r.status, r.raw)
+	}
+	if n := rows("k-query"); n != 0 {
+		t.Errorf("after the refused query parameter: %d idempotency rows, want none", n)
+	}
+	create(flowReq{bearer: secret}, "/v1/customers", "k-query").want(t, 201, "secret key after the refused query parameter")
 
 	// The customer-usage mount routes no POST: the ingest key's request
 	// answers 405 and reserves nothing, so the secret key's request with the
