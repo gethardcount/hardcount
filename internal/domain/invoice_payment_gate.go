@@ -92,15 +92,17 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 // would be confirmed; refusing them here spares the charge.
 //
 // How the hold is read:
-//   - On a 'pending' or 'failed' invoice, a live hold refuses every action.
-//     A stale hold refuses too (ADR-127), until the stale-hold sweep clears
-//     it, within about an hour: its charger is gone, and the sweep moves the
-//     counter in the same write so the next charge sends a new key.
-//     Write-off is the one action a stale hold allows.
-//     It moves no money, a payment the sweep finds later still settles the
-//     invoice (uncollectible → paid), and it is the exit when Stripe can
-//     never answer (disconnected, the customer deleted). This is ADR-107's
-//     carve-out reasoning.
+//   - On a 'pending' or 'failed' invoice, a live hold refuses every action,
+//     and so does a stale one (ADR-127), except write-off. A stale hold
+//     there confirmed nothing, so there is no payment to find: a charge
+//     confirms only after StampPendingConfirm has made the invoice 'unknown'
+//     on its PaymentIntent, and dunning's final action charges nothing. The
+//     stale-hold sweep clears the hold without asking Stripe, and moves the
+//     counter so the next charge sends a new key, on its first run at least
+//     10 minutes after the hold ends (hourly in production; later while the
+//     sweep is down). Write-off need not wait for it: a charger whose hold
+//     has gone stale cannot stamp (StampPendingConfirm needs a live hold), so
+//     it can no longer confirm a payment.
 //   - On an 'unknown' invoice only a live hold counts: write-off waits
 //     while the charge that left the outcome unclear may still be resending
 //     to Stripe (ADR-127 amendment 2026-10-29, ADR-137).

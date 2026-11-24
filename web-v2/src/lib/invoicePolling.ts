@@ -34,13 +34,12 @@ export function pollIntervalForInvoice(invoice?: PollableInvoice): number | fals
   if (!invoice) return false
   // Drafts + voided are terminal-no-trailing-events.
   //
-  // uncollectible is terminal ONLY while nothing is charging it. A bad-debt
-  // recovery leaves the invoice written off with a live PaymentIntent, and
-  // treating that as terminal froze the page at the exact moment money was
-  // moving: a pre-ADR-113 recovery charge or a parked payment drew the
-  // in-flight banner, and nothing updated again until a manual reload — no
-  // settle, no paid row, no status flip. The banner that exists to stop a
-  // second operator charging again could never clear on its own.
+  // uncollectible is terminal only while no payment on it is unresolved. An
+  // invoice can be written off while its charge is unclear ('unknown': Stripe
+  // has not confirmed it yet), and is marked paid if that charge succeeded.
+  // Treated as terminal, the page would keep the in-flight banner, which
+  // stops a second operator charging again, until a manual reload: no
+  // settle, no paid row, no status flip.
   //
   // paymentIsUnresolved is the shared predicate, never re-typed here.
   if (invoice.status === 'draft' || invoice.status === 'voided') return false

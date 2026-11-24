@@ -23,9 +23,10 @@ import (
 // claimed and not yet stamped finds its stamp refused. One that marks it
 // failed clears the hold only when the invoice was in flight (unknown or
 // processing) on that PaymentIntent: no claim admits an in-flight invoice, so
-// that hold is the attempt's own. Otherwise only the stale-hold sweep (payment.Reconciler) clears a stale hold; it
-// needs no answer from Stripe to do so.
-// Write-off is the one action allowed on a stale hold: it moves no money.
+// that hold is the attempt's own. Otherwise only the stale-hold sweep
+// (payment.Reconciler) clears a stale hold; it needs no answer from Stripe to
+// do so. Write-off is the one action allowed on a stale hold: it moves no
+// money.
 //
 // A stale hold does not count as free. If it did, an interrupted charge
 // would leave the invoice looking exactly like one never charged. The next

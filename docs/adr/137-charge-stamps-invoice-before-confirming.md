@@ -278,7 +278,9 @@ branch and its `earlier` result, and the parked surface (the gate's
 `hardcount_parked_invoices`). The store no longer accepts `unknown` from
 `StampChargeOutcome`: only `StampPendingConfirm` writes it.
 
-A stale hold is now cleared the same way whichever claim took it: on an
-invoice still pending or failed the hold is cleared and the counter moved,
-and on any other invoice it is cleared. A failure settle frees the hold of
-the attempt it ends without checking a token.
+A stale hold is now cleared the same way whichever claim took it. On an
+invoice open for payment (finalized, or an unpaid top-up) whose payment is
+still pending or failed, the hold is cleared and the counter moved. On any
+other invoice, a written-off or voided one among them, the hold is cleared
+and the counter stays. A failure settle frees the hold of the attempt it
+ends without checking a token.

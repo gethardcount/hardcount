@@ -142,8 +142,8 @@ func (r *Reconciler) SetBreaker(b *breaker.Breaker) {
 // rows and sweeps after it still run. The first such panic is raised again
 // only after the last sweep, so the billing tick still ends as panicked and
 // pages. Raised sooner, it would stop the sweeps after it on every tick: the
-// stale-hold check of an 'unknown' invoice that names its PaymentIntent is
-// never stamped, so it comes back first.
+// stale-hold check never stamps an 'unknown' invoice, so one whose check
+// panics comes back first.
 func (r *Reconciler) Run(ctx context.Context, limit int) (int, []error) {
 	live, err := postgres.Livemode(ctx)
 	if err != nil {

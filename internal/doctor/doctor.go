@@ -10,11 +10,10 @@
 // The one rule (docs/dev/records/product-stability-plan.md): a check ships
 // only as an exact predicate, with zero legal false positives, or it does not
 // ship. Every check in checks.go passed a search for legal counterexamples:
-// grandfathered rows, deliberate states (such as an invoice parked under
-// ADR-107) and best-effort stamps that lag. A doctor that
-// raises false alarms gets ignored, and an ignored doctor is worse than none.
-// When a fixing PR closes a new class of bug, it adds the class's invariant
-// here in the same PR.
+// grandfathered rows, deliberate states and best-effort stamps that lag. A
+// doctor that raises false alarms gets ignored, and an ignored doctor is
+// worse than none. When a fixing PR closes a new class of bug, it adds the
+// class's invariant here in the same PR.
 package doctor
 
 import (

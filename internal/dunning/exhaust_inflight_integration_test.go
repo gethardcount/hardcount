@@ -115,7 +115,7 @@ func unclear(pi, lastErr string) func(*testing.T, context.Context, *exhaustFixtu
 
 var paymentShapes = []paymentShape{
 	{name: "processing", inFlight: true, apply: stamp(domain.PaymentProcessing, "pi_racing", "")},
-	{name: "unknown with a PaymentIntent", inFlight: true, apply: unclear("pi_racing", "stripe: 500")},
+	{name: "unknown", inFlight: true, apply: unclear("pi_racing", "stripe: 500")},
 	// The control: the payment definitely failed, so the final action fires.
 	{name: "failed (control)", inFlight: false, apply: func(*testing.T, context.Context, *exhaustFixture) {}},
 }
@@ -381,8 +381,8 @@ func (r *finalRetry) RetryPayment(ctx context.Context, _, _, _ string) error {
 
 // TestExhaust_FinalRetry_PaymentInFlight_HoldsTheFinalAction is the inline
 // way in: the final retry is declined, and by the time dunning reaches the
-// final action the invoice's payment is processing, unknown or parked. Neither
-// the subscription action nor the write-off fires; the run stays active and is
+// final action the invoice's payment is processing or unknown. Neither the
+// subscription action nor the write-off fires; the run stays active and is
 // re-checked. The control, a payment that definitely failed, still gets both.
 func TestExhaust_FinalRetry_PaymentInFlight_HoldsTheFinalAction(t *testing.T) {
 	db := testutil.SetupTestDB(t)

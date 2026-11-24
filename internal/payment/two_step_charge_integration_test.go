@@ -281,12 +281,12 @@ func (r *shRig) sweepUntilClear(invoiceID string) {
 }
 
 // failedBeforeConfirm checks what a failure before the stamp must leave: one
-// PaymentIntent at Stripe, never confirmed; nothing charged; the invoice
-// still pending (not unknown, not parked) and held, with no attempt row. Then
-// the stale-hold sweep clears the hold and moves the counter without asking
-// Stripe, and the next charge takes exactly one payment on a new
-// PaymentIntent. The unconfirmed PaymentIntent stays where it is and can take
-// no money: only one stamped on the invoice is ever confirmed.
+// PaymentIntent at Stripe, never confirmed; nothing charged; the invoice still
+// pending (not unknown) and held, with no attempt row. Then the stale-hold
+// sweep clears the hold and moves the counter without asking Stripe, and the
+// next charge takes exactly one payment on a new PaymentIntent. The
+// unconfirmed PaymentIntent stays where it is and can take no money: only one
+// stamped on the invoice is ever confirmed.
 func (r *shRig) failedBeforeConfirm(inv domain.Invoice) {
 	r.t.Helper()
 	orphan := r.fake.onlyPI()

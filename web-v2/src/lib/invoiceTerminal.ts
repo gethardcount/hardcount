@@ -134,8 +134,8 @@ export function invoicePaymentSucceeded(inv: InvoiceMoneyInput): boolean {
 
 /**
  * Which unresolved payment the invoice carries: 'processing' (a charge still
- * confirming) or 'unknown' (parked: Stripe's answer was unclear, ADR-107), or
- * null. Same rule as paymentIsUnresolved in lib/status.
+ * confirming) or 'unknown' (Stripe has not confirmed the charge yet), or null.
+ * Same rule as paymentIsUnresolved in lib/status.
  */
 export function invoicePaymentInFlight(inv: InvoiceMoneyInput): 'processing' | 'unknown' | null {
   if (!inv.payment_status || !paymentIsUnresolved(inv.payment_status)) return null
@@ -171,8 +171,9 @@ export function invoiceShowsCollect(inv: InvoiceMoneyInput, hasPaymentMethod: bo
 }
 
 /**
- * Open with no payment succeeded or processing. A parked charge ('unknown')
- * still awaits payment: mark uncollectible is its way out (ADR-107).
+ * Open with no payment succeeded or processing. An unclear charge ('unknown':
+ * Stripe has not confirmed it yet) still awaits payment, and Mark
+ * uncollectible is the one action the server allows on it.
  */
 export function invoiceAwaitingPayment(inv: InvoiceMoneyInput): boolean {
   return inv.status === 'finalized' &&

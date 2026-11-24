@@ -62,10 +62,10 @@ export function invoiceStatus(inv: InvoiceStatusInput, nowMs: number | undefined
 // null when it would only repeat the badge. Drafts have no payment yet; Paid,
 // Void and Uncollectible say all there is to say (collection has ended, so
 // "Pending" or "Failed" beside a write-off read as a payment still expected),
-// except "Unknown" on a write-off: a parked charge can be written off and is
-// marked paid later if it succeeded (docs/payments.md), so money may still
-// arrive;
-// and when the badge already reads Paid, Processing or Payment failed, a
+// except "Unknown" on a write-off: an unclear charge (Stripe has not confirmed
+// it yet) can be written off and is marked paid later if it succeeded
+// (docs/payments.md), so money may still arrive; and when the badge already
+// reads Paid, Processing or Payment failed, a
 // "Succeeded"/"Processing"/"Failed" chip next to it is the same fact twice.
 // What is left is the payment state the badge does not show (Pending or
 // Unknown beside Open).

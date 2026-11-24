@@ -147,7 +147,7 @@ test('payment predicates: collect, awaiting payment, in flight', () => {
   assert.equal(invoiceCanCollect({ ...open, amount_due_cents: 0 }), false)
   assert.equal(invoiceCanCollect({ ...open, payment_status: 'succeeded' }), false)
   assert.equal(invoiceCanCollect({ ...open, payment_status: 'processing' }), false)
-  // A parked charge (unknown) is not collectible: it may already have been taken.
+  // An unclear charge (unknown) is not collectible: it may already have been taken.
   assert.equal(invoiceCanCollect({ ...open, payment_status: 'unknown' }), false)
   for (const status of ['voided', 'uncollectible', 'paid', 'draft']) {
     assert.equal(invoiceCanCollect({ ...open, status }), false, status)
@@ -156,8 +156,8 @@ test('payment predicates: collect, awaiting payment, in flight', () => {
   assert.equal(invoiceCanCollect({ ...open, status: 'draft', billing_reason: 'topup' }), true)
   assert.equal(invoiceCanCollect({ ...open, status: 'draft', billing_reason: 'manual' }), false)
 
-  // Awaiting payment: open, nothing succeeded or processing. A parked charge
-  // still awaits (mark uncollectible is its way out, ADR-107).
+  // Awaiting payment: open, nothing succeeded or processing. An unclear charge
+  // (unknown) still awaits, and Mark uncollectible is the one action allowed.
   assert.equal(invoiceAwaitingPayment(open), true)
   assert.equal(invoiceAwaitingPayment({ ...open, payment_status: 'unknown' }), true)
   assert.equal(invoiceAwaitingPayment({ ...open, payment_status: 'processing' }), false)
