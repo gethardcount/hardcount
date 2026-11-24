@@ -5,7 +5,8 @@ import (
 	"testing"
 )
 
-// deleteTestClocksVersion is 00241_delete_test_clocks.sql.
+// deleteTestClocksVersion is 00241_delete_test_clocks.sql. The test stops
+// before 00242, which drops the clock tables and columns it reads.
 const deleteTestClocksVersion = 241
 
 // A clock with a customer on it, and a customer on no clock, each with an
@@ -44,7 +45,8 @@ func TestDeleteTestClocks_UpAndDown(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	throughDelete := filesBefore(t, dropTestClockSchemaVersion)
+	if err := up(ctx, dsn, throughDelete); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
 	for _, c := range []struct {
@@ -66,10 +68,10 @@ func TestDeleteTestClocks_UpAndDown(t *testing.T) {
 		}
 	}
 
-	if _, err := down(ctx, dsn, migrationFiles(), deleteTestClocksVersion-1); err != nil {
+	if _, err := down(ctx, dsn, throughDelete, deleteTestClocksVersion-1); err != nil {
 		t.Fatalf("Down to %d: %v", deleteTestClocksVersion-1, err)
 	}
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	if err := up(ctx, dsn, throughDelete); err != nil {
 		t.Fatalf("Up again: %v", err)
 	}
 }

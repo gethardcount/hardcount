@@ -229,22 +229,6 @@ func IsForeignKeyViolation(err error) bool {
 	return false
 }
 
-// IsCheckViolation reports whether err is a Postgres check-constraint
-// violation (SQLSTATE 23514). Callers use it to turn a database invariant
-// failure into a 400 for the user, instead of leaking raw SQL error text.
-// Examples are the test_clocks livemode CHECK and
-// subscriptions_test_clock_requires_testmode.
-func IsCheckViolation(err error) bool {
-	if err == nil {
-		return false
-	}
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return pgErr.Code == "23514"
-	}
-	return false
-}
-
 // IsTransient reports whether err means the statement never reached a
 // verdict because the connection or the transaction was taken away. That
 // covers a lost connection, a server shutting down, and a transaction the
