@@ -89,7 +89,7 @@ export interface AnalyticsOverview {
      * Issued credit notes whose refund failed or has an unknown
      * result, has stayed pending for 72 hours since the note last
      * changed, or owes a refund that has not started an hour after the
-     * note last changed. Test-clock credit notes are not counted.
+     * note last changed.
      */
   refunds_needing_attention: number;
   /** Usage events with a timestamp in the window. */

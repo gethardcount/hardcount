@@ -14,8 +14,7 @@
 
 export type GetCustomerMarginParams = {
 /**
- * Window start, inclusive. RFC 3339. Default is 30 days before the
- * customer's current time.
+ * Window start, inclusive. RFC 3339. Default is 30 days before now.
  */
 from?: string;
 /**

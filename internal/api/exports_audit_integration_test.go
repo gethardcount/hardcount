@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -287,6 +288,13 @@ func TestExportsAudit_AuditLogExportStreamsEveryRow(t *testing.T) {
 	}
 	if records[0][0] == "EXPORT_INCOMPLETE" {
 		t.Fatal("export aborted mid-stream")
+	}
+	// The header pins the column order, which a parser may read by position.
+	wantHeader := []string{"id", "created_at", "actor_type", "actor_id", "actor_name",
+		"action", "resource_type", "resource_id", "resource_label",
+		"ip_address", "request_id", "metadata_json"}
+	if !slices.Equal(records[0], wantHeader) {
+		t.Errorf("header %v; want %v", records[0], wantHeader)
 	}
 	data := records[1:] // drop the header
 

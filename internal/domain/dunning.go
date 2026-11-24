@@ -330,9 +330,7 @@ type InvoiceDunningEvent struct {
 	Metadata     map[string]any   `json:"metadata,omitempty"`
 	CreatedAt    time.Time        `json:"created_at"`
 	// RecordedAt is the real-world instant of the INSERT (ADR-104
-	// Invariant A). It is the row's only wall-clock stamp, because CreatedAt
-	// follows the entity's calendar, which is simulated during catch-up (the
-	// work Hardcount does after a test clock moves forward, ADR-030). It is
-	// nil on rows written before migration 0164.
+	// Invariant A); CreatedAt is the action's instant, which a run may bind
+	// before it writes. It is nil on rows written before migration 0164.
 	RecordedAt *time.Time `json:"recorded_at,omitempty"`
 }

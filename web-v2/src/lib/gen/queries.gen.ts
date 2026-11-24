@@ -7985,8 +7985,8 @@ export const getReleaseHeldUsageUrl = () => {
  * a usage event under the same key is not written again. Releasing
  * twice writes nothing the second time.
  *
- * Rows whose meter still does not exist, or whose time is after the
- * customer's current time, stay held. One call releases at most 5,000
+ * Rows whose meter still does not exist, or whose time is still in
+ * the future, stay held. One call releases at most 5,000
  * rows; `more_to_release` counts the rest, and another call takes
  * them. A released row counts toward
  * the billing period its time falls in only if that period's invoice

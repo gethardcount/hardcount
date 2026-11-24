@@ -113,18 +113,14 @@ type CreditNote struct {
 	// transaction is not recorded yet. RetryPendingCreditNoteTaxReversal
 	// makes the reversal for marked notes with the per-note
 	// hardcount_tax_rev_<cn.ID> key (ADR-061, ADR-062). A note whose invoice
-	// never gets a tax transaction (its tax commit never succeeds, or it is on
-	// a test clock) stays marked: nothing was reported, so nothing is
-	// reversed.
+	// never gets a tax transaction (its tax commit never succeeds) stays
+	// marked: nothing was reported, so nothing is reversed.
 	TaxReversalPending bool           `json:"tax_reversal_pending"`
 	Metadata           map[string]any `json:"metadata,omitempty"`
 	CreatedAt          time.Time      `json:"created_at"`
 	// RecordedAt is the real-world instant this row was inserted (ADR-104,
-	// Invariant A). CreatedAt follows the entity's calendar, which is
-	// simulated time when the entity is pinned to a test clock (ADR-030).
-	// Without RecordedAt the row would have no wall-clock stamp at all, and
-	// the timeline could not show both calendars. It is nil on rows created
-	// before migration 0164, which were never backfilled.
+	// Invariant A); CreatedAt is the action's instant. It is nil on rows
+	// created before migration 0164, which were never backfilled.
 	RecordedAt *time.Time `json:"recorded_at,omitempty"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 }

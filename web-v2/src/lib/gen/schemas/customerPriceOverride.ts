@@ -60,7 +60,7 @@ export interface CustomerPriceOverride {
      * period after this instant gets it from the join.
      */
   created_at: string;
-  /** When the override ended, in the customer's time. Absent while it is active. */
+  /** When the override ended. Absent while it is active. */
   deactivated_at?: string;
   /** When the override was last written. */
   updated_at: string;

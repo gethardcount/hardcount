@@ -2020,8 +2020,7 @@ components:
             reason it is when tax was deferred, for `amount_below_minimum`
             when Stripe refused the amount, for `dispute_lost` when the
             dispute closed, and for `refunded_in_stripe` when the refund was
-            made. Otherwise it is when the invoice last changed; on a test
-            clock, when it was issued or its last charge failed. Absent when
+            made. Otherwise it is when the invoice last changed. Absent when
             it is not known.
         next_attempt_at:
           type: string
@@ -5222,8 +5221,7 @@ components:
         amounts. `net` = `new` + `expansion` - `contraction` - `churned`.
         Expansion and contraction count only subscriptions that were active
         for the whole window: a subscription activated or canceled inside
-        it counts only in `new` or `churned`. Test-clock subscriptions are
-        left out.
+        it counts only in `new` or `churned`.
       properties:
         new:
           type: integer
@@ -5533,7 +5531,7 @@ components:
             Issued credit notes whose refund failed or has an unknown
             result, has stayed pending for 72 hours since the note last
             changed, or owes a refund that has not started an hour after the
-            note last changed. Test-clock credit notes are not counted.
+            note last changed.
         usage_events:
           type: integer
           format: int64
@@ -7205,7 +7203,7 @@ components:
         deactivated_at:
           type: string
           format: date-time
-          description: When the override ended, in the customer's time. Absent while it is active.
+          description: When the override ended. Absent while it is active.
         updated_at:
           type: string
           format: date-time
@@ -12757,7 +12755,7 @@ paths:
             enum: [none, pending, succeeded, failed, unknown, needs_attention]
           description: |
             Only notes whose refund is in this state. `needs_attention`
-            returns issued, non-test-clock notes whose
+            returns issued notes whose
             refund failed or has an unknown result, has been pending more
             than 72 hours, or has a refund amount still at `none` after 1
             hour. Any other value is a 422 with `param: refund_status`.
@@ -15466,8 +15464,8 @@ paths:
             `paused` returns only active and trialing subscriptions whose
             `pause_collection` is in force, whether a dashboard user or an
             API key set it, or dunning (Hardcount's automatic payment
-            retries) did. A timed pause ends at `resumes_at` (on the subscription's test
-            clock, if it has one), even while the response still carries it.
+            retries) did. A timed pause ends at `resumes_at`, even while the
+            response still carries it.
             Any other value is a 422 with `param: collection`.
           schema:
             type: string
@@ -18356,8 +18354,8 @@ paths:
         a usage event under the same key is not written again. Releasing
         twice writes nothing the second time.
 
-        Rows whose meter still does not exist, or whose time is after the
-        customer's current time, stay held. One call releases at most 5,000
+        Rows whose meter still does not exist, or whose time is still in
+        the future, stay held. One call releases at most 5,000
         rows; `more_to_release` counts the rest, and another call takes
         them. A released row counts toward
         the billing period its time falls in only if that period's invoice
@@ -23650,8 +23648,7 @@ paths:
         - name: from
           in: query
           description: |
-            Window start, inclusive. RFC 3339. Default is 30 days before the
-            customer's current time.
+            Window start, inclusive. RFC 3339. Default is 30 days before now.
           schema:
             type: string
             format: date-time
