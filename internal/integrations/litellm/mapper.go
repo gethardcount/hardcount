@@ -455,8 +455,7 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 
 	// Event timestamp: EndTime (when the call completed), else StartTime,
 	// unix seconds to the sub-second. With neither it stays nil, and usage
-	// dates the call at the customer's time. For a customer on a test clock
-	// usage.Service.IngestCall dates every call at the clock's time.
+	// dates the call at the call's bound instant.
 	var ts *time.Time
 	switch {
 	case p.EndTime > 0:

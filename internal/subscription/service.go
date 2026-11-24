@@ -134,22 +134,16 @@ type DueBiller interface {
 type Service struct {
 	store Store
 	// clock is the server's clock: the router's clk, the one the engine
-	// bills by. Every subscription action runs on a time decided on a test
-	// clock or at real time (see clock.Decide and clock.WithRealTime). Who
-	// decides it:
+	// bills by. Who binds a subscription action's time:
 	//   - a request, the API's door (api.clockDoor), with one read of the
-	//     server's clock; a create, the service itself, from the customer its
-	//     body names (DecideForCustomer);
-	//   - the billing run at real time (its lists exclude subscriptions on a
-	//     test clock), and a test clock's catch-up on that clock (period
-	//     closes, due cancels, trial ends);
+	//     server's clock; a create, the create route, with one read of this
+	//     clock (BindNow);
+	//   - the billing run, each subscription its own instant;
 	//   - dunning's final action (a pause or a cancel), its run's time.
 	// Each entry point keeps that time. Work that arrives with no instant
-	// bound (a job's row, or a function that decides its own time, before it
-	// binds) reads this clock once (clock.EnsureEffectiveNow); a request on
-	// any other route arrives with the door's instant. Without
-	// that read, two reads of the time in one action could differ, and a
-	// store's stamp could fall on another time than the action's.
+	// bound reads this clock once (clock.EnsureEffectiveNow). Without that
+	// read, two reads of the time in one action could differ, and a store's
+	// stamp could fall on another time than the action's.
 	clock     clock.Clock
 	settings  SettingsReader
 	customers CustomerReader
@@ -163,7 +157,6 @@ type Service struct {
 	// invoiceGrace is INVOICE_GRACE_PERIOD (ADR-120). Only dunning's final
 	// pause and cancel wait for it; see SetInvoiceGrace.
 	invoiceGrace time.Duration
-	resolver     clock.Resolver
 	// No event dispatcher: the service sends no webhook itself. A writer's
 	// events are queued in its transaction by the store
 	// (PostgresStore.SetOutboxEnqueuer); the operator's own are sent by
@@ -288,30 +281,12 @@ func (e *InsideInvoiceGraceError) Error() string {
 	return "the subscription's ended period is inside its invoice grace until " + e.Until.UTC().Format(time.RFC3339Nano)
 }
 
-// SetResolver wires the clock.Resolver the service decides a new
-// subscription's time with (DecideForCustomer). Optional: nil decides
-// nothing, and a create is at real time (narrow tests).
-func (s *Service) SetResolver(r clock.Resolver) {
-	s.resolver = r
-}
-
-// DecideForCustomer decides a new subscription's time from the customer its
-// body names (clock.DecideOrRealTime) and binds it (see the clock package's
-// doc). A clock that cannot be read refuses the create (503), with nothing
-// written. No customer id names no record to decide from: it binds one read
-// of the service's clock, and the create answers the missing field. The
-// create route calls it on the service because the service holds the
-// resolver.
-func (s *Service) DecideForCustomer(ctx context.Context, tenantID, customerID string) (context.Context, error) {
-	if customerID == "" {
-		return clock.EnsureEffectiveNow(ctx, s.clock), nil
-	}
-	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
-	if err != nil {
-		return ctx, errs.Unavailable("test_clock_unavailable",
-			"The customer's test clock could not be read. Nothing was created; send the request again.", err)
-	}
-	return clock.EnsureEffectiveNow(decided, s.clock), nil
+// BindNow binds one read of the service's clock on ctx, unless ctx already
+// carries an instant (clock.EnsureEffectiveNow). The create route calls it
+// before Create runs, so all of the create's writes share one instant; it is
+// on the service because the service holds the clock.
+func (s *Service) BindNow(ctx context.Context) context.Context {
+	return clock.EnsureEffectiveNow(ctx, s.clock)
 }
 
 // tenantLocation resolves the tenant's billing timezone (ADR-077). The zone
@@ -696,9 +671,8 @@ type CreateInput struct {
 
 // Create creates a subscription that starts now, or starts its trial now,
 // and bills its first in-advance period when it has no trial. Its caller
-// decides the time first (DecideForCustomer, as the create route does), and
-// Create reads every instant from ctx: a caller that did not decide would
-// stamp a clock customer's subscription at real time, not at its clock's.
+// binds the time first (BindNow, as the create route does), and Create reads
+// every instant from ctx, so all its writes share one.
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.Subscription, error) {
 	code := strings.TrimSpace(input.Code)
 	displayName := strings.TrimSpace(input.DisplayName)
@@ -1221,7 +1195,7 @@ func (s *Service) AddItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscript
 	// CloseEndedPeriodFirst: a subscription with no items cannot be billed,
 	// so refusing its add would leave its period due for good.
 	if sub.Status == domain.SubscriptionActive && len(sub.Items) > 0 && domain.BillingDueAt(sub, now) {
-		return ItemChangeResult{}, errUnbilledPeriod(sub)
+		return ItemChangeResult{}, errUnbilledPeriod()
 	}
 	item, err := s.store.AddItemTx(ctx, tx, tenantID, domain.SubscriptionItem{
 		SubscriptionID: subscriptionID,
@@ -1443,7 +1417,7 @@ func (s *Service) changeItemUnderLock(ctx context.Context, tx *sql.Tx, tenantID,
 	// The handler closed an ended period before its read
 	// (CloseEndedPeriodFirst); the boundary can pass after that.
 	if domain.BillingDueAt(sub, now) {
-		return ItemChangeResult{}, errUnbilledPeriod(sub)
+		return ItemChangeResult{}, errUnbilledPeriod()
 	}
 	pricedFrom := itemChangeBase{sub: sub, item: item}
 
@@ -1673,7 +1647,7 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 	// boundary that passed after that. The period CAS below proves the row
 	// still equals sub, so the check holds at the write.
 	if domain.BillingDueAt(sub, now) {
-		return ItemChangeResult{}, errUnbilledPeriod(sub)
+		return ItemChangeResult{}, errUnbilledPeriod()
 	}
 	loc, err := s.tenantLocation(ctx, sub.TenantID)
 	if err != nil {
@@ -2013,7 +1987,7 @@ func (s *Service) RemoveItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscr
 	// As in changeItemUnderLock: the boundary can pass after the handler's
 	// CloseEndedPeriodFirst.
 	if sub.Status == domain.SubscriptionActive && domain.BillingDueAt(sub, now) {
-		return ItemChangeResult{}, errUnbilledPeriod(sub)
+		return ItemChangeResult{}, errUnbilledPeriod()
 	}
 	if err := s.store.RemoveItemTx(ctx, tx, tenantID, itemID); err != nil {
 		return ItemChangeResult{}, err
@@ -2227,12 +2201,8 @@ func graceWait(sub domain.Subscription, grace time.Duration) *InsideInvoiceGrace
 // errUnbilledPeriod is the refusal of a write that would act on a period that
 // ended and could not be closed. Code unbilled_period, the same answer an
 // immediate cancel gives (billing.Engine.priceFinalOnCancel).
-func errUnbilledPeriod(sub domain.Subscription) error {
-	next := "retry billing for this subscription, then try again"
-	if sub.TestClockID != "" {
-		next = "finish or retry the clock advance, then try again"
-	}
-	return errs.InvalidState("this subscription has a billing period that ended and is not invoiced yet; " + next).
+func errUnbilledPeriod() error {
+	return errs.InvalidState("this subscription has a billing period that ended and is not invoiced yet; retry billing for this subscription, then try again").
 		WithCode("unbilled_period")
 }
 
@@ -2261,7 +2231,7 @@ func (s *Service) closeEndedPeriodFirstWithin(ctx context.Context, tenantID, id 
 		return domain.Subscription{}, err
 	}
 	if sub.Status == domain.SubscriptionActive && len(sub.Items) > 0 && domain.BillingDueAt(sub, s.clock.Now(ctx)) {
-		return domain.Subscription{}, errUnbilledPeriod(sub)
+		return domain.Subscription{}, errUnbilledPeriod()
 	}
 	return sub, nil
 }
@@ -2553,9 +2523,6 @@ func (s *Service) RetryBilling(ctx context.Context, tenantID, id string) (RetryB
 	sub, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return RetryBillingResult{}, err
-	}
-	if sub.TestClockID != "" {
-		return RetryBillingResult{}, errs.InvalidState("this subscription is on a test clock; use Retry advance on the clock")
 	}
 
 	if _, err := s.store.ClearBillingFailure(ctx, tenantID, id, func(tx *sql.Tx, cleared domain.BillingFailure) error {
@@ -3027,10 +2994,7 @@ func (s *Service) cancelTrialAtEnd(ctx context.Context, tenantID string, sub dom
 		"triggered_by": "schedule",
 		"canceled_at":  canceled.CanceledAt.UTC().Format(time.RFC3339),
 	}
-	// The trial-end instant is its OWN fact, under its own key. The row's
-	// sim_effective_at is a separate column the audit writer owns from the
-	// ctx binding (simColumns); the two used to collide on one key, with the
-	// writer silently winning.
+	// The trial-end instant is its own fact, under its own key.
 	if sub.TrialEndAt != nil {
 		meta["trial_end_at"] = sub.TrialEndAt.UTC().Format(time.RFC3339)
 	}

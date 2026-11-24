@@ -12,44 +12,12 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// entryDecidedAt is the instant a caller decided, on clock clk_d (a cycle's
-// boundary, say, before the clock's frozen time). The resolver below answers
-// the clock's frozen time, three days later, and counts its reads.
+// entryDecidedAt is the instant a caller bound (a cycle's boundary, say).
+// The service's own clock answers three days later, and counts its reads.
 var entryDecidedAt = time.Date(2027, 3, 4, 10, 0, 0, 0, time.UTC)
 
-func onDecidedClock() context.Context {
-	return clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: entryDecidedAt, TestClockID: "clk_d"})
-}
-
-// otherClock puts every record on clock clk_d at its frozen time, three days
-// after entryDecidedAt, and counts the reads.
-type otherClock struct{ reads int }
-
-func (o *otherClock) answer() (clock.Sim, error) {
-	o.reads++
-	return clock.Sim{At: entryDecidedAt.Add(72 * time.Hour), TestClockID: "clk_d"}, nil
-}
-func (o *otherClock) SimForInvoice(context.Context, string, string) (clock.Sim, error) {
-	return o.answer()
-}
-func (o *otherClock) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
-	return o.answer()
-}
-func (o *otherClock) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
-	return o.answer()
-}
-
-// simSeeingRetrier records the clock and instant a tax retry ran on.
-type simSeeingRetrier struct {
-	*stubTaxRetrier
-	saw clock.Sim
-}
-
-func (r *simSeeingRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string,
-	then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
-) (domain.Invoice, error) {
-	r.saw, _ = clock.SimOf(ctx)
-	return r.stubTaxRetrier.RetryTaxForInvoice(ctx, tenantID, invoiceID, then)
+func atDecidedTime() context.Context {
+	return clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), entryDecidedAt)
 }
 
 // atRecordingApplier records the instant a credit is applied at, and the
@@ -70,11 +38,10 @@ func (a *atRecordingApplier) ApplyToInvoiceAt(ctx context.Context, tenantID, cus
 // makes, which the database store and the audit row stamp from their ctx,
 // run on that time too.
 func TestEntryPoints_RunOnTheDecidedTime(t *testing.T) {
-	newSvc := func() (*Service, *instantStore, *otherClock) {
+	newSvc := func() (*Service, *instantStore, *steppingClock) {
 		store := &instantStore{memStore: newMemStore()}
-		res := &otherClock{}
-		svc := NewService(store, clock.Real(), newMemNumberer())
-		svc.SetResolver(res)
+		res := &steppingClock{at: entryDecidedAt.Add(72 * time.Hour)}
+		svc := NewService(store, res, newMemNumberer())
 		return svc, store, res
 	}
 	seed := func(t *testing.T, store *instantStore, inv domain.Invoice) domain.Invoice {
@@ -86,7 +53,7 @@ func TestEntryPoints_RunOnTheDecidedTime(t *testing.T) {
 		}
 		return created
 	}
-	paidAt := func(t *testing.T, store *instantStore, inv domain.Invoice, err error, res *otherClock) {
+	paidAt := func(t *testing.T, store *instantStore, inv domain.Invoice, err error, res *steppingClock) {
 		t.Helper()
 		if err != nil {
 			t.Fatalf("err = %v", err)
@@ -99,29 +66,29 @@ func TestEntryPoints_RunOnTheDecidedTime(t *testing.T) {
 	t.Run("a zero-due settle is paid at the decided time", func(t *testing.T) {
 		svc, store, res := newSvc()
 		inv := seed(t, store, domain.Invoice{Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending})
-		got, err := svc.SettleZeroDue(onDecidedClock(), "t1", inv.ID)
+		got, err := svc.SettleZeroDue(atDecidedTime(), "t1", inv.ID)
 		paidAt(t, store, got, err, res)
 	})
 
 	t.Run("a zero-due settle with no charge claim is paid at the decided time", func(t *testing.T) {
 		svc, store, res := newSvc()
 		inv := seed(t, store, domain.Invoice{Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending})
-		got, _, err := svc.SettleZeroDueWithoutClaim(onDecidedClock(), "t1", inv.ID)
+		got, _, err := svc.SettleZeroDueWithoutClaim(atDecidedTime(), "t1", inv.ID)
 		paidAt(t, store, got, err, res)
 	})
 
 	t.Run("an offline payment is recorded at the decided time", func(t *testing.T) {
 		svc, store, res := newSvc()
 		inv := seed(t, store, domain.Invoice{Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, AmountDueCents: 5000, TotalAmountCents: 5000})
-		got, err := svc.RecordOfflinePayment(onDecidedClock(), "t1", inv.ID, "Wire 1042")
+		got, err := svc.RecordOfflinePayment(atDecidedTime(), "t1", inv.ID, "Wire 1042")
 		paidAt(t, store, got, err, res)
 	})
 
-	// The draft is composed two days earlier on the same clock, so a finalize
-	// that kept the draft's issue date would show.
+	// The draft is composed two days earlier, so a finalize that kept the
+	// draft's issue date would show.
 	t.Run("a manual invoice is issued at the decided time of its finalize", func(t *testing.T) {
 		svc, _, res := newSvc()
-		composed := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: entryDecidedAt.Add(-48 * time.Hour), TestClockID: "clk_d"})
+		composed := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), entryDecidedAt.Add(-48*time.Hour))
 		draft, err := svc.Create(composed, "t1", CreateInput{
 			CustomerID: "cus_1",
 			LineItems:  []AddLineItemInput{{Description: "Consulting", Quantity: 1, UnitAmountCents: 10000}},
@@ -132,7 +99,7 @@ func TestEntryPoints_RunOnTheDecidedTime(t *testing.T) {
 		res.reads = 0
 		aud := &instantAudit{}
 		svc.SetAuditLogger(aud)
-		final, err := svc.Finalize(onDecidedClock(), "t1", draft.ID)
+		final, err := svc.Finalize(atDecidedTime(), "t1", draft.ID)
 		if err != nil {
 			t.Fatalf("finalize: %v", err)
 		}
@@ -150,7 +117,7 @@ func TestEntryPoints_RunOnTheDecidedTime(t *testing.T) {
 		inv := seed(t, store, domain.Invoice{Status: domain.InvoiceFinalized, AmountDueCents: 5000})
 		applier := &atRecordingApplier{fakeInvCreditApplier: &fakeInvCreditApplier{store: store.memStore, applyCents: 2000}}
 		svc.SetCreditApplier(applier)
-		if _, err := svc.ApplyCreditBalance(onDecidedClock(), "t1", inv.ID); err != nil {
+		if _, err := svc.ApplyCreditBalance(atDecidedTime(), "t1", inv.ID); err != nil {
 			t.Fatalf("ApplyCreditBalance: %v", err)
 		}
 		if !applier.at.Equal(entryDecidedAt) || !applier.ctxAt.Equal(entryDecidedAt) || res.reads != 0 {
@@ -161,7 +128,7 @@ func TestEntryPoints_RunOnTheDecidedTime(t *testing.T) {
 	t.Run("an added line is written at the decided time", func(t *testing.T) {
 		svc, store, res := newSvc()
 		inv := seed(t, store, domain.Invoice{Status: domain.InvoiceDraft})
-		if _, err := svc.AddLineItem(onDecidedClock(), "t1", inv.ID, AddLineItemInput{Description: "Extra", Quantity: 1, UnitAmountCents: 500}); err != nil {
+		if _, err := svc.AddLineItem(atDecidedTime(), "t1", inv.ID, AddLineItemInput{Description: "Extra", Quantity: 1, UnitAmountCents: 500}); err != nil {
 			t.Fatalf("AddLineItem: %v", err)
 		}
 		if !store.at.Equal(entryDecidedAt) || res.reads != 0 {
@@ -172,13 +139,13 @@ func TestEntryPoints_RunOnTheDecidedTime(t *testing.T) {
 	t.Run("a tax retry runs at the decided time", func(t *testing.T) {
 		svc, store, res := newSvc()
 		inv := seed(t, store, stuckDraft("", "cus_1", "provider_unavailable"))
-		retrier := &simSeeingRetrier{stubTaxRetrier: &stubTaxRetrier{store: store.memStore}}
+		retrier := &instantSeeingRetrier{stubTaxRetrier: &stubTaxRetrier{store: store.memStore}}
 		svc.SetTaxRetrier(retrier)
-		if _, err := svc.RetryTax(onDecidedClock(), "t1", inv.ID); err != nil {
+		if _, err := svc.RetryTax(atDecidedTime(), "t1", inv.ID); err != nil {
 			t.Fatalf("RetryTax: %v", err)
 		}
-		if retrier.saw != (clock.Sim{At: entryDecidedAt, TestClockID: "clk_d"}) || res.reads != 0 {
-			t.Errorf("retry ran on %+v, clock reads %d; want clk_d at %v, none", retrier.saw, res.reads, entryDecidedAt)
+		if !retrier.at[inv.ID].Equal(entryDecidedAt) || res.reads != 0 {
+			t.Errorf("retry ran at %v, clock reads %d; want %v, none", retrier.at[inv.ID], res.reads, entryDecidedAt)
 		}
 	})
 
@@ -188,7 +155,7 @@ func TestEntryPoints_RunOnTheDecidedTime(t *testing.T) {
 	t.Run("a void reads no clock of its own", func(t *testing.T) {
 		svc, store, res := newSvc()
 		inv := seed(t, store, domain.Invoice{Status: domain.InvoiceFinalized, AmountDueCents: 5000})
-		if _, err := svc.Void(onDecidedClock(), "t1", inv.ID); err != nil {
+		if _, err := svc.Void(atDecidedTime(), "t1", inv.ID); err != nil {
 			t.Fatalf("Void: %v", err)
 		}
 		if res.reads != 0 {
@@ -198,7 +165,7 @@ func TestEntryPoints_RunOnTheDecidedTime(t *testing.T) {
 	t.Run("a write-off reads no clock of its own", func(t *testing.T) {
 		svc, store, res := newSvc()
 		inv := seed(t, store, domain.Invoice{Status: domain.InvoiceFinalized, AmountDueCents: 5000})
-		if _, err := svc.MarkUncollectibleThen(onDecidedClock(), "t1", inv.ID, nil); err != nil {
+		if _, err := svc.MarkUncollectibleThen(atDecidedTime(), "t1", inv.ID, nil); err != nil {
 			t.Fatalf("MarkUncollectibleThen: %v", err)
 		}
 		if res.reads != 0 {

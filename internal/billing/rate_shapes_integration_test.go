@@ -38,7 +38,6 @@ func TestRateShapes_PreviewEqualsTheInvoice(t *testing.T) {
 		price        func(t *testing.T, lf *liveFixture)
 		events       []event // before the threshold invoice, and again after it
 		taxInclusive bool
-		testClock    bool // previews and the live balance only: clock-pinned subscriptions are closed by the clock's advance
 		cancel       bool // end with an immediate cancel instead of the period close
 	}{
 		{
@@ -103,14 +102,6 @@ func TestRateShapes_PreviewEqualsTheInvoice(t *testing.T) {
 			events:       []event{{qty: "150"}, {qty: "180"}},
 			taxInclusive: true,
 		},
-		{
-			name: "test clock",
-			price: func(t *testing.T, lf *liveFixture) {
-				publishCallsRule(t, lf, packageRule("calls_flat", 10, "0.35"))
-			},
-			events:    []event{{qty: "27"}, {qty: "0.5"}},
-			testClock: true,
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -135,13 +126,6 @@ func TestRateShapes_PreviewEqualsTheInvoice(t *testing.T) {
 					t.Fatalf("ingest: %v", err)
 				}
 			}
-			if tc.testClock {
-				clockID := postgres.NewID("hc_tclk")
-				bypassExec(t, lf, `INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status) VALUES ($1, $2, false, 'Rate Shapes Clock', $3, 'ready')`,
-					clockID, lf.tenantID, time.Now().UTC())
-				bypassExec(t, lf, `UPDATE subscriptions SET test_clock_id = $1 WHERE id = $2`, clockID, lf.subID)
-			}
-
 			previews := billing.NewPreviewService(lf.engine, customer.NewPostgresStore(lf.db), lf.subStore)
 			// readAll previews the period as its close will bill it and reads
 			// the live balance; the two must agree. It returns the preview's
@@ -171,81 +155,79 @@ func TestRateShapes_PreviewEqualsTheInvoice(t *testing.T) {
 			}
 			readAll("open")
 
-			if !tc.testClock {
-				if _, err := lf.subSvc.SetBillingThresholds(ctx, lf.tenantID, lf.subID, subscription.BillingThresholdsInput{
-					AmountGTE: 1,
-				}); err != nil {
-					t.Fatalf("set thresholds: %v", err)
-				}
-				if fired, errs := lf.engine.ScanThresholds(ctx, 50); len(errs) > 0 || fired != 1 {
-					t.Fatalf("threshold scan: fired=%d errs=%v, want 1", fired, errs)
-				}
-				invs := lf.listInvoices(t, ctx)
-				if len(invs) != 1 {
-					t.Fatalf("invoices after the fire = %d, want 1", len(invs))
-				}
-				fireEnd := invs[0].BillingPeriodEnd.UTC()
-				for i, ev := range tc.events {
-					insertUsageAt(t, lf, fireEnd.Add(time.Duration(i+1)*100*time.Millisecond), ev.qty, ev.dims)
-				}
-				if wait := time.Until(fireEnd.Add(time.Duration(len(tc.events)+1) * 100 * time.Millisecond)); wait > 0 {
-					time.Sleep(wait)
-				}
-				previewed := readAll("after fire")
+			if _, err := lf.subSvc.SetBillingThresholds(ctx, lf.tenantID, lf.subID, subscription.BillingThresholdsInput{
+				AmountGTE: 1,
+			}); err != nil {
+				t.Fatalf("set thresholds: %v", err)
+			}
+			if fired, errs := lf.engine.ScanThresholds(ctx, 50); len(errs) > 0 || fired != 1 {
+				t.Fatalf("threshold scan: fired=%d errs=%v, want 1", fired, errs)
+			}
+			invs := lf.listInvoices(t, ctx)
+			if len(invs) != 1 {
+				t.Fatalf("invoices after the fire = %d, want 1", len(invs))
+			}
+			fireEnd := invs[0].BillingPeriodEnd.UTC()
+			for i, ev := range tc.events {
+				insertUsageAt(t, lf, fireEnd.Add(time.Duration(i+1)*100*time.Millisecond), ev.qty, ev.dims)
+			}
+			if wait := time.Until(fireEnd.Add(time.Duration(len(tc.events)+1) * 100 * time.Millisecond)); wait > 0 {
+				time.Sleep(wait)
+			}
+			previewed := readAll("after fire")
 
-				periodEnd := fireEnd.Add(2 * time.Second).Truncate(time.Microsecond)
-				if wait := time.Until(periodEnd.Add(500 * time.Millisecond)); wait > 0 {
-					time.Sleep(wait)
+			periodEnd := fireEnd.Add(2 * time.Second).Truncate(time.Microsecond)
+			if wait := time.Until(periodEnd.Add(500 * time.Millisecond)); wait > 0 {
+				time.Sleep(wait)
+			}
+			// usageBilled is what an invoice billed for usage: the gross
+			// line amount, which a tax-inclusive tenant's preview shows.
+			usageBilled := func(inv domain.Invoice) int64 {
+				t.Helper()
+				lines, err := lf.invStore.ListLineItems(ctx, lf.tenantID, inv.ID)
+				if err != nil {
+					t.Fatalf("list lines: %v", err)
 				}
-				// usageBilled is what an invoice billed for usage: the gross
-				// line amount, which a tax-inclusive tenant's preview shows.
-				usageBilled := func(inv domain.Invoice) int64 {
-					t.Helper()
-					lines, err := lf.invStore.ListLineItems(ctx, lf.tenantID, inv.ID)
-					if err != nil {
-						t.Fatalf("list lines: %v", err)
+				var n int64
+				for _, l := range lines {
+					if l.LineType != domain.LineTypeUsage {
+						continue
 					}
-					var n int64
-					for _, l := range lines {
-						if l.LineType != domain.LineTypeUsage {
-							continue
-						}
-						if tc.taxInclusive {
-							n += l.TotalAmountCents
-						} else {
-							n += l.AmountCents
-						}
+					if tc.taxInclusive {
+						n += l.TotalAmountCents
+					} else {
+						n += l.AmountCents
 					}
-					return n
 				}
-				if tc.cancel {
-					canceledAt := time.Now().UTC().Truncate(time.Microsecond)
-					bypassExec(t, lf, `UPDATE subscriptions SET status = 'canceled', canceled_at = $1 WHERE id = $2`, canceledAt, lf.subID)
-					sub, err := lf.subStore.Get(ctx, lf.tenantID, lf.subID)
-					if err != nil {
-						t.Fatalf("get sub: %v", err)
+				return n
+			}
+			if tc.cancel {
+				canceledAt := time.Now().UTC().Truncate(time.Microsecond)
+				bypassExec(t, lf, `UPDATE subscriptions SET status = 'canceled', canceled_at = $1 WHERE id = $2`, canceledAt, lf.subID)
+				sub, err := lf.subStore.Get(ctx, lf.tenantID, lf.subID)
+				if err != nil {
+					t.Fatalf("get sub: %v", err)
+				}
+				inv, err := lf.engine.BillFinalOnCancel(ctx, sub)
+				if err != nil || inv.ID == "" {
+					t.Fatalf("cancel final invoice: inv=%q err=%v", inv.ID, err)
+				}
+				if got := usageBilled(inv); got != previewed {
+					t.Errorf("the cancel billed %d for usage, the preview said %d", got, previewed)
+				}
+			} else {
+				bypassExec(t, lf, `UPDATE subscriptions SET current_billing_period_end = $1, next_billing_at = $1 WHERE id = $2`, periodEnd, lf.subID)
+				if generated, failures := lf.engine.RunCycleForTenant(ctx, lf.tenantID, 50); len(failures) > 0 || generated != 1 {
+					t.Fatalf("period close: generated=%d failures=%v, want 1", generated, failures)
+				}
+				var closed domain.Invoice
+				for _, inv := range lf.listInvoices(t, ctx) {
+					if inv.BillingReason == domain.BillingReasonSubscriptionCycle {
+						closed = inv
 					}
-					inv, err := lf.engine.BillFinalOnCancel(ctx, sub)
-					if err != nil || inv.ID == "" {
-						t.Fatalf("cancel final invoice: inv=%q err=%v", inv.ID, err)
-					}
-					if got := usageBilled(inv); got != previewed {
-						t.Errorf("the cancel billed %d for usage, the preview said %d", got, previewed)
-					}
-				} else {
-					bypassExec(t, lf, `UPDATE subscriptions SET current_billing_period_end = $1, next_billing_at = $1 WHERE id = $2`, periodEnd, lf.subID)
-					if generated, failures := lf.engine.RunCycleForTenant(ctx, lf.tenantID, 50); len(failures) > 0 || generated != 1 {
-						t.Fatalf("period close: generated=%d failures=%v, want 1", generated, failures)
-					}
-					var closed domain.Invoice
-					for _, inv := range lf.listInvoices(t, ctx) {
-						if inv.BillingReason == domain.BillingReasonSubscriptionCycle {
-							closed = inv
-						}
-					}
-					if got := usageBilled(closed); got != previewed {
-						t.Errorf("the close billed %d for usage, the preview said %d", got, previewed)
-					}
+				}
+				if got := usageBilled(closed); got != previewed {
+					t.Errorf("the close billed %d for usage, the preview said %d", got, previewed)
 				}
 			}
 		})

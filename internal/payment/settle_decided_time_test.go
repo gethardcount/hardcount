@@ -11,22 +11,16 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/scheduler"
 )
 
-// In live mode no record is on a test clock, so no settle reads one: a live
-// payment must never wait on a clock read, nor be refused when one fails.
-// Not a failed payment's event (a paid one is
-// TestHandleWebhook_ALiveEventDecidesNothing), not the reconciler's sweeps,
-// and not a charge settled inline.
+// A live payment settles on every path: a payment's event, paid or failed,
+// the reconciler's sweeps, and a charge settled inline.
 func TestSettle_LiveReadsNoClock(t *testing.T) {
 	live := func() context.Context { return postgres.WithLivemode(context.Background(), true) }
 
 	t.Run("the hosted-session sweep, paid", func(t *testing.T) {
-		res := &eventResolver{}
 		inv := finalizedPendingInvoice()
 		r, updater, _ := sweepHarness(inv, &mockStripeClient{piStates: map[string]PaymentIntentResult{
 			"pi_hosted": {ID: "pi_hosted", Status: "succeeded", AmountReceivedCents: inv.AmountDueCents},
 		}})
-		r.SetResolver(res)
-		r.settler.(*Stripe).SetResolver(res)
 		r.SetHostedSessions(
 			&fakeHostedLedger{rows: []CheckoutClaim{{ID: "cks_1", TenantID: "t1", InvoiceID: inv.ID, StripeSessionID: "cs_1", Status: "completed"}}},
 			fakeSessionReader{"cs_1": {Status: "complete", PaymentStatus: "paid", PaymentIntentID: "pi_hosted"}},
@@ -34,42 +28,44 @@ func TestSettle_LiveReadsNoClock(t *testing.T) {
 		if _, errs := r.sweepHostedSessions(live(), 50, new(scheduler.Panics)); len(errs) != 0 {
 			t.Fatalf("errors: %v", errs)
 		}
-		if got := updater.invoices[inv.ID]; got.Status != domain.InvoicePaid || res.reads != 0 {
-			t.Errorf("status %s, clock reads %d; want paid, none", got.Status, res.reads)
+		if got := updater.invoices[inv.ID]; got.Status != domain.InvoicePaid {
+			t.Errorf("status %s; want paid", got.Status)
 		}
 	})
 
-	t.Run("a failed payment's event", func(t *testing.T) {
-		res := &eventResolver{}
-		invoices, webhooks := processingInvoice()
-		s := NewStripe(&mockStripeClient{}, invoices, webhooks, nil, &recordingDunningStarter{})
-		s.SetResolver(res)
-		failed := domain.StripeWebhookEvent{StripeEventID: "evt_ev_failed", EventType: "payment_intent.payment_failed", PaymentIntentID: "pi_ev"}
-		if err := s.HandleWebhook(live(), "t1", failed); err != nil {
-			t.Fatalf("HandleWebhook: %v", err)
-		}
-		if got := invoices.invoices["inv_1"]; got.PaymentStatus != domain.PaymentFailed || res.reads != 0 {
-			t.Errorf("payment status %s, clock reads %d; want failed, none", got.PaymentStatus, res.reads)
-		}
-	})
+	for _, c := range []struct {
+		event domain.StripeWebhookEvent
+		want  domain.InvoicePaymentStatus
+	}{
+		{succeeded, domain.PaymentSucceeded},
+		{domain.StripeWebhookEvent{StripeEventID: "evt_ev_failed", EventType: "payment_intent.payment_failed", PaymentIntentID: "pi_ev"}, domain.PaymentFailed},
+	} {
+		t.Run("a payment's event, "+c.event.EventType, func(t *testing.T) {
+			invoices, webhooks := processingInvoice()
+			s := NewStripe(&mockStripeClient{}, invoices, webhooks, nil, &recordingDunningStarter{})
+			if err := s.HandleWebhook(live(), "t1", c.event); err != nil {
+				t.Fatalf("HandleWebhook: %v", err)
+			}
+			if got := invoices.invoices["inv_1"]; got.PaymentStatus != c.want {
+				t.Errorf("payment status %s; want %s", got.PaymentStatus, c.want)
+			}
+		})
+	}
 
 	for _, c := range []struct {
 		status string
 		want   domain.InvoicePaymentStatus
 	}{{"succeeded", domain.PaymentSucceeded}, {"canceled", domain.PaymentFailed}} {
 		t.Run("the reconciler's sweep, "+c.status, func(t *testing.T) {
-			res := &eventResolver{}
 			inv := unknownClockInvoice()
 			r, updater, _ := sweepHarness(inv, &mockStripeClient{piStates: map[string]PaymentIntentResult{
 				"pi_sweep": {ID: "pi_sweep", Status: c.status, AmountReceivedCents: inv.AmountDueCents, Charged: true},
 			}})
-			r.SetResolver(res)
-			r.settler.(*Stripe).SetResolver(res)
 			if _, errs := r.Run(live(), 10); len(errs) != 0 {
 				t.Fatalf("errors: %v", errs)
 			}
-			if got := updater.invoices[inv.ID]; got.PaymentStatus != c.want || res.reads != 0 {
-				t.Errorf("payment status %s, clock reads %d; want %s, none", got.PaymentStatus, res.reads, c.want)
+			if got := updater.invoices[inv.ID]; got.PaymentStatus != c.want {
+				t.Errorf("payment status %s; want %s", got.PaymentStatus, c.want)
 			}
 		})
 	}
@@ -83,14 +79,12 @@ func TestSettle_LiveReadsNoClock(t *testing.T) {
 		{"a charge declined inline", &mockStripeClient{shouldFail: true}, domain.PaymentFailed},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			res := &eventResolver{}
 			invoices := newMockInvoiceUpdater()
 			invoices.invoices["inv_1"] = finalizedPendingInvoice()
 			s := NewStripe(c.client, invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
-			s.SetResolver(res)
 			_, _ = s.ChargeInvoice(live(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test")
-			if got := invoices.invoices["inv_1"]; got.PaymentStatus != c.want || res.reads != 0 {
-				t.Errorf("payment status %s, clock reads %d; want %s, none", got.PaymentStatus, res.reads, c.want)
+			if got := invoices.invoices["inv_1"]; got.PaymentStatus != c.want {
+				t.Errorf("payment status %s; want %s", got.PaymentStatus, c.want)
 			}
 		})
 	}

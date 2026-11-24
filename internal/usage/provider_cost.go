@@ -695,9 +695,7 @@ func (h *ProviderCostHandler) marginWindow(ctx context.Context, r *http.Request)
 }
 
 // parseWindow reads from/to (RFC3339); a missing bound defaults to the
-// last 30 days ending at now, the report's instant: frozen_time for a
-// customer on a test clock, so a bare request for that customer covers the
-// simulated last 30 days, the same timeline customer usage follows.
+// last 30 days ending at now, the report's instant.
 func parseWindow(r *http.Request, now time.Time) (time.Time, time.Time, error) {
 	q := r.URL.Query()
 	var from, to time.Time

@@ -278,17 +278,11 @@ func TestActivityDates_HostedPageAttempts(t *testing.T) {
 	srv := NewServer(hr.db, clock.Real(), nil)
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
-	hr.charger.SetResolver(srv.BillingEngine)
 	key := createAPIKeyWithMode(t, hr.db, hr.tenantID, false)
 	call := func(method, path string, req flowReq) flowResp {
 		t.Helper()
 		req.bearer = key
 		return flowDo(t, ts, method, path, req)
-	}
-	// A webhook's time, decided from the invoice it names, as its handler
-	// decides it.
-	webhook := func(t *testing.T, invoiceID string) context.Context {
-		return testutil.DecidedFor(t, srv.BillingEngine, clock.Pin{TenantID: hr.tenantID, InvoiceID: invoiceID})
 	}
 
 	newInvoice := func(key string) string {
@@ -318,7 +312,7 @@ func TestActivityDates_HostedPageAttempts(t *testing.T) {
 	}
 	hostedFailure := func(invoiceID, pi, purpose string) {
 		t.Helper()
-		if err := hr.charger.SettleFailed(webhook(t, invoiceID), hr.tenantID, hr.invoice(invoiceID), payment.PaymentFailure{
+		if err := hr.charger.SettleFailed(testutil.AtRealTime(), hr.tenantID, hr.invoice(invoiceID), payment.PaymentFailure{
 			PaymentIntentID: pi, Purpose: purpose, Message: "Your card was declined.", DeclineCode: "generic_decline",
 		}, payment.SourceWebhook); err != nil {
 			t.Fatalf("settle failed %s: %v", pi, err)
@@ -327,7 +321,7 @@ func TestActivityDates_HostedPageAttempts(t *testing.T) {
 
 	t.Run("a hosted-page payment succeeds", func(t *testing.T) {
 		id := newInvoice("pay")
-		if err := hr.charger.SettleSucceeded(webhook(t, id), hr.tenantID, hr.invoice(id), "pi_hosted_ok", 4900, payment.SourceWebhook); err != nil {
+		if err := hr.charger.SettleSucceeded(testutil.AtRealTime(), hr.tenantID, hr.invoice(id), "pi_hosted_ok", 4900, payment.SourceWebhook); err != nil {
 			t.Fatalf("settle succeeded: %v", err)
 		}
 		inv := hr.invoice(id)

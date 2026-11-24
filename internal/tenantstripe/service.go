@@ -192,8 +192,8 @@ func (s *Service) Connect(ctx context.Context, tenantID string, in ConnectInput)
 // its cancel: the tenant, the mode (checkMode proved it is the
 // connection's), the actor, so the invoices it finalizes are recorded under
 // the operator who connected, and the request id. It is capped at
-// PostConnectRetryTimeout. It decides each invoice's time on its own after
-// the request has answered, as a job does.
+// PostConnectRetryTimeout. Each invoice binds its own instant after the
+// request has answered, as a job's row does.
 //
 // Nothing waits for it at shutdown. A stop mid-row leaves that row pending
 // or finalized, never between: a tax retry writes the tax and the finalize

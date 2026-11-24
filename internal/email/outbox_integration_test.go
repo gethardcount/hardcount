@@ -639,9 +639,8 @@ func resetEmailDue(db *postgres.DB, id string) error {
 	return tx.Commit()
 }
 
-// An enqueue records the instant its action decided (effective_at), in both
-// modes, and the action's test clock when there is one (ADR-104): where the
-// email sits on a timeline.
+// An enqueue records the instant its action bound (effective_at), in both
+// modes (ADR-104): where the email sits on a timeline.
 func TestEmailOutbox_Enqueue_StampsTheActionsInstant(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	baseCtx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 15*time.Second)
@@ -649,31 +648,17 @@ func TestEmailOutbox_Enqueue_StampsTheActionsInstant(t *testing.T) {
 
 	tenantID := testutil.CreateTestTenant(t, db, "Email Outbox Anchor")
 	store := email.NewOutboxStore(db)
-	frozen := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
 	real := time.Date(2026, 9, 3, 8, 0, 0, 0, time.UTC)
-
-	for _, c := range []struct {
-		name, invoice string
-		ctx           context.Context
-		wantAt        time.Time
-		wantClock     string
-	}{
-		{"on a test clock", "HC-000042", clock.WithSim(baseCtx, clock.Sim{At: frozen, TestClockID: "hc_tclk_anchor"}), frozen, "hc_tclk_anchor"},
-		{"on no clock", "HC-000043", clock.WithEffectiveNow(baseCtx, real), real, ""},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			if _, err := store.EnqueueStandalone(c.ctx, tenantID, email.TypePaymentReceipt, map[string]any{
-				"to": "c@example.com", "invoice_number": c.invoice,
-			}); err != nil {
-				t.Fatalf("enqueue: %v", err)
-			}
-			rows, err := store.ListByInvoice(baseCtx, tenantID, c.invoice)
-			if err != nil || len(rows) != 1 {
-				t.Fatalf("list: %d rows, %v; want 1", len(rows), err)
-			}
-			if !rows[0].EffectiveAt.Equal(c.wantAt) || rows[0].TestClockID != c.wantClock {
-				t.Errorf("effective_at %v, clock %q; want %v, %q", rows[0].EffectiveAt, rows[0].TestClockID, c.wantAt, c.wantClock)
-			}
-		})
+	if _, err := store.EnqueueStandalone(clock.WithEffectiveNow(baseCtx, real), tenantID, email.TypePaymentReceipt, map[string]any{
+		"to": "c@example.com", "invoice_number": "HC-000043",
+	}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	rows, err := store.ListByInvoice(baseCtx, tenantID, "HC-000043")
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("list: %d rows, %v; want 1", len(rows), err)
+	}
+	if !rows[0].EffectiveAt.Equal(real) || rows[0].TestClockID != "" {
+		t.Errorf("effective_at %v, clock %q; want %v, none", rows[0].EffectiveAt, rows[0].TestClockID, real)
 	}
 }

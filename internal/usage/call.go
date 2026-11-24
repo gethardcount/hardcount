@@ -9,7 +9,6 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // A LiteLLM call is written whole (#1044 held semantics per key, one
@@ -134,22 +133,8 @@ func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput)
 	if err != nil {
 		return CallResult{}, err
 	}
-	// One decision for the call: build reads the bound instant.
-	ctx, err = s.decide(ctx, tenantID, in.CustomerID)
-	if err != nil {
-		return CallResult{}, err
-	}
-	// A gateway dates a call by its own clock, which has no place on a test
-	// clock's timeline: on a clock the call takes the clock's time (while it
-	// advances, its target), where the next advance bills it.
-	if _, onClock := clock.SimOf(ctx); onClock {
-		for i := range eventInputs {
-			eventInputs[i].Timestamp = nil
-		}
-		for i := range legacyInputs {
-			legacyInputs[i].Timestamp = nil
-		}
-	}
+	// One instant for the call: build reads it.
+	ctx = s.bindNow(ctx)
 	// Both mappings are built, the store writes one, and only that one is
 	// recorded as late: a replay would otherwise count rows never written.
 	prep := func(inputs []IngestInput) ([]domain.UsageEvent, []domain.UsageEvent, error) {

@@ -106,7 +106,7 @@ func TestCreditNoteLineItems_ATieOnCreatedAtSortsByID(t *testing.T) {
 }
 
 // Two credit notes that hold one Stripe refund and share a created_at: each of
-// the three lookups by refund id answers the note with the lower id (or its
+// the two lookups by refund id answers the note with the lower id (or its
 // invoice), with the rows stored in both orders.
 func TestRefundLookups_ATieOnCreatedAtSortsByID(t *testing.T) {
 	r := newTieRig(t, "Refund Lookup Ties")
@@ -145,9 +145,6 @@ func TestRefundLookups_ATieOnCreatedAtSortsByID(t *testing.T) {
 		touchNote(t, r, o.first)
 		touchNote(t, r, o.second)
 
-		if inv, err := r.store.InvoiceOfRefundNote(r.ctx, r.tenantID, refundID); err != nil || inv != noteOn[lo] {
-			t.Errorf("%s: InvoiceOfRefundNote = %s, %v; want %s, the lower id's invoice", o.name, inv, err, noteOn[lo])
-		}
 		inTx(t, r, func(tx *sql.Tx) {
 			if inv, err := r.store.InvoiceForStripeRefundTx(r.ctx, tx, refundID); err != nil || inv != noteOn[lo] {
 				t.Errorf("%s: InvoiceForStripeRefundTx = %s, %v; want %s, the lower id's invoice", o.name, inv, err, noteOn[lo])

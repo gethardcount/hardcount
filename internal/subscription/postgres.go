@@ -188,26 +188,7 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 	id := postgres.NewID("hc_sub")
 	now := clock.Now(ctx)
 
-	// A clock customer's subscription takes its clock FOR KEY SHARE before
-	// the insert (ADR-130 §8). The insert's foreign keys lock the customer
-	// first and the clock second. A test-clock teardown holds its clock FOR
-	// UPDATE and later deletes the customer, so waiting at the clock while
-	// holding the customer deadlocks it. Read first, the create waits at the
-	// clock holding nothing the teardown deletes.
-	if sub.TestClockID != "" {
-		var locked string
-		err := tx.QueryRowContext(ctx, `SELECT id FROM test_clocks WHERE id = $1 FOR KEY SHARE`, sub.TestClockID).Scan(&locked)
-		if errors.Is(err, sql.ErrNoRows) {
-			// A teardown of the clock committed while this waited for it,
-			// and deleted the customer with it.
-			return domain.Subscription{}, errs.NotFound("customer")
-		}
-		if err != nil {
-			return domain.Subscription{}, fmt.Errorf("lock test clock %s: %w", sub.TestClockID, err)
-		}
-	}
-
-	// The customer-rules lock comes next, before the insert, so the
+	// The customer-rules lock comes before the insert, so the
 	// customer's status and every check after it (the meter check below,
 	// the currency check in billFn) read what earlier creates, item changes
 	// and customer updates committed.
@@ -1004,9 +985,6 @@ func (s *PostgresStore) clearLiftedPauseTx(ctx context.Context, tx *sql.Tx, list
 		return domain.Subscription{}, false, nil
 	}
 	r := liftedPauseResume(*pc)
-	ctx = r.bind(ctx, listed)
-	// On a test clock the bound instant is r.At itself, so the lifted check
-	// holds by the resumes_at match: a clock only moves forward.
 	now := clock.Now(ctx)
 	var cleared domain.Subscription
 	err := scanSubRow(tx.QueryRowContext(ctx, `

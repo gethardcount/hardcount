@@ -9,7 +9,6 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/payment/breaker"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -84,10 +83,6 @@ type Reconciler struct {
 	// settler routes recovered terminals through the shared settlement
 	// primitive so they fire the full side-effects (dunning/event/email).
 	settler Settler
-	// resolver decides each row's time from its invoice (decideRow), so a
-	// clock invoice is settled on its clock. Wired via SetResolver from
-	// wire.go. Nil (narrow unit tests) decides nothing.
-	resolver clock.Resolver
 	// hostedLedger + hostedReader drive the hosted-page sweep
 	// (reconciler_hosted.go). Nil-tolerant: unwired, that sweep is skipped.
 	hostedLedger HostedSessionLedger
@@ -129,11 +124,6 @@ func (r *Reconciler) SetProcessingReconcileAfter(d time.Duration) {
 func (r *Reconciler) SetBreaker(b *breaker.Breaker) {
 	r.breaker = b
 }
-
-// SetResolver wires the clock resolver each row's time is decided with
-// (decideRow), so a clock invoice's paid_at, failed stamp and dunning start
-// are on its clock.
-func (r *Reconciler) SetResolver(res clock.Resolver) { r.resolver = res }
 
 // Run reconciles unresolved payments against Stripe:
 //   - stale charge holds (ADR-127, ADR-137, reconciler_stale_hold.go): holds
@@ -217,16 +207,11 @@ func (r *Reconciler) sweep(ctx context.Context, label string, list func(context.
 		errs     []error
 	)
 	for _, inv := range invoices {
-		rowCtx, gone, err := r.decideRow(ctx, inv.TenantID, inv.ID)
-		if gone || err != nil {
-			// Stamped like a failed check, so the list moves on past it.
-			r.recordSync(ctx, inv, inv.ProviderPaymentStatus)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("invoice %s: checked again on the next run; no payment is lost: %w", inv.ID, err))
-			}
-			continue
-		}
-		var changed bool
+		rowCtx := rowTime(ctx)
+		var (
+			changed bool
+			err     error
+		)
 		if guardRow(panics, func() { changed, err = r.reconcileOne(rowCtx, inv) },
 			"step", "reconcile_"+label, "invoice_id", inv.ID, "tenant_id", inv.TenantID) {
 			r.recordSync(ctx, inv, inv.ProviderPaymentStatus)
@@ -243,28 +228,13 @@ func (r *Reconciler) sweep(ctx context.Context, label string, list func(context.
 	return resolved, errs
 }
 
-// decideRow decides a row's time from its invoice, right after the sweep
-// listed it (clock.DecideWithoutDoor). The settle's times are read when
-// Stripe's answer arrives (clock.AtArrival), and the bound instant dates the
-// row's other writes. gone is true on a not-found:
-// the invoice, or, in a race with its clock's deletion, its clock; there is
-// nothing to settle, and the caller stamps the row so the list moves on.
-// Any other failure is clock.ErrUndecided: the row is checked again on the
-// next run.
-func (r *Reconciler) decideRow(ctx context.Context, tenantID, invoiceID string) (context.Context, bool, error) {
-	decided, err := clock.DecideWithoutDoor(ctx, r.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
-	if errors.Is(err, errs.ErrNotFound) {
-		slog.InfoContext(ctx, "reconcile: the invoice or its test clock is gone; nothing to settle",
-			"invoice_id", invoiceID, "tenant_id", tenantID)
-		return ctx, true, nil
-	}
-	if err != nil {
-		return decided, false, err
-	}
-	// Bound as decideFor binds an event's time. clock.Real() is the server's
-	// clock, which a row on no clock reads (neither the settler's nor the
-	// resolver's interface exposes one); a row on a test clock keeps its own.
-	return clock.EnsureEffectiveNow(decided, clock.Real()), false, nil
+// rowTime binds one row's instant, one read of the server's clock
+// (clock.Real(); the settler's interface exposes none), so each row a sweep
+// works runs on its own time. The settle's times are read when Stripe's
+// answer arrives (clock.AtArrival), and the bound instant dates the row's
+// other writes.
+func rowTime(ctx context.Context) context.Context {
+	return clock.EnsureEffectiveNow(ctx, clock.Real())
 }
 
 type terminalKind int

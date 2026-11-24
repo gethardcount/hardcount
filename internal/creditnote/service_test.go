@@ -12,7 +12,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
-	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 type memStore struct {
@@ -348,15 +347,6 @@ func (m *memStore) UpdateRefundStatusAudited(ctx context.Context, tenantID, id s
 
 // Audited fake mirrors the real store: emit fires only when the status
 // actually flipped; a nil tx is fine for content-level unit tests.
-func (m *memStore) InvoiceOfRefundNote(_ context.Context, tenantID, stripeRefundID string) (string, error) {
-	for _, cn := range m.notes {
-		if cn.TenantID == tenantID && cn.StripeRefundID == stripeRefundID {
-			return cn.InvoiceID, nil
-		}
-	}
-	return "", errs.ErrNotFound
-}
-
 func (m *memStore) ApplyRefundWebhookStatusAudited(ctx context.Context, tenantID, stripeRefundID string, status domain.RefundStatus, emit func(tx *sql.Tx, cn domain.CreditNote) error) error {
 	var before domain.RefundStatus
 	var match domain.CreditNote
@@ -1346,54 +1336,8 @@ func TestCreate_LinesCommitWithHeader(t *testing.T) {
 	}
 }
 
-// simResolver pins every invoice to a fixed simulated instant, standing in for
-// the billing engine's clock.Resolver.
-type simResolver struct{ at time.Time }
-
-func (r *simResolver) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{}, errs.ErrNotFound
-}
-func (r *simResolver) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{}, errs.ErrNotFound
-}
-func (r *simResolver) SimForInvoice(_ context.Context, _, _ string) (clock.Sim, error) {
-	return clock.Sim{At: r.at, TestClockID: "hc_tclk_test"}, nil
-}
-
-// TestOperatorCreditNote_StampsTheDecidedTime: an operator credit note is
-// stamped at the time its route decided from the invoice (DecideForInvoice,
-// in the create route), so a note on a clock invoice is dated on the
-// invoice's clock, not before the invoice it credits.
-func TestOperatorCreditNote_StampsTheDecidedTime(t *testing.T) {
-	simAt := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
-	store := newMemStore()
-	invoices := &memInvoiceReader{invoices: map[string]domain.Invoice{
-		"inv_sim": {
-			ID: "inv_sim", TenantID: "t1", CustomerID: "cus_1",
-			Status: domain.InvoiceFinalized, Currency: "USD",
-			TotalAmountCents: 10000, AmountDueCents: 10000,
-		},
-	}}
-	svc := NewService(store, invoices, nil)
-	svc.SetNumberGenerator(&fakeCNNumbers{})
-	svc.SetResolver(&simResolver{at: simAt})
-
-	// The note's time, as its route's handler decides it from the invoice.
-	cn, err := svc.Create(testutil.DecidedFor(t, svc.resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_sim"}), "t1", CreateInput{
-		InvoiceID: "inv_sim",
-		Reason:    "Goodwill credit",
-		Lines:     []CreditLineInput{{Description: "adjustment", Quantity: 1, UnitAmountCents: 500}},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if !cn.CreatedAt.Equal(simAt) {
-		t.Errorf("created_at = %s, want the invoice's simulated instant %s — an operator credit note on a clock-pinned invoice must not be stamped wall-clock", cn.CreatedAt, simAt)
-	}
-}
-
-// TestOperatorCreditNote_UnpinnedStaysWallClock is the negative: with no
-// simulated pin the bind is a no-op and the row keeps wall-clock time.
+// TestOperatorCreditNote_UnpinnedStaysWallClock: with no instant bound, the
+// row keeps wall-clock time.
 func TestOperatorCreditNote_UnpinnedStaysWallClock(t *testing.T) {
 	store := newMemStore()
 	invoices := &memInvoiceReader{invoices: map[string]domain.Invoice{
@@ -1405,7 +1349,6 @@ func TestOperatorCreditNote_UnpinnedStaysWallClock(t *testing.T) {
 	}}
 	svc := NewService(store, invoices, nil)
 	svc.SetNumberGenerator(&fakeCNNumbers{})
-	// No resolver wired at all — the unpinned production shape.
 
 	before := time.Now().UTC().Add(-time.Minute)
 	cn, err := svc.Create(context.Background(), "t1", CreateInput{

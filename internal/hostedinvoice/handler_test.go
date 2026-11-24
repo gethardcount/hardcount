@@ -108,14 +108,14 @@ type fakeCheckout struct {
 	lastTenant  string
 	err         error
 	url         string
-	// decision is the time decided on the ctx the checkout was opened with,
-	// and decided whether there was one.
-	decision clock.Sim
-	decided  bool
+	// at is the instant bound on the ctx the checkout was opened with, and
+	// bound whether there was one.
+	at    time.Time
+	bound bool
 }
 
 func (f *fakeCheckout) CreateInvoicePaymentSession(ctx context.Context, tenantID string, inv domain.Invoice, successURL, cancelURL string) (string, error) {
-	f.decision, f.decided = clock.Decision(ctx)
+	f.at, f.bound = clock.EffectiveNow(ctx)
 	f.lastInvoice = inv
 	f.lastSuccess = successURL
 	f.lastCancel = cancelURL

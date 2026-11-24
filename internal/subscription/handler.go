@@ -326,13 +326,8 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The body's customer decides the subscription's time here, once, before
-	// anything runs: the create and its audit row both run on it.
-	ctx, err := h.svc.DecideForCustomer(r.Context(), tenantID, input.CustomerID)
-	if err != nil {
-		respond.FromError(w, r, err, "subscription")
-		return
-	}
+	// One instant for all of the create's writes, bound before Create runs.
+	ctx := h.svc.BindNow(r.Context())
 	sub, err := h.svc.Create(ctx, tenantID, input)
 	if err != nil {
 		// A create that lost a deadlock or a lock wait (such as on the
@@ -343,10 +338,8 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The create's audit row, on the create's decision: its created_at is
-	// real time (when the operator acted), and for a clock subscription the
-	// writer stamps the sim axis (sim_effective_at, test_clock_id) from the
-	// decision.
+	// The create's audit row: its created_at is real time (when the operator
+	// acted).
 	if h.auditLogger != nil {
 		_ = h.auditLogger.Log(ctx, tenantID, domain.AuditActionCreate, "subscription", sub.ID, sub.Code, map[string]any{
 			"customer_id": sub.CustomerID,
@@ -537,9 +530,8 @@ func (h *Handler) scheduleCancel(w http.ResponseWriter, r *http.Request) {
 // and each period's invoice is kept as a draft, so it is not finalized,
 // charged or dunned. It is the only pause: there is no POST /pause and no
 // paused subscription status. Body must include behavior; v1 only accepts
-// "keep_as_draft". resumes_at is optional — once it passes, the resume sweep
-// (the billing scheduler, or a test clock's catch-up) lifts the pause, dated
-// at resumes_at. A period that ended before resumes_at closes first, as a
+// "keep_as_draft". resumes_at is optional — once it passes, the billing
+// scheduler's resume sweep lifts the pause, dated at resumes_at. A period that ended before resumes_at closes first, as a
 // draft.
 func (h *Handler) pauseCollection(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
@@ -601,9 +593,8 @@ func (h *Handler) endTrial(w http.ResponseWriter, r *http.Request) {
 // three outcomes: billed (no billing_failure, still_due false); failed again
 // and saved (billing_failure set); or the attempt did not complete and nothing
 // was saved (no billing_failure, still_due true: unbilled, the next billing
-// run attempts it). 409 billing_not_failing when there is nothing to retry,
-// 409 invalid_state for a subscription on a test clock. The audit row is the
-// service's; the handler emits none.
+// run attempts it). 409 billing_not_failing when there is nothing to retry.
+// The audit row is the service's; the handler emits none.
 func (h *Handler) retryBilling(w http.ResponseWriter, r *http.Request) {
 	if !respond.NoBody(w, r) {
 		return

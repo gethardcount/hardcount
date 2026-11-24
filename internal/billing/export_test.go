@@ -51,7 +51,7 @@ func (e *Engine) BillFinalOnCancel(ctx context.Context, sub domain.Subscription)
 	}); err != nil {
 		return domain.Invoice{}, err
 	}
-	unpriced.record(live, sub)
+	unpriced.record(live)
 	if inv.ID != "" {
 		e.FinalizeOnCreateInvoice(ctx, sub, inv)
 	}

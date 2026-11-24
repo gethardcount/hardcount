@@ -2,13 +2,11 @@ package payment
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/auth"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/scheduler"
 )
 
@@ -90,15 +88,14 @@ func (r *Reconciler) sweepHostedSessions(ctx context.Context, limit int, panics 
 	for _, c := range rows {
 		// A panic leaves done false and err nil, so the session is touched
 		// below.
-		var done bool
-		rowCtx, gone, err := r.decideRow(ctx, c.TenantID, c.InvoiceID)
-		if err == nil && !gone {
-			guardRow(panics, func() { done, err = r.reconcileHostedSession(rowCtx, c) },
-				"step", "hosted_session", "claim_id", c.ID, "invoice_id", c.InvoiceID, "tenant_id", c.TenantID)
-		}
-		if errors.Is(err, clock.ErrUndecided) {
-			errs = append(errs, fmt.Errorf("checkout session %s: checked again on the next run; no payment is lost: %w", c.ID, err))
-		} else if err != nil {
+		var (
+			done bool
+			err  error
+		)
+		rowCtx := rowTime(ctx)
+		guardRow(panics, func() { done, err = r.reconcileHostedSession(rowCtx, c) },
+			"step", "hosted_session", "claim_id", c.ID, "invoice_id", c.InvoiceID, "tenant_id", c.TenantID)
+		if err != nil {
 			errs = append(errs, fmt.Errorf("checkout session %s: %w", c.ID, err))
 		}
 		if done {

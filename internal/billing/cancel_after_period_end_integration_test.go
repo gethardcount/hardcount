@@ -20,7 +20,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/subscription"
-	"github.com/gethardcount/hardcount/internal/testclock"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/usage"
 )
@@ -688,65 +687,6 @@ func TestImmediateCancel_AtPeriodEndFlag_AfterBoundary_ReturnsCanceledRow(t *tes
 	inv := invoiceFor(t, invs, p0, p1)
 	if usage, base := sumLines(lines[inv.ID]); usage != 1000 || base != cancelFixtureBaseCents || inv.SubtotalCents != 1000+cancelFixtureBaseCents {
 		t.Errorf("usage=%dc base=%dc subtotal=%dc, want 1000 + %d", usage, base, inv.SubtotalCents, cancelFixtureBaseCents)
-	}
-	assertUsageBilledOnce(t, r.base)
-}
-
-// TestImmediateCancel_TestClock_AfterPeriodEnd: the same two parts on a
-// subscription pinned to a test clock whose frozen time is an hour past the
-// period end (an advance that has not closed the period). No time is bound by
-// the caller: the cancel reads the clock. A failing bill is refused with the
-// clock's next step, not "retry billing" (retry-billing refuses a clock
-// subscription), and saves no billing failure. Once it can bill, the cancel
-// writes the ended period's invoice at the boundary and cancels at the
-// frozen time.
-func TestImmediateCancel_TestClock_AfterPeriodEnd(t *testing.T) {
-	r := newCancelRig(t, "991 cancel on a test clock")
-	p0, p1 := r.f.cycleStart, r.f.cycleEnd
-	frozen := p1.Add(time.Hour)
-	clockID := postgres.NewID("hc_tclk")
-	execTx(t, r.f.db, r.base, r.f.tenantID,
-		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status) VALUES ($1, $2, false, '991 clock', $3, 'ready')`,
-		clockID, r.f.tenantID, frozen)
-	r.exec(t, `UPDATE customers SET test_clock_id = $1 WHERE id = $2`, clockID, r.f.customerID)
-	r.exec(t, `UPDATE subscriptions SET test_clock_id = $1 WHERE id = $2`, clockID, r.f.subID)
-	r.f.engine.SetTestClockReader(testclock.NewReader(r.f.db))
-	r.f.subSvc.SetResolver(r.f.engine)
-	// The request's time, as the API's door decides it for the subscription.
-	onClock := testutil.DecidedFor(t, r.f.engine, clock.Pin{TenantID: r.f.tenantID, SubscriptionID: r.f.subID})
-
-	r.f.invAdapter.createTxErr = errors.New("invoice insert refused (test)")
-	_, _, err := r.f.subSvc.Cancel(onClock, r.f.tenantID, r.f.subID)
-	wantUnbilledPeriod(t, err)
-	if !strings.Contains(err.Error(), "finish or retry the clock advance, then cancel again") {
-		t.Fatalf("refusal on a clock subscription = %v, want the clock's next step", err)
-	}
-	if sub := r.sub(t); sub.Status != domain.SubscriptionActive || sub.BillingFailure != nil {
-		t.Fatalf("after the refusal: status=%s billing_failure=%+v, want active and none (a clock subscription saves no failure)", sub.Status, sub.BillingFailure)
-	}
-	if n := len(r.f.listInvoices(t, r.base)); n != 0 {
-		t.Fatalf("%d invoices after a refused cancel, want 0", n)
-	}
-
-	r.f.invAdapter.createTxErr = nil
-	canceled, _, err := r.f.subSvc.Cancel(onClock, r.f.tenantID, r.f.subID)
-	if err != nil {
-		t.Fatalf("cancel: %v", err)
-	}
-	if canceled.Status != domain.SubscriptionCanceled || canceled.CanceledAt == nil || !canceled.CanceledAt.Equal(frozen) {
-		t.Fatalf("cancel: status=%s canceled_at=%v, want canceled at the clock's frozen time %v", canceled.Status, canceled.CanceledAt, frozen)
-	}
-	invs, lines := r.liveInvoices(t)
-	if len(invs) != 1 {
-		t.Fatalf("live invoices = %d, want exactly 1", len(invs))
-	}
-	inv := invoiceFor(t, invs, p0, p1)
-	usage, base := sumLines(lines[inv.ID])
-	if usage != 1000 || base != cancelFixtureBaseCents || inv.SubtotalCents != 1000+cancelFixtureBaseCents {
-		t.Errorf("usage=%dc base=%dc subtotal=%dc, want 1000 + %d", usage, base, inv.SubtotalCents, cancelFixtureBaseCents)
-	}
-	if !inv.IssuedAtOrZero().Equal(p1) {
-		t.Errorf("issued_at=%v, want the boundary %v", inv.IssuedAtOrZero(), p1)
 	}
 	assertUsageBilledOnce(t, r.base)
 }

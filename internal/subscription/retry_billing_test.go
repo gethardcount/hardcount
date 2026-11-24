@@ -175,24 +175,6 @@ func TestRetryBilling_AuditFailureKeepsTheRecordAndDoesNotBill(t *testing.T) {
 	}
 }
 
-func TestRetryBilling_ClockPinnedIsRefused(t *testing.T) {
-	const tenantID = "t1"
-	store := newMemStore()
-	subID := seedFailingSub(t, store, tenantID)
-	sub := store.subs[subID]
-	sub.TestClockID = "hc_tclk_1"
-	store.subs[subID] = sub
-	svc := NewService(store, nil)
-
-	_, err := svc.RetryBilling(context.Background(), tenantID, subID)
-	if !errors.Is(err, errs.ErrInvalidState) || errs.Code(err) != "" {
-		t.Fatalf("err = %v (code %q), want InvalidState with the default code: billing_not_failing means something else", err, errs.Code(err))
-	}
-	if store.subs[subID].BillingFailure == nil {
-		t.Fatal("a refused retry cleared the record")
-	}
-}
-
 // TestListHandler_BillingParam: ?billing= is a closed set. An unknown value is
 // a 422, never an unfiltered list.
 func TestListHandler_BillingParam(t *testing.T) {

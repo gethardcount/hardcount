@@ -672,28 +672,20 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunListFilter) ([]d
 		return nil, 0, err
 	}
 
-	// LEFT JOIN denormalizes invoice fields + the owning CUSTOMER's
-	// test-clock frozen_time onto each row (through customers, not
-	// subscriptions — a one-off invoice has no subscription row, and
-	// the sub join left its runs rendering wall-anchored relative
-	// times with no clock badge; a sub's clock always equals its
-	// customer's clock, ADR-027). Eliminates N round-trips for
-	// the /dunning page (was: 1 list + N invoice fetches + N sub
-	// fetches + N clock fetches; now: 1 query). LEFT JOINs because
-	// invoice / sub / clock references can be NULL or unresolvable
-	// (RLS gap, deleted) without dropping the dunning row itself. The bound
-	// policy's retry count rides along too, so the page can tell a
-	// run with a retry still to come from one whose next step is only its
-	// final action (InvoiceDunningRun.RetryScheduled).
+	// LEFT JOIN denormalizes invoice fields onto each row, so the /dunning
+	// page is one query, not 1 list + N invoice fetches. LEFT JOINs because
+	// an invoice reference can be unresolvable (RLS gap) without dropping
+	// the dunning row itself. The bound policy's retry count rides along
+	// too, so the page can tell a run with a retry still to come from one
+	// whose next step is only its final action
+	// (InvoiceDunningRun.RetryScheduled).
 	query := `SELECT r.id, r.tenant_id, r.invoice_id, COALESCE(r.customer_id,''), r.policy_id, r.state,
 		COALESCE(r.reason,''), r.attempt_count, r.last_attempt_at, r.next_action_at,
 		r.paused, r.resolved_at, COALESCE(r.resolution,''), r.created_at, r.updated_at,
 		COALESCE(i.invoice_number, ''), COALESCE(i.amount_due_cents, 0), COALESCE(i.currency, ''),
-		tc.frozen_time, COALESCE(tc.id, ''), COALESCE(jsonb_array_length(p.retry_days), 0)
+		COALESCE(jsonb_array_length(p.retry_days), 0)
 		FROM invoice_dunning_runs r
 		LEFT JOIN invoices i ON i.id = r.invoice_id
-		LEFT JOIN customers cu ON cu.id = i.customer_id
-		LEFT JOIN test_clocks tc ON tc.id = cu.test_clock_id
 		LEFT JOIN dunning_policies p ON p.id = r.policy_id` + whereClause + ` ORDER BY r.created_at DESC, r.id DESC`
 	// Default 50, clamp to 100 — no-silent-fallbacks principle.
 	limit := filter.Limit
@@ -717,7 +709,7 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunListFilter) ([]d
 		if err := rows.Scan(&r.ID, &r.TenantID, &r.InvoiceID, &r.CustomerID, &r.PolicyID,
 			&r.State, &r.Reason, &r.AttemptCount, &r.LastAttemptAt, &r.NextActionAt,
 			&r.Paused, &r.ResolvedAt, &r.Resolution, &r.CreatedAt, &r.UpdatedAt,
-			&r.InvoiceNumber, &r.InvoiceAmountDue, &r.InvoiceCurrency, &r.EffectiveNow, &r.TestClockID,
+			&r.InvoiceNumber, &r.InvoiceAmountDue, &r.InvoiceCurrency,
 			&r.MaxRetryAttempts); err != nil {
 			return nil, 0, err
 		}

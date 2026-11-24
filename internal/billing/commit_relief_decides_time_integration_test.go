@@ -3,7 +3,6 @@ package billing_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -20,42 +19,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
-
-// onceThenUnreadable answers the first invoice lookup with clock clk_1 at
-// frozen and fails every later one.
-type onceThenUnreadable struct {
-	frozen time.Time
-	reads  int
-}
-
-func (o *onceThenUnreadable) SimForInvoice(context.Context, string, string) (clock.Sim, error) {
-	o.reads++
-	if o.reads == 1 {
-		return clock.Sim{At: o.frozen, TestClockID: "clk_1"}, nil
-	}
-	return clock.Sim{}, errors.New("connection reset by peer")
-}
-func (o *onceThenUnreadable) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{}, errors.New("not used")
-}
-func (o *onceThenUnreadable) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{}, errors.New("not used")
-}
-
-// noClockAnswer puts every record on no test clock (the engine's answer for
-// one), and counts the reads.
-type noClockAnswer struct{ reads int }
-
-func (n *noClockAnswer) SimForInvoice(context.Context, string, string) (clock.Sim, error) {
-	n.reads++
-	return clock.Sim{}, nil
-}
-func (n *noClockAnswer) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{}, errors.New("not used")
-}
-func (n *noClockAnswer) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{}, errors.New("not used")
-}
 
 // reliefThroughTheRoute pays a commit invoice and sends its commit relief
 // through the credit note route on svc's real stores, and returns the note.
@@ -97,28 +60,12 @@ func reliefThroughTheRoute(t *testing.T, name string, prepare func(svc *creditno
 	return cn
 }
 
-// On the real stores, through the credit note route: a commit relief runs on
-// the route's decision, the invoice's clock at its frozen time. Nothing in the
-// relief looks the clock up again (the resolver would fail any second read).
-func TestCommitRelief_TheRoutesDecisionStands(t *testing.T) {
-	frozen := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
-	res := &onceThenUnreadable{frozen: frozen}
-	cn := reliefThroughTheRoute(t, "Commit Relief Decided", func(svc *creditnote.Service) { svc.SetResolver(res) })
-	if !cn.CreatedAt.Equal(frozen) || cn.IssuedAt == nil || !cn.IssuedAt.Equal(frozen) {
-		t.Errorf("created_at %v, issued_at %v; want both at the decided clock's %v", cn.CreatedAt, cn.IssuedAt, frozen)
-	}
-	if res.reads != 1 {
-		t.Errorf("%d lookups; want only the route's", res.reads)
-	}
-}
-
-// For an invoice on no test clock the route decides real time and binds no
-// instant: the relief reads the server's clock once (here a fixed past
-// instant, not the machine's), and its note is created and issued at it.
+// On the real stores, through the credit note route: the relief reads the
+// server's clock once (here a fixed past instant, not the machine's), and its
+// note is created and issued at it.
 func TestCommitRelief_AtRealTimeIsOnTheServersClock(t *testing.T) {
 	serverAt := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
 	cn := reliefThroughTheRoute(t, "Commit Relief Real Time", func(svc *creditnote.Service) {
-		svc.SetResolver(&noClockAnswer{})
 		svc.SetClock(clock.NewFake(serverAt))
 	})
 	if !cn.CreatedAt.Equal(serverAt) || cn.IssuedAt == nil || !cn.IssuedAt.Equal(serverAt) {

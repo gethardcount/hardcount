@@ -278,10 +278,6 @@ func (s *OutboxStore) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, emailTy
 	// because it is not known later. created_at stays SQL now(): the queue's
 	// own order and the "Recorded" time (ADR-104).
 	effectiveAt := clock.Now(ctx).UTC()
-	var clockID any
-	if sim, ok := clock.SimOf(ctx); ok {
-		clockID = sim.TestClockID
-	}
 	// Who caused this email (ADR-128 §4), resolved exactly as the audit log
 	// resolves it: whoever's request led to the write. That is the operator
 	// or API key behind a resend, the customer on a public page, and also
@@ -293,9 +289,9 @@ func (s *OutboxStore) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, emailTy
 	actorType, actorID := audit.ResolveActor(ctx)
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO email_outbox (id, tenant_id, email_type, payload, status, attempts, next_attempt_at,
-			effective_at, test_clock_id, actor_type, actor_id)
-		VALUES ($1, $2, $3, $4, 'pending', 0, now(), $5, $6, $7, $8)
-	`, id, tenantID, emailType, payloadJSON, effectiveAt, clockID, actorType, actorID)
+			effective_at, actor_type, actor_id)
+		VALUES ($1, $2, $3, $4, 'pending', 0, now(), $5, $6, $7)
+	`, id, tenantID, emailType, payloadJSON, effectiveAt, actorType, actorID)
 	if err != nil {
 		return "", fmt.Errorf("email outbox: insert: %w", err)
 	}

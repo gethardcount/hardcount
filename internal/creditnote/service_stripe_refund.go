@@ -124,16 +124,8 @@ func (s *Service) RecordStripeRefund(ctx context.Context, tenantID string, snap 
 	if err != nil {
 		return domain.StripeRefundRecordResult{}, err
 	}
-	// A recorded note is dated on its invoice's time, as every credit note
-	// is (on a test clock, its frozen time). The time is decided here, right
-	// after the invoice is found; one that cannot be decided fails the event,
-	// which Stripe delivers again. The decision reads the invoice and its clock on other
-	// connections while this transaction is open.
-	if ctx, err = clock.DecideWithoutDoor(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID}); err != nil {
-		return domain.StripeRefundRecordResult{}, fmt.Errorf("refund %s refused, Stripe delivers it again: %w", snap.StripeRefundID, err)
-	}
-	// Bind the decision (see the clock package's doc): the note, its line, its
-	// issue and the tax stamp after the commit read one instant.
+	// The note, its line, its issue and the tax stamp after the commit read
+	// one instant.
 	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 
 	inv, err := s.invoices.LockForCreditNoteTx(ctx, tx, tenantID, invoiceID)

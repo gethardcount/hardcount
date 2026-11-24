@@ -211,19 +211,16 @@ type Service struct {
 	customerEmail    CustomerEmailFetcher
 	custPolicy       CustomerPolicyReader
 	// clock is the server's clock: the router's clk, the one the engine
-	// bills by. Every dunning action runs on a time that was decided before
-	// it reaches the service: on a test clock, or at real time (see the
-	// clock package's doc). Who decides it:
+	// bills by. Every dunning action runs on a time that was bound before it
+	// reaches the service. Who binds it:
 	//   - a failed payment starts a run on the time of the payment's settle;
 	//   - an invoice finalized with no card starts one on the finalize's time;
 	//   - the backfill job starts one for a failed invoice that has none, on
 	//     its own read of the server's clock for that invoice;
-	//   - the scheduled job retries due runs at real time (its list excludes
-	//     invoices on a test clock), and a test clock's catch-up retries its
-	//     own on that clock;
+	//   - the scheduled job retries each due run on its own instant;
 	//   - an invoice action that closes the run (a void, a write-off, a
 	//     payment, a credit note) runs on that action's time, which the API's
-	//     door (api.clockDoor) decides for a request.
+	//     door (api.clockDoor) binds for a request.
 	// Each entry point keeps that time, and a run's start always arrives with
 	// it bound. A due run's retry, or a resolve, that arrives with no instant
 	// bound reads this clock once (clock.EnsureEffectiveNow); a request on
@@ -679,16 +676,6 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	now := anchorInstant(s.clock.Now(ctx), run.NextActionAt)
 	run.LastAttemptAt = &now
 
-	// Rebind ctx's instant to the anchored retry time while keeping the
-	// clock (WithSim, never WithEffectiveNow — that clears the clock id).
-	// Everything downstream of this retry (the charge, credit applies)
-	// inherits the CONTRACTED instant instead of the catchup's advance-end
-	// frozen_time. A run at real time is on no test clock and keeps the
-	// instant processRun bound.
-	if sim, ok := clock.SimOf(ctx); ok {
-		ctx = clock.WithSim(ctx, clock.Sim{At: now, TestClockID: sim.TestClockID})
-	}
-
 	// Record the attempt BEFORE the charge (record-before-effect): a settle that
 	// fires synchronously inside RetryPayment — a card success that settles this
 	// invoice — re-reads the run from the store, so it must see the FULL
@@ -1143,7 +1130,7 @@ func (s *Service) retrySettledFirst(ctx context.Context, tenantID string, run do
 // that retry's instant. A caller must pass a ctx with the action's time
 // bound (processRun does); the final actions are dated at it.
 func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, stampAt, attemptAt time.Time) error {
-	// Its caller, processRun, decided the time and bound an instant.
+	// Its caller, processRun, bound the action's instant.
 	now := stampAt
 	if now.IsZero() {
 		now = s.clock.Now(ctx)

@@ -192,3 +192,20 @@ func TestRetrySweep_NoCreditsWired_ChargesAsBefore(t *testing.T) {
 		t.Fatalf("expected one full-amount charge, got %+v", charger.got)
 	}
 }
+
+// An invoice that owes nothing, settled by the real-time run, is paid at the
+// engine's clock (fixed here), never at a zero instant.
+func TestCollect_LiveZeroDueInvoiceIsPaidNow(t *testing.T) {
+	inv, _, engine := retryHarness(t, nil)
+	engine.SetDunningResolver(&recordingDunningResolver{})
+	inv.invoices[0].AmountDueCents = 0
+	charged, errs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil)
+	if len(errs) != 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	got := inv.invoices[0]
+	want := billingTestClock().Now(context.Background())
+	if got.Status != domain.InvoicePaid || got.PaidAt == nil || !got.PaidAt.Equal(want) {
+		t.Fatalf("charged %d; status %s, paid_at %v; want paid at %v", charged, got.Status, got.PaidAt, want)
+	}
+}

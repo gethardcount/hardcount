@@ -5,8 +5,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
-
-	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 func unpricedSeries(t *testing.T, mode string) float64 {
@@ -30,15 +28,14 @@ func unpricedSeries(t *testing.T, mode string) float64 {
 	return 0
 }
 
-// The counter tells live from test mode, and leaves test-clock simulations
-// out (one clock advance can close many periods), like the other billing
-// metrics. Without that, the runbook's alert fires on test experiments.
-func TestUnpricedRecord_ModeLabelAndTestClockSkip(t *testing.T) {
+// The counter tells live from test mode. Without that, the runbook's alert
+// fires on test experiments.
+func TestUnpricedRecord_ModeLabel(t *testing.T) {
 	live, test := unpricedSeries(t, "live"), unpricedSeries(t, "test")
 
 	u := unpricedUsage{}
 	u.add("mtr_unpriced_rec_live", decimal.NewFromInt(7))
-	u.record(true, domain.Subscription{ID: "sub_live"})
+	u.record(true)
 	if got := unpricedSeries(t, "live") - live; got != 7 {
 		t.Fatalf("live: counter grew by %v, want 7", got)
 	}
@@ -48,16 +45,9 @@ func TestUnpricedRecord_ModeLabelAndTestClockSkip(t *testing.T) {
 
 	u = unpricedUsage{}
 	u.add("mtr_unpriced_rec_test", decimal.NewFromInt(3))
-	u.record(false, domain.Subscription{ID: "sub_test"})
+	u.record(false)
 	if got := unpricedSeries(t, "test") - test; got != 3 {
 		t.Fatalf("test mode: counter grew by %v, want 3", got)
-	}
-
-	u = unpricedUsage{}
-	u.add("mtr_unpriced_rec_clock", decimal.NewFromInt(5))
-	u.record(false, domain.Subscription{ID: "sub_clock", TestClockID: "clk_1"})
-	if got := unpricedSeries(t, "test") - test; got != 3 {
-		t.Fatalf("test-clock subscription counted: grew by %v, want 3", got)
 	}
 }
 
@@ -68,7 +58,7 @@ func TestUnpricedRecord_OneSeriesPerMode(t *testing.T) {
 	u := unpricedUsage{}
 	u.add("mtr_unpriced_one_a", decimal.NewFromInt(1))
 	u.add("mtr_unpriced_one_b", decimal.NewFromInt(2))
-	u.record(true, domain.Subscription{ID: "sub_one"})
+	u.record(true)
 
 	mfs, err := prometheus.DefaultGatherer.Gather()
 	if err != nil {

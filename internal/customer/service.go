@@ -116,14 +116,10 @@ type Service struct {
 	dunningPolicy DunningPolicyReader
 
 	// clock is the server's clock: the router's clk, the one the engine
-	// bills by. Every customer change runs on a time decided on a test clock
-	// or at real time (see the clock package's doc). Who decides it:
-	//   - a request, the API's door (api.clockDoor), with one read of the
-	//     server's clock;
-	//   - a create, Create itself, from the test clock its body names.
-	// Each entry point keeps that time. Only Create binds an instant itself:
-	// for a customer on no test clock it reads this clock once
-	// (clock.EnsureEffectiveNow). Every other entry keeps its caller's
+	// bills by. A request runs on the instant the API's door bound, one read
+	// of the server's clock. Create's route gets none from the door
+	// (decidedIn), so Create reads this clock once itself
+	// (clock.EnsureEffectiveNow); every other entry keeps its caller's
 	// instant. Without that read, two reads of the time in one create could
 	// differ, and a store's stamp could fall on another time than the
 	// action's.

@@ -189,21 +189,6 @@ func TestRetryBilling_Refusals(t *testing.T) {
 			t.Fatalf("a refused retry billed the subscription (%d invoices): the route is not a second billing trigger", n)
 		}
 	})
-	t.Run("on a test clock", func(t *testing.T) {
-		a, _ := r.clockSub(t, "sub-clock", r.planOK)
-		code, _, body := r.retry(t, a.ID)
-		if code != http.StatusConflict || !strings.Contains(body, "test clock") {
-			t.Fatalf("got %d %s, want 409 pointing at the clock's retry advance", code, body)
-		}
-		// The documented code for this case is invalid_state. It must not be
-		// billing_not_failing, which a client reads as "already healthy".
-		if !strings.Contains(body, `"invalid_state"`) || strings.Contains(body, "billing_not_failing") {
-			t.Fatalf("409 body %s, want code invalid_state", body)
-		}
-		if rows := r.auditRows(t, a.ID); len(rows) != 0 {
-			t.Fatalf("a refused retry wrote %d audit rows", len(rows))
-		}
-	})
 	t.Run("unknown subscription", func(t *testing.T) {
 		if code, _, body := r.retry(t, "hc_sub_missing"); code != http.StatusNotFound {
 			t.Fatalf("got %d %s, want 404", code, body)

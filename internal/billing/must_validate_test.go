@@ -54,25 +54,10 @@ func TestMustValidate_CoversEveryCollaborator(t *testing.T) {
 		msg, _ := r.(string)
 		nilCount := strings.Count(msg, ",") + 1
 		// Count Engine's interface fields via the same mechanism a
-		// maintainer would: keep this number in lockstep with the struct.
-		// If this fails, a collaborator was added/removed — update BOTH
-		// the wiring in router.go and this count deliberately.
-		// 25th: ScheduledCancelExecutor (ADR-097 mid-period cancel fire).
-		// 26th: IntervalSnapshotter (ADR-101 segment-source seam — the
-		// producer always wires the real subscription store, even in
-		// reader mode "off", so the kill switch can never dangle unwired).
-		// Back to 25 at ADR-115: TxRunner is gone — the subscription store
-		// owns the period closer's tx (SubscriptionReader.WithTenantTx).
-		// 27 at issue #1019: CreditBalanceReader + CustomerSubscriptionLister,
-		// the two reads behind LiveCreditBalance.
-		// Back to 26 at #970 PR-A: the dead CreditGranter is gone (the
-		// cancel relief credits through CreditNoteAdjuster).
-		// 28 at the ADR-060 amendment (2026-10-30): StripeReadiness and
-		// InvoiceEmailer, the collector's no-Stripe arm.
-		// Back to 27 at P1-01 part B: the event dispatcher is gone. The
-		// subscription store queues the engine's subscription events in
-		// their transactions (SubscriptionReader).
-		const collaborators = 27
+		// maintainer would, in lockstep with the struct: a change means a
+		// collaborator was added or removed, so update the wiring in wire.go
+		// and this count deliberately.
+		const collaborators = 25
 		if nilCount != collaborators {
 			t.Errorf("zero engine names %d nil collaborators, expected %d — Engine's dep set changed; update router wiring + this count deliberately", nilCount, collaborators)
 		}

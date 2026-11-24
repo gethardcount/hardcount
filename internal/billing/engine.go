@@ -71,14 +71,12 @@ type Engine struct {
 	paymentSetups      PaymentReadiness
 	charger            InvoiceCharger
 	profiles           BillingProfileReader
-	customers          CustomerReader
 	// Issue #1019: the two reads LiveCreditBalance composes (live_balance.go).
 	creditBalances  CreditBalanceReader
 	customerSubs    CustomerSubscriptionLister
 	taxProviders    TaxProviderResolver
 	taxCalcStore    TaxCalculationWriter
 	clock           clock.Clock
-	testClocks      TestClockReader
 	noPMNotifier    NoPaymentMethodNotifier
 	stripeReady     StripeReadiness
 	invoiceEmailer  InvoiceEmailer
@@ -215,31 +213,6 @@ func (e *Engine) SetCreditHeadroomReader(r CreditHeadroomReader) {
 	e.creditHeadroom = r
 }
 
-// CustomerReader is the narrow read interface the engine uses to
-// resolve a customer's test_clock_id pin (ADR-027). Implemented by
-// *customer.PostgresStore. Optional — when nil, SimForCustomer
-// answers no clock, a zero Sim; this is the safe default for narrow unit
-// tests that don't exercise customer-level clock pins.
-type CustomerReader interface {
-	Get(ctx context.Context, tenantID, id string) (domain.Customer, error)
-}
-
-// SetCustomerReader wires the customer reader used by
-// SimForCustomer (and transitively SimForInvoice on
-// one-off invoices). Production wires *customer.PostgresStore via
-// api/wire.go.
-func (e *Engine) SetCustomerReader(r CustomerReader) {
-	e.customers = r
-}
-
-// Compile-time assertion that *Engine satisfies clock.Resolver. Lets
-// every domain bind effective-now via the platform/clock package
-// without importing billing — clock owns the interface, billing owns
-// the implementation. Replaces the per-service ClockResolver
-// interfaces we threaded through dunning / subscription / invoice in
-// the post-ADR-029 patches.
-var _ clock.Resolver = (*Engine)(nil)
-
 // NoPaymentMethodNotifier dispatches a customer-facing email when an
 // invoice finalizes for a customer with no PaymentSetup ready. Without
 // this, the customer would never know to add a card and the invoice
@@ -339,15 +312,6 @@ type DunningResolver interface {
 // would keep renewing past its own cancellation (the ADR-097 money bug).
 type ScheduledCancelExecutor interface {
 	FireDueScheduledCancel(ctx context.Context, tenantID, id string, at time.Time) error
-}
-
-// TestClockReader looks up a test clock's frozen_time. Only the engine's
-// resolver (clockOf) calls it, to answer which clock a record is on and that
-// clock's frozen time. Returns errs.ErrNotFound when the clock has been
-// deleted; the resolver returns the error, and Decide's callers say what a
-// missing clock means.
-type TestClockReader interface {
-	Get(ctx context.Context, tenantID, id string) (domain.TestClock, error)
 }
 
 // CreditApplier applies customer credits to an invoice before charging.
@@ -665,7 +629,7 @@ type InvoiceWriter interface {
 // nil creditHeadroom disables the #276-#278 overcharge cap).
 //
 // Why boot-time and not construction-time: the engine and its peer services
-// are mutually referential (invoiceSvc needs the engine as clock resolver;
+// are mutually referential (invoiceSvc needs the engine as tax committer;
 // the engine needs invoiceSvc as invoice voider), so a fully-populated
 // construction-time deps struct is not achievable without restructuring the
 // services — the setters exist BECAUSE of that cycle. Boot-validate is the
@@ -931,13 +895,6 @@ func settingsForTaxDocument(ts domain.TenantSettings, upstreamRef string) domain
 		ts.TaxProvider = "stripe_tax"
 	}
 	return ts
-}
-
-// SetTestClockReader wires the reader the resolver answers a record's clock
-// from. Optional: when nil, the resolver answers no clock for every record
-// (narrow unit tests that don't exercise test-mode timing).
-func (e *Engine) SetTestClockReader(r TestClockReader) {
-	e.testClocks = r
 }
 
 // SetNoPaymentMethodNotifier wires the customer-notification dispatcher
@@ -1494,99 +1451,6 @@ func (e *Engine) afterScheduledCancel(ctx context.Context, sub, canceled domain.
 			"customer_id": canceled.CustomerID,
 		})
 	}
-}
-
-// --- The clock resolver ----------------------------------------------------
-//
-// SimForInvoice, SimForSubscription and SimForCustomer are the clock.Resolver
-// that deciding a request's or job's time goes through. They answer as the
-// Resolver doc says: a record on a test clock answers that clock and its
-// frozen time; a record on no clock answers no clock, a zero Sim, and so does
-// live mode (test clocks exist in test mode only, a database CHECK), each
-// without reading the engine's clock. In test mode a record they cannot read
-// is an error, returned with a zero Sim and not logged: the caller that goes
-// on anyway logs it.
-
-// inLiveMode reports whether ctx is in live mode, where no record is on a
-// test clock, so the resolvers answer no clock without reading anything.
-func inLiveMode(ctx context.Context) bool {
-	live, err := postgres.Livemode(ctx)
-	return err == nil && live
-}
-
-// clockOf is test clock clockID, which owner (named in the error,
-// "subscription s_1") is on: its frozen time and its id. No clock, a zero
-// Sim, when clockID is empty or the engine reads no clocks (narrow unit
-// tests; production wires the reader).
-func (e *Engine) clockOf(ctx context.Context, tenantID, clockID, owner string) (clock.Sim, error) {
-	if clockID == "" || e.testClocks == nil {
-		return clock.Sim{}, nil
-	}
-	tc, err := e.testClocks.Get(ctx, tenantID, clockID)
-	if err != nil {
-		return clock.Sim{}, fmt.Errorf("could not read test clock %s of %s: %w", clockID, owner, err)
-	}
-	// What arrives while the clock advances (usage, a payment's answer) is
-	// dated at the advance's target and takes effect after it: dated at the
-	// step the catch-up has reached, it could land in a period the catch-up
-	// closes before it commits. The catch-up binds each step's time itself
-	// and decides nothing through here.
-	at := tc.FrozenTime
-	if tc.Status == domain.TestClockStatusAdvancing && tc.AdvanceTarget != nil {
-		at = *tc.AdvanceTarget
-	}
-	return clock.Sim{At: at, TestClockID: clockID}, nil
-}
-
-// SimForInvoice is the time answer for an invoice: the clock of its
-// subscription, or, for a one-off invoice, of its customer (SimForCustomer).
-// Dunning dates a run's next action with it, in the same time the clock's
-// due list compares against, and every audit row written below a bind with
-// it carries the clock.
-func (e *Engine) SimForInvoice(ctx context.Context, tenantID, invoiceID string) (clock.Sim, error) {
-	if inLiveMode(ctx) {
-		return clock.Sim{}, nil
-	}
-	inv, err := e.invoices.GetInvoice(ctx, tenantID, invoiceID)
-	if err != nil {
-		return clock.Sim{}, fmt.Errorf("could not read invoice %s to find its test clock: %w", invoiceID, err)
-	}
-	if inv.SubscriptionID == "" {
-		return e.SimForCustomer(ctx, tenantID, inv.CustomerID)
-	}
-	sub, err := e.subs.Get(ctx, tenantID, inv.SubscriptionID)
-	if err != nil {
-		return clock.Sim{}, fmt.Errorf("could not read subscription %s of invoice %s to find its test clock: %w", inv.SubscriptionID, invoiceID, err)
-	}
-	return e.clockOf(ctx, tenantID, sub.TestClockID, "subscription "+sub.ID)
-}
-
-// SimForSubscription is the time answer for an action on a subscription
-// (EndTrial, ChangeItem and the like): its clock's.
-func (e *Engine) SimForSubscription(ctx context.Context, tenantID, subscriptionID string) (clock.Sim, error) {
-	if inLiveMode(ctx) {
-		return clock.Sim{}, nil
-	}
-	sub, err := e.subs.Get(ctx, tenantID, subscriptionID)
-	if err != nil {
-		return clock.Sim{}, fmt.Errorf("could not read subscription %s to find its test clock: %w", subscriptionID, err)
-	}
-	return e.clockOf(ctx, tenantID, sub.TestClockID, "subscription "+sub.ID)
-}
-
-// SimForCustomer is the time answer for an action where only the customer is
-// known (subscription.Service.Create, a one-off invoice): the customer's
-// clock, which its subscriptions inherit when they are created. An engine
-// that reads no customers (narrow unit tests) answers no clock.
-func (e *Engine) SimForCustomer(ctx context.Context, tenantID, customerID string) (clock.Sim, error) {
-	if inLiveMode(ctx) || e.customers == nil {
-		return clock.Sim{}, nil
-	}
-	cust, err := e.customers.Get(ctx, tenantID, customerID)
-	if err != nil {
-		return clock.Sim{}, fmt.Errorf("could not read customer %s to find its test clock: %w", customerID, err)
-	}
-	return e.clockOf(ctx, tenantID, cust.TestClockID, "customer "+customerID)
 }
 
 // TaxApplication is the invoice-level tax summary returned by
@@ -2919,45 +2783,35 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	// so a nil here is a fault.
 	//
 	// Anchoring on the cycle boundary keeps every per-cycle decision in
-	// the time domain the cycle belongs to:
-	//   - IssuedAt / CreatedAt / DueAt stamped at the cycle close,
-	//     not at advance-end frozen_time. Multi-period catchup now
-	//     produces one invoice per cycle with its own period-correct
-	//     timestamp instead of all invoices sharing advance-end.
+	// the time domain the cycle belongs to, however late the close runs:
+	//   - IssuedAt / CreatedAt / DueAt stamped at the cycle close, so a
+	//     close that bills several ended periods gives each invoice its
+	//     own period-correct timestamp.
 	//   - The pause is read at the cycle close: the period ending May 1
 	//     stays a draft when the pause resumes May 5, even when the
 	//     close runs May 20.
 	//   - Trial-end activation stamps `activated_at` at the cycle's
-	//     own boundary instead of advance-end.
+	//     own boundary.
 	//   - Cancel-at-period-end / scheduled-change applications stamp
 	//     their `canceled_at` / `applied_at` at the cycle boundary.
 	//   - Tax calculation date matches the cycle, so the tax rate
-	//     applicable at the cycle close (not at advance-end) is used.
+	//     applicable at the cycle close is used.
 	//   - MarkPaid for zero-amount auto-paid invoices stamps PaidAt at
 	//     the cycle close, aligning with IssuedAt.
 	//
-	// In the cron (wall-clock) path NextBillingAt ≈ time.Now() within
-	// one scheduler tick, so the change is neutral — invoice timestamps
-	// land exactly on the period boundary instead of "few minutes after,"
-	// which is the more defensible cosmetic anyway.
+	// For a close that runs on time, NextBillingAt is within one scheduler
+	// tick of now, so invoice timestamps land on the period boundary rather
+	// than a few minutes after it.
 	if sub.NextBillingAt == nil {
 		return false, fmt.Errorf("bill a period of subscription %s: it has no next_billing_at", sub.ID)
 	}
 	now := *sub.NextBillingAt
-	// Rebind ctx's instant to this cycle's own close (keeping the clock)
-	// so downstream effects that read ctx time land on the boundary like
-	// every other cycle stamp, not on advance-end frozen_time.
-	if sim, ok := clock.SimOf(ctx); ok {
-		ctx = clock.WithSim(ctx, clock.Sim{At: now, TestClockID: sim.TestClockID})
-	}
 
-	// The pause is cleared by the scheduled resumers, not here
-	// (Scheduler.pauseResumer for wall-clock, the test-clock catchup's
-	// resume phase for clock-pinned subs). They run after the billing
-	// run and never clear a pause while a period ending before
-	// resumes_at is still unclosed, so the row still holds the pause
-	// this close must read; the finalization gate below reads it as of
-	// `now`, the period's end.
+	// The pause is cleared by the scheduled resumer, not here
+	// (Scheduler.pauseResumer). It runs after the billing run and never
+	// clears a pause while a period ending before resumes_at is still
+	// unclosed, so the row still holds the pause this close must read; the
+	// finalization gate below reads it as of `now`, the period's end.
 
 	// Apply any scheduled plan changes due at this cycle boundary before
 	// reading plans (see applyDueScheduledPlanChanges).
@@ -3045,7 +2899,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 		}
 		// The period closed with no invoice; any unpriced usage in it is
 		// now billed nowhere, so it counts here, after the commit.
-		unpriced.record(live, sub)
+		unpriced.record(live)
 		if out.canceled != nil {
 			e.afterScheduledCancel(ctx, sub, *out.canceled, now)
 		}
@@ -3174,7 +3028,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	inv := out.inv
 	// Counted after the commit: a close that lost its CAS or rolled back
 	// counted nothing, and the retry that wins counts once.
-	unpriced.record(live, sub)
+	unpriced.record(live)
 	// The period is closed (or the sub terminated). Every leg from here runs
 	// after the commit. The closer tx above already holds the invoice's
 	// finalize audit row (emitFinalizeAuditTx, ADR-090) and its
@@ -3322,7 +3176,7 @@ func (e *Engine) BillOnPlanSwapTx(ctx context.Context, tx *sql.Tx, before, after
 	defer span.End()
 
 	unpriced := unpricedUsage{}
-	afterCommit := func() { unpriced.record(live, before) }
+	afterCommit := func() { unpriced.record(live) }
 	if before.CurrentBillingPeriodStart == nil || before.CurrentBillingPeriodEnd == nil {
 		return domain.Invoice{}, false, afterCommit, fmt.Errorf("subscription has no billing period set")
 	}
@@ -3675,7 +3529,7 @@ func (e *Engine) PlanCancelBill(ctx context.Context, sub domain.Subscription, at
 		if err != nil {
 			return domain.Invoice{}, domain.Relief{}, nil, err
 		}
-		return inv, r, func() { unpriced.record(live, canceled) }, nil
+		return inv, r, func() { unpriced.record(live) }, nil
 	}, nil
 }
 
@@ -3981,12 +3835,8 @@ func (e *Engine) priceFinalOnCancel(ctx context.Context, sub domain.Subscription
 	// crossed in between). sub is the row the cancel read; the cancel's
 	// compare-and-set proves its period is still the row's when it writes.
 	if !canceledAt.Before(periodEnd) {
-		next := "retry billing for this subscription, then cancel again"
-		if sub.TestClockID != "" {
-			next = "finish or retry the clock advance, then cancel again"
-		}
 		return finalOnCancel{}, errs.InvalidState(
-			"this subscription has a billing period that ended and is not invoiced yet; " + next).
+			"this subscription has a billing period that ended and is not invoiced yet; retry billing for this subscription, then cancel again").
 			WithCode("unbilled_period")
 	}
 

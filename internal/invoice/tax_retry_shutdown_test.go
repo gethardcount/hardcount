@@ -204,7 +204,7 @@ func TestTaxRetryLoops_StopBetweenRowsOnceCtxIsDone(t *testing.T) {
 		// oneShot: no next tick lists the rows left, so the stop is an error.
 		oneShot bool
 	}{
-		{"processTaxRetryBatch (tax_retry sweep, clock catch-up)", func(ctx context.Context, cancel context.CancelFunc) (int, []error, int) {
+		{"processTaxRetryBatch (tax_retry sweep)", func(ctx context.Context, cancel context.CancelFunc) (int, []error, int) {
 			mem := newMemStore()
 			rows := []domain.Invoice{taxPendingCycleDraft("inv_1"), taxPendingCycleDraft("inv_2")}
 			for _, inv := range rows {
@@ -225,7 +225,7 @@ func TestTaxRetryLoops_StopBetweenRowsOnceCtxIsDone(t *testing.T) {
 			svc := NewService(mem, nil, newMemNumberer())
 			f := &cancellingRetrier{store: mem, cancel: cancel}
 			svc.SetTaxRetrier(f)
-			n, errs := svc.retryStuck(ctx, "t1", rows, svc.decideInvoice)
+			n, errs := svc.retryStuck(ctx, "t1", rows, true)
 			return n, errs, f.calls
 		}, true},
 		{"RetryPendingTaxCommit (tax_commit sweep)", func(ctx context.Context, cancel context.CancelFunc) (int, []error, int) {

@@ -25,25 +25,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/tax"
 )
 
-// stubClockReader is a TestClockReader spy for the resolver tests. It
-// returns a canned (TestClock, error) pair and records the last tenant and
-// id queried, so a test can assert the resolver asked for the right clock.
-type stubClockReader struct {
-	clk        domain.TestClock
-	err        error
-	lastID     string
-	lastTenant string
-}
-
-func (s *stubClockReader) Get(_ context.Context, tenantID, id string) (domain.TestClock, error) {
-	s.lastID = id
-	s.lastTenant = tenantID
-	if s.err != nil {
-		return domain.TestClock{}, s.err
-	}
-	return s.clk, nil
-}
-
 // mockSettings is a minimal SettingsReader for engine tests. Hands out
 // HC-000001, HC-000002, ... deterministically; Get returns a zero-value
 // TenantSettings so net_payment_terms defaults to the engine's fallback.
@@ -1558,25 +1539,15 @@ func TestRunCycle_GeneratesInvoice(t *testing.T) {
 	}
 }
 
-// A period's close runs at its next_billing_at and reads no test clock: with
-// a clock reader that fails, the period is billed, and the reader is never
-// asked. A subscription with no next_billing_at, which the one caller never
-// passes, is an error.
+// A period's close runs at its next_billing_at. A subscription with no
+// next_billing_at, which the one caller never passes, is an error.
 func TestBillOnePeriod_ReadsNoTestClock(t *testing.T) {
 	engine, subs, _, _, invoices := setupEngine()
-	reader := &stubClockReader{err: errors.New("connection reset by peer")}
-	engine.SetTestClockReader(reader)
 	sub := subs.subs["sub_1"]
-	sub.TestClockID = "tc_1"
-	subs.subs["sub_1"] = sub
-	frozen := time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC)
-	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: frozen, TestClockID: "tc_1"})
+	ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC))
 
 	if invoiced, err := engine.billOnePeriod(ctx, sub); err != nil || !invoiced || len(invoices.invoices) != 1 {
 		t.Fatalf("invoiced %v, error %v, %d invoices; want the period billed", invoiced, err, len(invoices.invoices))
-	}
-	if reader.lastID != "" {
-		t.Errorf("the test clock reader was asked for %q; want it never asked", reader.lastID)
 	}
 
 	sub.NextBillingAt = nil
@@ -1587,29 +1558,22 @@ func TestBillOnePeriod_ReadsNoTestClock(t *testing.T) {
 
 // A cancel's final invoice is issued, created and due from the instant the
 // cancel runs at, which its caller bound, whatever its cancel instant (at).
-// Dunning's final action in a catch-up binds the escalation, earlier than the
-// clock's frozen time: the invoice is dated at the escalation, not at the
-// instant the advance landed on. A due scheduled cancel in a catch-up passes
-// its cancel_at as at and runs on the pass's instant: the invoice is dated at
-// the pass's instant.
+// Dunning's final action binds the escalation: the invoice is dated at it. A
+// due scheduled cancel passes its cancel_at as at and runs on the run's
+// instant: the invoice is dated at the run's instant.
 func TestPlanCancelBill_TheFinalInvoiceIsDatedAtTheBoundInstant(t *testing.T) {
 	escalation := time.Date(2026, 3, 20, 6, 0, 0, 0, time.UTC)
 	for _, c := range []struct {
 		name      string
 		at, bound time.Time
-		frozen    time.Time
 	}{
-		{"dunning's cancel, bound to the escalation", escalation, escalation, escalation.Add(48 * time.Hour)},
-		{"a due scheduled cancel, at its cancel_at, bound to the pass's instant",
-			escalation.Add(-48 * time.Hour), escalation, escalation},
+		{"dunning's cancel, bound to the escalation", escalation, escalation},
+		{"a due scheduled cancel, at its cancel_at, bound to the run's instant", escalation.Add(-48 * time.Hour), escalation},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			engine, subs, _, _, invoices := setupEngine()
 			sub := subs.subs["sub_1"]
-			sub.TestClockID = "tc_1"
-			subs.subs["sub_1"] = sub
-			engine.SetTestClockReader(&stubClockReader{clk: domain.TestClock{ID: "tc_1", FrozenTime: c.frozen}})
-			ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: c.bound, TestClockID: "tc_1"})
+			ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), c.bound)
 
 			write, err := engine.PlanCancelBill(ctx, sub, c.at)
 			if err != nil {
@@ -1631,75 +1595,29 @@ func TestPlanCancelBill_TheFinalInvoiceIsDatedAtTheBoundInstant(t *testing.T) {
 	}
 }
 
-// A subscription's due check runs at the instant its caller bound, not at
-// its clock's frozen time. Dunning's final action in a catch-up binds the
-// escalation: at an escalation before the next renewal nothing is due,
-// though the clock's frozen time is after it; and at a bound instant after
-// the renewal the period is billed, though the frozen time is before it.
+// A subscription's due check runs at the instant its caller bound, as
+// dunning's final action binds the escalation: at an escalation before the
+// next renewal nothing is due; at a bound instant after it the period is
+// billed.
 func TestBillDue_DueAtTheCallersInstant(t *testing.T) {
 	renewal := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC) // sub_1's next_billing_at
 	for _, c := range []struct {
-		name          string
-		bound, frozen time.Time
-		billed        int
+		name   string
+		bound  time.Time
+		billed int
 	}{
-		{"bound before the renewal, frozen after it: nothing due", renewal.AddDate(0, 0, -7), renewal.AddDate(0, 0, 1), 0},
-		{"bound after the renewal, frozen before it: the period billed", renewal.AddDate(0, 0, 1), renewal.AddDate(0, 0, -7), 1},
+		{"bound before the renewal: nothing due", renewal.AddDate(0, 0, -7), 0},
+		{"bound after the renewal: the period billed", renewal.AddDate(0, 0, 1), 1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			engine, subs, _, _, invoices := setupEngine()
-			sub := subs.subs["sub_1"]
-			sub.TestClockID = "tc_1"
-			subs.subs["sub_1"] = sub
-			engine.SetTestClockReader(&stubClockReader{clk: domain.TestClock{ID: "tc_1", FrozenTime: c.frozen}})
-			ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: c.bound, TestClockID: "tc_1"})
+			engine, _, _, _, invoices := setupEngine()
+			ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), c.bound)
 
 			n, err := engine.BillDue(ctx, "t1", "sub_1", 0)
 			if err != nil || n != c.billed || len(invoices.invoices) != c.billed {
 				t.Errorf("billed %d, error %v, %d invoices; want %d", n, err, len(invoices.invoices), c.billed)
 			}
 		})
-	}
-}
-
-// A trial that ends inside a period is activated by that period's close, and
-// its day-1 invoice (the plan bills in advance) is collected at the close: the
-// close rebinds the context to next_billing_at, and the collection takes that
-// instant, not the clock's frozen time. Its credits are applied then.
-func TestBillOnePeriod_ATrialEndingInThePeriodIsCollectedAtTheClose(t *testing.T) {
-	periodStart := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
-	periodEnd := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	trialEnd := time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)
-	frozen := periodEnd.Add(10 * 24 * time.Hour)
-	subs := &mockSubs{subs: map[string]domain.Subscription{
-		"sub_1": {
-			ID: "sub_1", TenantID: "t1", CustomerID: "cus_1", TestClockID: "tc_1",
-			Items:                     []domain.SubscriptionItem{{PlanID: "pln_1", Quantity: 1}},
-			Status:                    domain.SubscriptionTrialing,
-			BillingTime:               domain.BillingTimeCalendar,
-			TrialEndAt:                &trialEnd,
-			CurrentBillingPeriodStart: &periodStart,
-			CurrentBillingPeriodEnd:   &periodEnd,
-			NextBillingAt:             &periodEnd,
-		},
-	}, cycleUpdated: make(map[string]bool)}
-	pricing := &mockPricing{plans: map[string]domain.Plan{
-		"pln_1": {ID: "pln_1", Currency: "USD", BillingInterval: domain.BillingMonthly, BaseAmountCents: 4900, BaseBillTiming: domain.BillInAdvance},
-	}}
-	invoices := &mockInvoices{}
-	applier := &fakeCreditApplier{inv: invoices, applyCents: 100}
-	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, applier, &mockSettings{},
-		&fakePaymentSetups{ready: true, stripeCustomerID: "cus_stripe_1"}, &recordingCharger{store: invoices}, clock.NewFake(frozen)))
-	engine.SetTestClockReader(&stubClockReader{clk: domain.TestClock{ID: "tc_1", FrozenTime: frozen}})
-	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: frozen, TestClockID: "tc_1"})
-
-	if _, err := engine.billOnePeriod(ctx, subs.subs["sub_1"]); err != nil {
-		t.Fatalf("billOnePeriod: %v", err)
-	}
-	// Two collections: the day-1 invoice's (FinalizeOnCreateInvoice, no
-	// anchor) and the period's own (anchored at the close).
-	if len(applier.at) != 2 || !applier.at[0].Equal(periodEnd) || !applier.at[1].Equal(periodEnd) {
-		t.Errorf("credits applied at %v; want twice, both at the close %v (not the clock's frozen %v)", applier.at, periodEnd, frozen)
 	}
 }
 
@@ -2393,23 +2311,6 @@ func TestRunCycle_SkipsPendingChangeNotYetDue(t *testing.T) {
 	if it.PlanID != "pln_old" {
 		t.Errorf("plan_id should not have swapped: got %q", it.PlanID)
 	}
-}
-
-// stubCustomerReader returns a fixed customer per id, for the resolver tests.
-type stubCustomerReader struct {
-	customers map[string]domain.Customer
-	err       error
-}
-
-func (s *stubCustomerReader) Get(_ context.Context, _, id string) (domain.Customer, error) {
-	if s.err != nil {
-		return domain.Customer{}, s.err
-	}
-	c, ok := s.customers[id]
-	if !ok {
-		return domain.Customer{}, fmt.Errorf("not found")
-	}
-	return c, nil
 }
 
 // TestRunCycle_AppliesPendingChangeAtTheClose: when a due pending item plan

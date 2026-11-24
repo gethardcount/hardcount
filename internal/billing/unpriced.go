@@ -2,8 +2,6 @@ package billing
 
 import (
 	"github.com/shopspring/decimal"
-
-	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // Unpriced usage (#981, ADR-096 amendment): usage that matches no price of
@@ -25,15 +23,10 @@ func (u unpricedUsage) add(meterID string, qty decimal.Decimal) {
 }
 
 // record adds each meter's quantity to the counter, labeled with the mode
-// (live or test) the invoice was built in, which the caller reads off ctx. The counter is an operator
-// signal (float, reset on restart), never a billing record. A test-clock
-// subscription is a simulation and is not counted: one clock advance can
-// close many periods, and the billing metrics leave simulations out too.
-// The WARN still logs it.
-func (u unpricedUsage) record(live bool, sub domain.Subscription) {
-	if sub.TestClockID != "" {
-		return
-	}
+// (live or test) the invoice was built in, which the caller reads off ctx. The
+// counter is an operator signal (float, reset on restart), never a billing
+// record.
+func (u unpricedUsage) record(live bool) {
 	for _, qty := range u {
 		recordUsageUnpriced(live, qty.InexactFloat64())
 	}

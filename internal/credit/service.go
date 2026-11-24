@@ -38,24 +38,19 @@ type LiveBalanceReader interface {
 
 type Service struct {
 	store       Store
-	resolver    clock.Resolver
 	auditLogger AuditEmitter
 	customers   CustomerReader
 	live        LiveBalanceReader
 	// clock is the server's clock: the router's clk, the one the engine
-	// bills by. Every credit action runs on a time decided on a test clock or
-	// at real time (see the clock package's doc). Who decides it:
+	// bills by. Who binds a credit action's time:
 	//   - a request, the API's door (api.clockDoor), with one read of the
-	//     server's clock; a grant or an adjustment, the service itself, from
-	//     the customer its body names (decideForCustomer);
+	//     server's clock; a grant or an adjustment, the service itself, with
+	//     one read of this clock (clock.EnsureEffectiveNow);
 	//   - the engine's reads (a balance, a draw), the time of the work that
 	//     makes them.
-	// Each entry point keeps that time. Only a grant and an adjustment bind
-	// an instant themselves: for a customer on no clock, decideForCustomer
-	// reads this clock once (clock.EnsureEffectiveNow). Every other entry
-	// keeps its caller's instant. Without that read, two reads of the time in
-	// one grant could differ, and a store's stamp could fall on another time
-	// than the action's.
+	// Each entry point keeps that time. Without the grant's read, two reads
+	// of the time in one grant could differ, and a store's stamp could fall
+	// on another time than the action's.
 	clock clock.Clock
 }
 
@@ -64,9 +59,8 @@ func NewService(store Store) *Service {
 }
 
 // SetClock sets the clock real time is read from: the server's clock, the one
-// the billing engine bills by. The service is handed it because a decision
-// for a customer on no clock carries no instant, so the service reads real
-// time itself. Without it, real time is the machine's.
+// the billing engine bills by. A grant and an adjustment read it once to bind
+// their instant. Without it, real time is the machine's.
 func (s *Service) SetClock(c clock.Clock) { s.clock = c }
 
 // SetAuditLogger wires in-tx audit emission for operator-facing credit
@@ -77,14 +71,6 @@ func (s *Service) SetClock(c clock.Clock) { s.clock = c }
 // logged-then-failed pattern elsewhere could. In-tx emission makes both
 // classes unrepresentable.
 func (s *Service) SetAuditLogger(a AuditEmitter) { s.auditLogger = a }
-
-// SetResolver wires the clock.Resolver that Grant and Adjust decide their
-// time with (decideForCustomer), and that the customer reads below look the
-// customer's time up with. Optional: nil decides nothing, and every read is
-// real time (narrow tests).
-func (s *Service) SetResolver(r clock.Resolver) {
-	s.resolver = r
-}
 
 // SetCustomerReader wires the customer read that Grant and Adjust run before
 // writing. When unwired (narrow unit tests) the read is skipped.
@@ -117,25 +103,6 @@ func (s *Service) requireCustomer(ctx context.Context, tenantID, customerID stri
 		return fmt.Errorf("get customer: %w", err)
 	}
 	return nil
-}
-
-// decideForCustomer decides a grant's or an adjustment's time from the
-// customer its body names (clock.DecideOrRealTime), after the customer is
-// read (a customer that does not exist answers 404 first) and before
-// anything is written. The decision is made here rather than in the handler,
-// as subscriptions and credit notes do, because Grant and Adjust are each
-// the one call their route makes, with nothing after it. It binds one
-// instant for the whole request: for a customer on no clock, or in live
-// mode, it reads real time once from the service's clock, so the expiry
-// check and the ledger entry's created_at read the same instant. A clock
-// that cannot be read refuses the request (503), with nothing written.
-func (s *Service) decideForCustomer(ctx context.Context, tenantID, customerID string) (context.Context, error) {
-	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
-	if err != nil {
-		return ctx, errs.Unavailable("test_clock_unavailable",
-			"The customer's test clock could not be read. Nothing was changed; send the request again.", err)
-	}
-	return clock.EnsureEffectiveNow(decided, s.clock), nil
 }
 
 type GrantInput struct {
@@ -193,9 +160,10 @@ func (s *Service) Grant(ctx context.Context, tenantID string, input GrantInput) 
 	if err := s.requireCustomer(ctx, tenantID, input.CustomerID); err != nil {
 		return domain.CreditLedgerEntry{}, err
 	}
-	if ctx, err = s.decideForCustomer(ctx, tenantID, input.CustomerID); err != nil {
-		return domain.CreditLedgerEntry{}, err
-	}
+	// One instant for the whole grant, bound before anything is written, so
+	// the expiry check and the ledger entry's created_at read the same one.
+	// Grant binds it itself because it is the one call its route makes.
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	if input.AmountCents <= 0 {
 		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", "must be greater than 0")
 	}
@@ -217,9 +185,8 @@ func (s *Service) Grant(ctx context.Context, tenantID string, input GrantInput) 
 	// wrong year/date. Industry parity: Stripe credit-grant API
 	// returns 422 on past expires_at.
 	//
-	// Compare against the request's decided instant (decideForCustomer
-	// above), so a clock customer's expiry is checked against its clock's
-	// time. Internal engine callers
+	// Compare against the grant's bound instant (above). Internal engine
+	// callers
 	// (cancel / plan-swap relief, CN Issue) don't set
 	// ExpiresAt on their grants, so this gate doesn't affect refund
 	// flows — only operator-driven and SDK-driven Grant calls.
@@ -844,12 +811,9 @@ func (s *Service) Adjust(ctx context.Context, tenantID string, input AdjustInput
 	if err := s.requireCustomer(ctx, tenantID, input.CustomerID); err != nil {
 		return domain.CreditLedgerEntry{}, err
 	}
-	// An adjustment, positive or negative, is decided as a whole from its
-	// customer, before anything is written: the ledger entry and its audit
-	// row carry the customer's time.
-	if ctx, err = s.decideForCustomer(ctx, tenantID, input.CustomerID); err != nil {
-		return domain.CreditLedgerEntry{}, err
-	}
+	// One instant for the whole adjustment, bound before anything is
+	// written: the ledger entry carries it.
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	if input.AmountCents == 0 {
 		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", "cannot be zero")
 	}

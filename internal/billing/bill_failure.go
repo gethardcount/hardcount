@@ -44,8 +44,7 @@ const (
 
 // classifyBillFailure classifies the error of a failed billing attempt. It
 // reads the run's ctx and typed driver errors only; it never matches message
-// text. It knows nothing about the subscription: recordBillFailure additionally
-// never saves a failure for a clock-pinned subscription, whatever the class.
+// text. It knows nothing about the subscription.
 //
 // The ctx is tested, not the error chain: a cancel can surface as a driver
 // error with no context.Canceled in it, and an inner deadline (the tenant
@@ -164,7 +163,7 @@ func billFailureText(subID string, cause error) string {
 type billFailureOutcome struct {
 	class    string
 	recorded bool
-	// notRecorded says why a counted failure was not saved: "test_clock",
+	// notRecorded says why a counted failure was not saved:
 	// "no_due_instant", "moved_on" (the write matched no row: another writer
 	// finished the work or counted this attempt) or "write_error". Empty when
 	// recorded, and for an uncounted class, which is its own reason.
@@ -186,11 +185,9 @@ type billProgress struct {
 // recordBillFailure saves one failed billing attempt on the subscription the
 // attempt planned from (seen), when the failure counts.
 //
-// Nothing is written for a clock-pinned subscription (a count and a real-time
-// wait mean nothing against a frozen simulated time; the clock has its own
-// internal_failure state and Retry advance), for an interrupted run, or for a
-// transient database error. Those subscriptions stay due and are attempted on
-// the next run, exactly as before.
+// Nothing is written for an interrupted run, or for a transient database
+// error. Those subscriptions stay due and are attempted on the next run,
+// exactly as before.
 //
 // The failed billing transaction has already rolled back, so this is its own
 // transaction on the run's ctx. If the write errors or matches no row, it is
@@ -200,10 +197,6 @@ type billProgress struct {
 func (e *Engine) recordBillFailure(ctx context.Context, seen domain.Subscription, cause error) billFailureOutcome {
 	out := billFailureOutcome{class: classifyBillFailure(ctx, cause)}
 	if out.class != billClassCounted {
-		return out
-	}
-	if seen.TestClockID != "" {
-		out.notRecorded = "test_clock"
 		return out
 	}
 	due := domain.DueInstant(seen)
@@ -257,7 +250,7 @@ func (e *Engine) recordBillFailure(ctx context.Context, seen domain.Subscription
 //
 // The line carries class, and recorded. When a counted failure was not saved,
 // not_recorded_reason says why, so class=counted recorded=false is never
-// ambiguous: every failure on a test clock logs it with reason test_clock.
+// ambiguous.
 func (e *Engine) reportBillFailure(ctx context.Context, seen domain.Subscription, invoicesBefore int, cause error, logArgs ...any) {
 	out := e.recordBillFailure(ctx, seen, cause)
 	args := []any{
@@ -277,8 +270,8 @@ func (e *Engine) reportBillFailure(ctx context.Context, seen domain.Subscription
 }
 
 // attemptSub is the one caller of billSubscription, the bill of a
-// subscription's due work: the scheduler run, the operator's billing run,
-// test-clock Advance and the operator retry all come through it. (Invoices
+// subscription's due work: the scheduler run, the operator's billing run
+// and the operator retry all come through it. (Invoices
 // written by other paths, such as the day-1 bill on create, a cancel's final
 // invoice or a threshold fire, do not, and save no failure.) It bills sub and,
 // when the attempt fails, saves the failure against the row the failing step
@@ -293,11 +286,7 @@ func (e *Engine) reportBillFailure(ctx context.Context, seen domain.Subscription
 // run (drainDue) catches it, bills the rest of the due subscriptions, and
 // raises it again at the end, so the scheduler still reports it; the next tick
 // skips this subscription until its wait ends, so one bad subscription no
-// longer replays the same panic at the head of every tick. Whether to record
-// is a property of the subscription (its test clock), not of the caller: for
-// a clock-pinned subscription nothing is written and the panic reaches the
-// catch-up's own recover once the run has billed the clock's other
-// subscriptions.
+// longer replays the same panic at the head of every tick.
 //
 // grace is the invoice grace the caller's run honours (see billSubscription).
 func (e *Engine) attemptSub(ctx context.Context, sub domain.Subscription, grace time.Duration, logArgs ...any) (n int, err error) {
@@ -354,7 +343,6 @@ func (e *Engine) BillDueNow(ctx context.Context, tenantID, subscriptionID string
 // (subscription.Service.closeEndedPeriods). Dunning's final pause and cancel
 // pass INVOICE_GRACE_PERIOD (ADR-120 amendment 2026-10-22): a catch-up over
 // several ended periods closes those past their grace and leaves the newest.
-// A test clock has no grace (ADR-120); the caller passes 0 for one.
 func (e *Engine) BillDue(ctx context.Context, tenantID, subscriptionID string, grace time.Duration) (int, error) {
 	logArgs := []any{"run", "operator_retry"}
 	if grace > 0 {
@@ -384,7 +372,7 @@ func (e *Engine) BillDue(ctx context.Context, tenantID, subscriptionID string, g
 		}, logArgs...)...)
 		return n, fmt.Errorf("re-read subscription %s: %w", subscriptionID, err)
 	}
-	if fresh.TestClockID == "" && fresh.BillingFailure == nil && domain.BillingDueAt(fresh, e.clock.Now(ctx).Add(-grace)) {
+	if fresh.BillingFailure == nil && domain.BillingDueAt(fresh, e.clock.Now(ctx).Add(-grace)) {
 		e.reportBillFailure(ctx, fresh, n, errStillDue, logArgs...)
 		return n, errStillDue
 	}
