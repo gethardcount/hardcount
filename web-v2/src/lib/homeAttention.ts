@@ -1,10 +1,7 @@
 // Home's "needs attention" lines. Each line's count is the total of the list
 // it links to, read with the same filter, so the two never disagree (C-04).
 // They used to come from the overview: a failed-payment count windowed to
-// the period behind a link to every failed invoice, and counts that leave
-// out test-clock records behind lists that show them. These are action
-// counts, so test-clock records count; money totals (the cards, the amount
-// owed) leave them out, so the amount shows only when none are among them.
+// the period behind a link to every failed invoice.
 //
 // Dependency-free so the unit tests can load it.
 
@@ -35,9 +32,7 @@ export interface AttentionCounts {
   // (domain.CreditNoteRefundNeedsAttentionSQL), so the overview's count is
   // the list's.
   refunds?: number
-  // The overview's open-invoice count and amount owed, which leave out
-  // test-clock invoices.
-  openOutsideClocks?: number
+  // The overview's amount owed on the open invoices, per currency.
   outstanding?: readonly CurrencyAmount[]
 }
 
@@ -67,10 +62,9 @@ export function homeAttentionLines(c: AttentionCounts): AttentionLine[] {
     })
   }
   if (c.open) {
-    const amountCovers = c.openOutsideClocks === c.open && (c.outstanding ?? []).some(a => a.amount_cents > 0)
     lines.push({
       severity: 'info',
-      text: amountCovers ? outstandingText(c.open, c.outstanding ?? []) : plural(c.open, 'open invoice', 'open invoices'),
+      text: outstandingText(c.open, c.outstanding ?? []),
       to: ATTENTION_LISTS.open.to,
     })
   }

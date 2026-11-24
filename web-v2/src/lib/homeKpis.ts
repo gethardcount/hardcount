@@ -27,7 +27,7 @@ export const CUSTOMERS_DEFINITION =
 
 // currentMRR (internal/analytics/overview.go): plan base fee × quantity of
 // each active subscription, a yearly plan divided by 12, in the default
-// currency, test-clock subscriptions left out. Usage is not in it.
+// currency. Usage is not in it.
 export const MRR_DEFINITION =
   'Monthly recurring revenue: the base fees of active subscriptions, per month. Usage is not included. ARR is the same × 12.'
 

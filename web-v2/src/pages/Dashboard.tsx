@@ -84,7 +84,6 @@ export default function DashboardPage() {
     retrying,
     open: openTotal,
     refunds: overview?.refunds_needing_attention,
-    openOutsideClocks: overview?.open_invoices,
     outstanding: overview?.outstanding_by_currency,
   }), [failedOpen, retrying, openTotal, overview])
 

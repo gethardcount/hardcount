@@ -21,11 +21,10 @@ test('payment retry opens Dunning filtered to active runs', () => {
   assert.equal(line.to, '/dunning?state=active')
 })
 
-test('open invoices show the amount owed only when no test-clock invoice is among them', () => {
+test('open invoices show the amount owed, and the count alone when nothing is', () => {
   const usd = [{ currency: 'USD', amount_cents: 12500 }]
-  assert.equal(homeAttentionLines({ open: 4, openOutsideClocks: 4, outstanding: usd })[0].text, '4 open invoices · $125.00 outstanding')
-  // Test-clock invoices are in the list but not in the amount: count only.
-  assert.equal(homeAttentionLines({ open: 4, openOutsideClocks: 1, outstanding: usd })[0].text, '4 open invoices')
-  // All on test clocks: the line still shows (it used to hide).
-  assert.equal(homeAttentionLines({ open: 2, openOutsideClocks: 0, outstanding: [] })[0].text, '2 open invoices')
+  assert.equal(homeAttentionLines({ open: 4, outstanding: usd })[0].text, '4 open invoices · $125.00 outstanding')
+  // While the overview is loading, or with nothing owed: the count alone.
+  assert.equal(homeAttentionLines({ open: 2 })[0].text, '2 open invoices')
+  assert.equal(homeAttentionLines({ open: 2, outstanding: [] })[0].text, '2 open invoices')
 })
