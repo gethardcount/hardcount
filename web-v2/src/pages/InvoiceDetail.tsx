@@ -26,7 +26,7 @@ import { flaggedStripeRefunds } from '@/lib/stripeRefunds'
 import { ActivityList, ActivityZone } from '@/components/ActivityList'
 import { Callout } from '@/components/Callout'
 import { collectionPausedNow, finalizeConfirmLines, pickInvoiceNotice, writtenOffCardLine, writtenOffSubscriptionLine } from '@/lib/invoiceNotice'
-import { hasDocument, invoiceLabel, isUnpaidTopup, issueDates, sellerBlock, sellerMissing, showsActivity, SELLER_SETTINGS_PATH } from '@/lib/invoiceDocument'
+import { creditLastsText, hasDocument, invoiceLabel, isUnpaidTopup, issueDates, sellerBlock, sellerMissing, showsActivity, topupCredit, SELLER_SETTINGS_PATH } from '@/lib/invoiceDocument'
 import { authApi } from '@/lib/auth'
 import { useAuth } from '@/contexts/AuthContext'
 import { useNowResolver } from '@/hooks/useNow'
@@ -167,6 +167,7 @@ const LANE_LABELS: Record<string, string> = {
   disputes: 'disputes',
   charge_attempts: 'payment attempts',
   stripe_refunds: 'refunds made in Stripe',
+  credit: 'the credit a top-up added',
 }
 const laneLabel = (lane: string): string => LANE_LABELS[lane] ?? lane
 
@@ -681,6 +682,8 @@ export default function InvoiceDetailPage() {
   // While its charge is being confirmed the server refuses every action on
   // a top-up, Withdraw included.
   const topupChargeInFlight = unpaidTopup && invoicePaymentInFlight(invoice) !== null
+  // What a top-up sells: its credit and how long it lasts.
+  const credit = invoice.billing_reason === 'topup' ? topupCredit(lineItems) : null
 
   return (
     <>
@@ -952,10 +955,19 @@ export default function InvoiceDetailPage() {
               <p className="text-sm text-muted-foreground">{unpaidTopup ? 'Price' : 'Amount due'}</p>
               <p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{formatCents(invoiceDueCents(invoice), invoice.currency)}</p>
             </div>
-            <div className="min-w-0 px-6 py-4 md:flex-1">
-              <p className="text-sm text-muted-foreground">Total</p>
-              <p className="mt-1 text-sm font-medium tabular-nums text-foreground">{formatCents(invoice.total_amount_cents, invoice.currency)}</p>
-            </div>
+            {/* A top-up's total is its price; what it sells is the credit. */}
+            {credit ? (
+              <div className="min-w-0 px-6 py-4 md:flex-1">
+                <p className="text-sm text-muted-foreground">Credit</p>
+                <p className="mt-1 text-sm font-medium tabular-nums text-foreground">{formatCents(credit.creditCents, invoice.currency)}</p>
+                <p className="text-xs text-muted-foreground">{creditLastsText(credit.validDays)}</p>
+              </div>
+            ) : (
+              <div className="min-w-0 px-6 py-4 md:flex-1">
+                <p className="text-sm text-muted-foreground">Total</p>
+                <p className="mt-1 text-sm font-medium tabular-nums text-foreground">{formatCents(invoice.total_amount_cents, invoice.currency)}</p>
+              </div>
+            )}
             <div className="min-w-0 px-6 py-4 md:flex-1">
               <p className="text-sm text-muted-foreground">Due</p>
               <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -1104,8 +1116,9 @@ export default function InvoiceDetailPage() {
         invoice.status === 'voided' && 'border-destructive/30'
       )}>
         {/* Same mark the PDF carries: a draft is a preview, not an invoice
-            anyone owes on. Smaller on a phone so the whole word fits. */}
-        {invoice.status === 'draft' && (
+            anyone owes on. Smaller on a phone so the whole word fits. An
+            unpaid top-up is finished, waiting for money: no mark. */}
+        {invoice.status === 'draft' && !unpaidTopup && (
           <span aria-hidden data-testid="draft-watermark" className="pointer-events-none absolute inset-0 flex items-center justify-center select-none text-[4.5rem] sm:text-[7rem] font-bold tracking-widest text-foreground/[0.04] -rotate-12">
             DRAFT
           </span>
@@ -1309,7 +1322,9 @@ export default function InvoiceDetailPage() {
                           ) : (
                             <span className="text-sm text-foreground">{item.description}</span>
                           )}
-                          <span className="text-xs text-muted-foreground">({formatLineType(item.line_type)})</span>
+                          {invoice.billing_reason !== 'topup' && (
+                            <span className="text-xs text-muted-foreground">({formatLineType(item.line_type)})</span>
+                          )}
                           {reasonLabel && (
                             <Badge variant="outline" className="text-[10px] font-normal px-1.5 py-0 h-4">
                               {reasonLabel}
@@ -1323,6 +1338,9 @@ export default function InvoiceDetailPage() {
                             segment-aware billing under plan changes) — the
                             explicit dates convey what the line covers without
                             us guessing the cause. */}
+                        {credit && (
+                          <div className="text-xs text-muted-foreground mt-0.5">{formatCents(credit.creditCents, invoice.currency)} of prepaid credit</div>
+                        )}
                         <div className="sm:hidden text-xs text-muted-foreground font-mono tabular-nums mt-0.5">{qty} × {rate}</div>
                         {item.billing_period_start && item.billing_period_end && (
                           item.billing_period_start !== invoice.billing_period_start ||
@@ -1867,7 +1885,7 @@ export default function InvoiceDetailPage() {
                   disabled={recordPaymentMutation.isPending}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Surfaces in the audit trail for finance reconciliation.
+                  Shown in the audit log.
                 </p>
               </div>
             </div>

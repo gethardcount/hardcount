@@ -67,8 +67,8 @@ export function CustomerCreditsSection({ customer, currency, readOnly }: {
       actions={
         !readOnly && (
           <>
+            <Button size="sm" onClick={() => setSellOpen(true)}>Sell credit</Button>
             <Button variant="outline" size="sm" onClick={() => setGrantOpen(true)}>Grant credits</Button>
-            <Button variant="outline" size="sm" onClick={() => setSellOpen(true)}>Sell credit</Button>
           </>
         )
       }
@@ -100,7 +100,7 @@ export function CustomerCreditsSection({ customer, currency, readOnly }: {
                       // Kind split: money-backed commit must not read as one
                       // number with free promotional credit.
                       <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
-                        {r.commit_remaining_cents > 0 && <>Commit {formatCents(r.commit_remaining_cents, b.currency)}</>}
+                        {r.commit_remaining_cents > 0 && <>Bought {formatCents(r.commit_remaining_cents, b.currency)}</>}
                         {r.commit_remaining_cents > 0 && r.promotional_remaining_cents > 0 && ' · '}
                         {r.promotional_remaining_cents > 0 && <>Promotional {formatCents(r.promotional_remaining_cents, b.currency)}</>}
                       </p>
@@ -117,7 +117,7 @@ export function CustomerCreditsSection({ customer, currency, readOnly }: {
             <p className="mb-2 text-xs font-medium text-muted-foreground">Grants</p>
             {shown.some(g => g.grant_kind === 'commit' || g.grant_kind === 'promotional') && (
               <p className="mb-2 text-xs text-muted-foreground">
-                Commit credit was bought with a top-up. Promotional credit is free and is used up first.
+                Bought credit was paid for with a top-up. Promotional credit is free and is used up first.
               </p>
             )}
             {shown.length > 0 && (
@@ -140,7 +140,7 @@ export function CustomerCreditsSection({ customer, currency, readOnly }: {
                           <TableCell className="max-w-[16rem]">
                             <div className="flex items-center gap-2 min-w-0">
                               <span className="truncate text-sm" title={g.description}>{g.description || 'Credit grant'}</span>
-                              {g.grant_kind === 'commit' && <Badge variant="info">Commit</Badge>}
+                              {g.grant_kind === 'commit' && <Badge variant="info">Bought</Badge>}
                               {g.grant_kind === 'promotional' && <Badge variant="secondary">Promotional</Badge>}
                               {state === 'used_up' && <Badge variant="secondary">Used up</Badge>}
                               {state === 'expired' && <Badge variant="warning">Expired</Badge>}

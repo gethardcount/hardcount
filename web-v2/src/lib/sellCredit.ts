@@ -56,6 +56,8 @@ export interface PayOption {
   state: 'available' | 'unavailable' | 'checking'
   // Why the option is unavailable, or what happens after Create top-up.
   note: string
+  // The Settings tab where what is missing is set up, when there is one.
+  href?: string
 }
 
 // The facts the options depend on. undefined: still loading.
@@ -86,15 +88,17 @@ export interface PayFacts {
 // server's send makes. A charge needs a saved card and Stripe.
 export function payOptions(f: PayFacts): PayOption[] {
   const mode = f.livemode ? 'live' : 'test'
-  const stripeMissing = `Stripe isn't connected in ${mode} mode.`
+  const stripeMissing = { note: `Stripe isn't connected in ${mode} mode.`, href: '/settings?tab=payments' }
+  // Settings → Email shows the server's email setup and its link addresses.
+  const emailSetup = '/settings?tab=email'
 
   let link: PayOption = { value: 'send_link', label: 'Send them the payment link', state: 'available', note: 'Next, you check the email and send it.' }
-  const linkBlock = f.customerEmail !== undefined && !f.customerEmail.trim() ? 'The customer has no email address.'
-    : f.smtpConfigured === false ? "Email isn't set up on this server."
-      : f.paymentPageSet === false ? 'This server has no payment page address (HOSTED_INVOICE_BASE_URL).'
+  const linkBlock = f.customerEmail !== undefined && !f.customerEmail.trim() ? { note: 'The customer has no email address.' }
+    : f.smtpConfigured === false ? { note: "Email isn't set up on this server.", href: emailSetup }
+      : f.paymentPageSet === false ? { note: 'This server has no payment page address (HOSTED_INVOICE_BASE_URL).', href: emailSetup }
         : f.stripeConnected === false ? stripeMissing
           : null
-  if (linkBlock) link = { ...link, state: 'unavailable', note: linkBlock }
+  if (linkBlock) link = { ...link, state: 'unavailable', ...linkBlock }
   else if (f.linkFactsFailed) link = { ...link, state: 'unavailable', note: "Couldn't check whether the link can be sent." }
   else if (f.customerEmail === undefined || f.smtpConfigured === undefined || f.paymentPageSet === undefined || f.stripeConnected === undefined) {
     link = { ...link, state: 'checking', note: 'Checking whether the link can be sent…' }
@@ -108,7 +112,7 @@ export function payOptions(f: PayFacts): PayOption[] {
     note: 'Next, you confirm the charge.',
   }
   if (f.card === null) card = { ...card, state: 'unavailable', note: 'The customer has no saved card.' }
-  else if (f.stripeConnected === false) card = { ...card, state: 'unavailable', note: stripeMissing }
+  else if (f.stripeConnected === false) card = { ...card, state: 'unavailable', ...stripeMissing }
   else if (f.cardFactsFailed) card = { ...card, state: 'unavailable', note: "Couldn't check for a saved card." }
   else if (f.card === undefined || f.stripeConnected === undefined) card = { ...card, state: 'checking', note: 'Checking for a saved card…' }
 

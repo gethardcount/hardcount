@@ -462,6 +462,73 @@
     ]
   },
   {
+    "case": "finalized/top-up issued by its payment",
+    "line": {
+      "id": "finalized/top-up issued by its payment",
+      "kind": "invoice.finalized",
+      "title": "Invoice issued",
+      "amount": {
+        "cents": 4900,
+        "currency": "USD"
+      },
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Invoice issued · $49.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "credit added/never expires",
+    "line": {
+      "id": "credit added/never expires",
+      "kind": "credit.added",
+      "title": "Credit added",
+      "amount": {
+        "cents": 10000,
+        "currency": "USD"
+      },
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Credit added · $100.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "credit added/expires",
+    "line": {
+      "id": "credit added/expires",
+      "kind": "credit.added",
+      "title": "Credit added",
+      "amount": {
+        "cents": 10000,
+        "currency": "USD"
+      },
+      "detail": [
+        [
+          {
+            "text": "Expires "
+          },
+          {
+            "time": "2028-02-01T04:30:00Z"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Credit added · $100.00",
+      "meta: Expires Feb 1, 2028 04:30 UTC",
+      "tone: neutral"
+    ]
+  },
+  {
     "case": "uncollectible/by payment recovery",
     "line": {
       "id": "uncollectible/by payment recovery",

@@ -41,6 +41,12 @@ test('the link says which of its four needs is missing, the first one only', () 
 })
 
 test('a charge needs a saved card and Stripe, and names the real card', () => {
+  // What is missing in Settings links to where it is set up.
+  assert.equal(option({ ...ready, stripeConnected: false }, 'send_link').href, '/settings?tab=payments')
+  assert.equal(option({ ...ready, stripeConnected: false }, 'charge_card').href, '/settings?tab=payments')
+  assert.equal(option({ ...ready, smtpConfigured: false }, 'send_link').href, '/settings?tab=email')
+  assert.equal(option({ ...ready, paymentPageSet: false }, 'send_link').href, '/settings?tab=email')
+  assert.equal(option({ ...ready, customerEmail: '' }, 'send_link').href, undefined)
   assert.deepEqual(option({ ...ready, card: null }, 'charge_card'), {
     value: 'charge_card', label: 'Charge their saved card', state: 'unavailable', note: 'The customer has no saved card.',
   })

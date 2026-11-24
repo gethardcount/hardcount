@@ -9614,7 +9614,9 @@ export const getGetInvoicePaymentTimelineUrl = (id: string,) => {
  * row, titled "Refunded in Stripe".
  * A draft invoice returns an empty list, except an unpaid top-up: it
  * returns its creation, its charge attempts and the emails sent for
- * it, such as its link.
+ * it, such as its link. A paid top-up's payment is followed by a
+ * `credit.added` row (source `lifecycle`): the credit it added, and
+ * when that credit expires.
  *
  * Each row carries `line`, the row with every word written by the
  * server: a title, an amount, a problem line, the meta line and who

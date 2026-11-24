@@ -2,8 +2,11 @@
 
 This guide sells a customer prepaid credit with the API: they pay up front,
 and later invoices in the same currency draw the credit down. It walks
-through the five calls, what the customer sees, and how to top up a
-customer's credit automatically from your own code.
+through the calls: create the top-up (`POST /v1/invoices`), then take the
+payment by charging the saved card (`collect`), sending the payment link
+(`send`) or recording a payment (`record-payment`), or withdraw it (`void`).
+Then what the customer sees, and how to top up a customer's credit
+automatically from your own code.
 
 Think of a gift card: the customer buys it once, and each purchase after
 that spends from it.
@@ -19,12 +22,21 @@ that spends from it.
   ([Connect Stripe](connect-stripe.md)). Recording a payment you received
   needs neither.
 
+Two settings are set in the dashboard, not with an API key, under
+**Settings → Invoicing**. One is how long bought credit lasts, from 1 to
+3650 days ([below](#how-long-the-credit-lasts)). The other is the
+low-balance alert that [automatic top-up](#automatic-top-up-with-your-own-code)
+starts from. The
+seller name in the customer's email and on their payment page is the
+business name in **Settings → General**.
+
 ## Words on this page
 
 | Word | Meaning |
 |---|---|
 | Top-up | The invoice that sells the credit: `billing_reason` `topup`, with one line. It is a draft with no number until it is paid. |
-| Commit credit | The credit a paid top-up adds to the customer's balance (`grant_kind` `commit`). |
+| Issue | Give an invoice its number and make it final. An ordinary invoice is issued when you finalize it; a top-up is issued by its payment. |
+| Bought credit | The credit a paid top-up adds to the customer's balance (`grant_kind` `commit` in the API). |
 | Withdraw | Void a top-up nobody paid. It granted nothing, and its link stops working. |
 
 In the dashboard, **Sell credit** on the customer's Credits section, or on
@@ -33,9 +45,9 @@ the Credits page, makes the same top-up as step 1.
 ## How long the credit lasts
 
 Credit bought with a top-up stays usable for `topup_credit_valid_days` after
-its payment. Set it in the dashboard: **Settings → Invoicing → Bought credit
-lasts (days)**. Leave it blank and the credit never expires, which is the
-default.
+its payment, from 1 to 3650 days. Set it in the dashboard: **Settings →
+Invoicing → Bought credit lasts (days)**. Leave it blank and the credit never
+expires, which is the default.
 
 A top-up copies the setting when it is created, so a change applies to
 top-ups created after it. The setting is changed from a dashboard session:
@@ -47,7 +59,7 @@ dashboard session".
 An invoice with one line that carries `commit_granted_cents`, and nothing
 else, is a top-up. `unit_amount_cents` is what the customer pays, and
 `commit_granted_cents` is the credit they get. Here they pay $90 for $100 of
-credit.
+credit: a $10 discount.
 
 ```bash
 TOPUP=$(jq -n --arg cus "$CUSTOMER_ID" \
@@ -71,8 +83,8 @@ The purchase carries no tax, because the usage the credit pays for is taxed
 read with `GET /v1/invoices/$TOPUP_ID`, shows `credit_valid_days` when the
 credit expires, and leaves it out when it never does.
 
-A top-up is never finalized: its payment issues it. Finalizing it is
-refused.
+You never call finalize on a top-up: its payment issues it, numbering it
+in the same step. Finalizing it is refused.
 
 ```bash
 curl -s -X POST "$HARDCOUNT/v1/invoices/$TOPUP_ID/finalize" \
@@ -152,7 +164,7 @@ curl -s "$HARDCOUNT/v1/credits/balance/$CUSTOMER_ID" \
 
 **You see:** `{"currency":"USD","balance_cents":10000,"total_granted":10000}`
 
-The customer paid $90 and holds $100 of commit credit.
+The customer paid $90 and holds $100 of bought credit.
 
 ## Withdraw a top-up nobody paid
 
@@ -169,7 +181,8 @@ curl -s -X POST "$HARDCOUNT/v1/invoices/$UNPAID_ID/void" \
 
 A charge on it afterwards is refused with `422`. A card payment that still
 arrives is recorded as a payment on a voided invoice, which raises the
-`payment.received_on_voided_invoice` event and grants no credit.
+`payment.received_on_voided_invoice` event and grants no credit. Refund that
+payment in Stripe: the customer paid for an offer you withdrew.
 
 ## What the customer sees
 
@@ -214,8 +227,9 @@ curl -s "$HARDCOUNT/v1/invoices/$TOPUP_ID/payment-timeline" \
 ```
 
 **You see**, for the top-up paid by bank transfer above: `"Top-up created"`,
-`"Invoice finalized"`, `"Offline payment received"`. A withdrawn one ends in
-`"Top-up withdrawn"`.
+`"Invoice issued"`, `"Offline payment received"`, `"Credit added"`. The
+credit row carries the amount and, when the credit expires, its expiry. A
+withdrawn one ends in `"Top-up withdrawn"`.
 
 ## Automatic top-up with your own code
 
@@ -243,32 +257,78 @@ threshold.
   or without a threshold. Handle it the same way if you top up only when
   the credit is gone.
 
-**On each `credit.balance_low` event:**
+**A handler for the event.** This Python handler uses only the standard
+library, and `verify_hardcount_signature` from
+[Receive webhooks](receive-webhooks.md#check-the-signature-in-your-code).
+Call `on_webhook` from your web framework's route with the raw request body
+and the `Hardcount-Signature` header, and answer with the status it returns.
 
-1. **Skip an event you have handled.** Store each event's `id` (`hc_whevt_…`)
-   and stop if you have seen it
-   ([handle each event once](receive-webhooks.md#handle-each-event-once)).
-   Hardcount retries a delivery for about 26 hours, and an idempotency key
-   lasts 24, so your own record is what stops a late retry.
-2. **Read the balance again** with `GET /v1/credits/balance/{customer_id}`.
-   If it is back at or above your threshold, a payment already landed: stop.
-3. **Reuse an unpaid top-up.** List the customer's drafts and keep a top-up
-   in the event's currency:
+```python
+import json, os, urllib.error, urllib.request
 
-   ```bash
-   curl -s "$HARDCOUNT/v1/invoices?customer_id=$CUSTOMER_ID&status=draft" \
-     -H "Authorization: Bearer $HARDCOUNT_KEY" \
-     | jq -c '[.data[] | select(.billing_reason == "topup") | {id, currency, amount_due_cents}]'
-   ```
+HARDCOUNT, KEY = os.environ["HARDCOUNT"], os.environ["HARDCOUNT_KEY"]
+SECRET = os.environ["HARDCOUNT_WEBHOOK_SECRET"]  # whsec_…, shown when the endpoint is made
+SELL = {"unit_amount_cents": 5000, "commit_granted_cents": 5000}  # what one top-up sells
+handled = set()  # event ids you acted on: keep them in your database
 
-   **You see:** `[{"id":"hc_inv_dc2q1ejmajdrmuv09q60","currency":"USD","amount_due_cents":9000}]`,
-   or `[]` when there is none. Never create a new top-up for each webhook.
-4. **Otherwise create one** as in step 1, with the header
-   `Idempotency-Key: topup-create-<event id>`.
-5. **Charge it** with `POST /v1/invoices/{id}/collect` and the header
-   `Idempotency-Key: topup-collect-<event id>`. The event id is random and
-   unique, so a key built from it is too. A redelivered event within 24 hours
-   gets the first answer back and charges nothing.
+def api(method, path, body=None, key=None):
+    headers = {"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
+    if key:
+        headers["Idempotency-Key"] = key
+    req = urllib.request.Request(f"{HARDCOUNT}/v1{path}", None if body is None else json.dumps(body).encode(), headers, method=method)
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, json.load(r)
+    except urllib.error.HTTPError as e:
+        return e.code, json.load(e)
+
+def on_webhook(raw: bytes, signature: str) -> int:
+    if not verify_hardcount_signature(raw, signature, SECRET):
+        return 400
+    event = json.loads(raw)
+    if event["event_type"] != "credit.balance_low" or event["id"] in handled:
+        return 200
+    cus, cur = event["data"]["credit_balance"]["customer_id"], event["data"]["credit_balance"]["currency"]
+    balances = api("GET", f"/credits/balance/{cus}")[1]["data"]
+    if not any(b["currency"] == cur and b["balance_cents"] >= event["data"]["threshold_cents"] for b in balances):
+        drafts = api("GET", f"/invoices?customer_id={cus}&status=draft")[1]["data"]
+        topup = next((i for i in drafts if i["billing_reason"] == "topup" and i["currency"] == cur), None)
+        if topup is None:
+            line = {"description": "Prepaid credit", "line_type": "add_on", "quantity": 1, **SELL}
+            topup = api("POST", "/invoices", {"customer_id": cus, "currency": cur, "line_items": [line]},
+                        key=f"topup-create-{event['id']}")[1]
+        status, _ = api("POST", f"/invoices/{topup['id']}/collect", key=f"topup-collect-{event['id']}")
+        if status == 422:  # no saved card: email the customer the payment link instead
+            email = api("GET", f"/customers/{cus}")[1]["email"]
+            api("POST", f"/invoices/{topup['id']}/send", {"email": email}, key=f"topup-send-{event['id']}")
+    handled.add(event["id"])
+    return 200
+```
+
+What it does, in order:
+
+1. **Checks the signature and skips an event it has handled**, by the
+   event's `id` (`hc_whevt_…`). Hardcount retries a failed delivery for about
+   26 hours, so a short outage of your endpoint loses nothing
+   ([Retries](../webhooks.md#retries)). Keep `handled` in your database, so a
+   restart does not forget it.
+2. **Reads the balance again.** If it is back at or above the threshold, a
+   payment already landed, and it does nothing.
+3. **Reuses an unpaid top-up** in the event's currency, so a second event
+   never makes a second top-up. Otherwise it creates one, with the key
+   `topup-create-<event id>`.
+4. **Charges it** with the key `topup-collect-<event id>`. Hardcount keeps a
+   key's answer for 24 hours, so a delivery repeated within a day gets the
+   first answer back and charges nothing. After that, step 1's record is
+   what stops it.
+5. **Sends the payment link** when the charge answers `422`: the customer
+   has no saved card.
+
+**You see**, on a test server with no Stripe connected: the handler creates
+the top-up (`201`), and the charge answers `422` "customer has no payment
+method set up". The send then answers `409`, because the payment page cannot
+take a card without Stripe. A second crossing for the same customer reuses
+that top-up, and a delivery sent again is skipped.
 
 **What the charge answers, and what to do:**
 
@@ -276,9 +336,9 @@ threshold.
 |---|---|---|
 | `200`, `status` `paid` | Paid, and the credit added | Nothing |
 | `200`, `payment_status` `processing` | Stripe is confirming the payment | Wait for `invoice.paid` |
-| `422`, "customer has no payment method set up" | No saved card. Nothing charged | Send the link (step 2) |
+| `422`, "customer has no payment method set up" | No saved card. Nothing charged | Send the link |
 | `502` `provider_error` | Declined. The top-up stays an unpaid draft | Leave it for the next event, which reuses it, or withdraw it |
-| `502` `payment_outcome_unknown` | Stripe never answered; the card may be charged | Do not retry. Hardcount checks with Stripe and updates the top-up; watch for `invoice.paid` |
+| `502` `payment_outcome_unknown` | Stripe never answered; the card may be charged | Do not retry. Hardcount reads the payment from Stripe, usually within an hour, and sends `invoice.paid` if it went through. If nothing has changed after an hour, look the payment up in the Stripe dashboard |
 | `409` `payment_in_flight` | A charge on it is still running | Nothing |
 
 ## What to ask a lawyer

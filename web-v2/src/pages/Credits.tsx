@@ -311,14 +311,14 @@ export default function CreditsPage() {
             )}
           </div>
           <div className="flex items-center gap-2 mt-1">
-            <Button variant="outline" size="sm" onClick={() => { setModalCustomerId(selectedCustomerId); setShowDeduct(true) }}>
-              <Minus size={16} className="mr-2" /> Deduct
+            <Button size="sm" onClick={() => { setModalCustomerId(selectedCustomerId); setShowSell(true) }}>
+              <Coins size={16} className="mr-2" /> Sell credit
             </Button>
             <Button variant="outline" size="sm" onClick={() => { setModalCustomerId(selectedCustomerId); setShowGrant(true) }}>
               <Plus size={16} className="mr-2" /> Grant
             </Button>
-            <Button size="sm" onClick={() => { setModalCustomerId(selectedCustomerId); setShowSell(true) }}>
-              <Coins size={16} className="mr-2" /> Sell credit
+            <Button variant="outline" size="sm" onClick={() => { setModalCustomerId(selectedCustomerId); setShowDeduct(true) }}>
+              <Minus size={16} className="mr-2" /> Deduct
             </Button>
           </div>
         </div>
@@ -406,7 +406,7 @@ export default function CreditsPage() {
                         <TableCell>
                           <span className="inline-flex items-center gap-1.5">
                             <Badge variant={entryTypeVariant(entry.entry_type)}>{entryTypeLabel(entry.entry_type)}</Badge>
-                            {entry.grant_kind === 'commit' && <Badge variant="outline">Commit</Badge>}
+                            {entry.grant_kind === 'commit' && <Badge variant="outline">Bought</Badge>}
                             {entry.grant_kind === 'promotional' && <Badge variant="secondary">Promo</Badge>}
                           </span>
                         </TableCell>
@@ -543,11 +543,11 @@ export default function CreditsPage() {
         </div>
         {customersWithCredits.size > 0 && (
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => { setModalCustomerId(''); setShowGrant(true) }}>
-              <Plus size={16} className="mr-2" /> Grant credits
-            </Button>
             <Button size="sm" onClick={() => { setModalCustomerId(''); setShowSell(true) }}>
               <Coins size={16} className="mr-2" /> Sell credit
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => { setModalCustomerId(''); setShowGrant(true) }}>
+              <Plus size={16} className="mr-2" /> Grant credits
             </Button>
           </div>
         )}

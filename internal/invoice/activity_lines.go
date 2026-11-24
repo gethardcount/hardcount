@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/activity"
@@ -85,12 +86,32 @@ func createdLine(inv domain.Invoice, actor *activity.Actor, sub *activity.Part) 
 
 // finalizedLine is I-2. The amount is what the invoice asked for when it was
 // finalized: its total, before any credit applied at collection or credit
-// note issued later.
+// note issued later. A top-up is never finalized: its payment issues it.
 func finalizedLine(inv domain.Invoice, actor *activity.Actor) activity.Line {
+	title := "Invoice finalized"
+	if inv.BillingReason == domain.BillingReasonTopup {
+		title = "Invoice issued"
+	}
 	return activity.Line{
-		Kind: "invoice.finalized", Title: "Invoice finalized", Tone: activity.ToneNeutral,
+		Kind: "invoice.finalized", Title: title, Tone: activity.ToneNeutral,
 		Amount: activity.Amount(inv.TotalAmountCents, inv.Currency), Actor: actor,
 	}
+}
+
+// topupGrant is the credit a paid top-up granted.
+type topupGrant struct {
+	cents     int64
+	expiresAt *time.Time
+}
+
+// creditAddedLine is the credit a top-up's payment added to the customer's
+// balance, with its expiry when it has one.
+func creditAddedLine(cents int64, currency string, expiresAt *time.Time) activity.Line {
+	l := activity.Line{Kind: "credit.added", Title: "Credit added", Tone: activity.ToneNeutral, Amount: activity.Amount(cents, currency)}
+	if expiresAt != nil {
+		l.Detail = append(l.Detail, activity.Segment{activity.T("Expires "), activity.At(*expiresAt)})
+	}
+	return l
 }
 
 // voidedLine is I-3: voiding is a choice, not a failure, and it cancels the

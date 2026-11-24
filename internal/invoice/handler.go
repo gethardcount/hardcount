@@ -159,6 +159,13 @@ type EmailEventLister interface {
 	ListByInvoice(ctx context.Context, tenantID, invoiceID, invoiceNumber string) ([]EmailEventRow, error)
 }
 
+// TopupGrantReader reads the credit a paid top-up granted, for its "Credit
+// added" row: the amount and the expiry (nil: never); found is false when it
+// granted none. Satisfied by credit.PostgresStore.TopupGrant.
+type TopupGrantReader interface {
+	TopupGrant(ctx context.Context, tenantID, invoiceID string) (amountCents int64, expiresAt *time.Time, found bool, err error)
+}
+
 // EmailEventRow is the timeline-friendly view of an email_outbox row.
 // Trimmed to the fields the timeline renderer needs.
 type EmailEventRow struct {
@@ -235,6 +242,7 @@ type Handler struct {
 	paymentSetups   PaymentSetupGetter
 	dunning         DunningResolver
 	emailEvents     EmailEventLister
+	topupGrants     TopupGrantReader
 	dunningTimeline DunningTimelineFetcher
 	emailSender     EmailSender
 	refundIssuer    RefundIssuer
@@ -318,6 +326,12 @@ func (h *Handler) SetCollector(c Collector) { h.collector = c }
 // charge attempts, credit notes, dunning) renders unchanged.
 func (h *Handler) SetEmailEvents(lister EmailEventLister) {
 	h.emailEvents = lister
+}
+
+// SetTopupGrants wires the read of a paid top-up's grant, for its "Credit
+// added" row. When nil, the timeline has no such row.
+func (h *Handler) SetTopupGrants(r TopupGrantReader) {
+	h.topupGrants = r
 }
 
 // SetAuditLogger configures audit logging for financial operations.
@@ -1359,7 +1373,9 @@ const (
 	rankRetryAttempted    = 40
 	rankEscalated         = 50
 	rankLifecycleTerminal = 60 // paid / voided / uncollectible
-	rankCreditNote        = 70
+	// A top-up's credit is added by its payment, in the same transaction.
+	rankCreditAdded = 61
+	rankCreditNote  = 70
 	// A credit note that left nothing due marks the invoice paid in its own
 	// transaction: the paid row follows the note that caused it.
 	rankPaidByNote = 71
@@ -1823,6 +1839,16 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		degrade("stripe_refunds", srerr)
 	}
 
+	// The credit a paid top-up granted, in its payment's transaction.
+	var grant *topupGrant
+	if h.topupGrants != nil && inv.BillingReason == domain.BillingReasonTopup && inv.PaidAt != nil {
+		if cents, expires, found, err := h.topupGrants.TopupGrant(ctx, tenantID, inv.ID); err != nil {
+			degrade("credit", err)
+		} else if found {
+			grant = &topupGrant{cents: cents, expiresAt: expires}
+		}
+	}
+
 	// Charge attempts: the one owner of payment rows (ADR-103).
 	attempts, aerr := h.svc.ListChargeAttempts(ctx, tenantID, inv.ID)
 	if aerr != nil {
@@ -1955,6 +1981,10 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		i := addLifecycle("paid", "invoice.paid", *inv.PaidAt, rank,
 			paidLine(inv, retries, note, actor, byNote))
 		events[i].AttemptCount = retries
+		if grant != nil {
+			addLifecycle("credit_added", "credit.added", *inv.PaidAt, rankCreditAdded,
+				creditAddedLine(grant.cents, inv.Currency, grant.expiresAt))
+		}
 	}
 
 	// Credit-note rows. The settlement waterfall on the page already shows

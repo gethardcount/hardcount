@@ -347,6 +347,13 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 	withdrawn := inv
 	withdrawn.BillingReason, withdrawn.InvoiceNumber, withdrawn.SubscriptionID = domain.BillingReasonTopup, "", ""
 	add("voided/top-up withdrawn by person", voidedLine(withdrawn, person))
+	// A top-up is issued by its payment, which adds its credit.
+	issued := inv
+	issued.BillingReason, issued.SubscriptionID = domain.BillingReasonTopup, ""
+	add("finalized/top-up issued by its payment", finalizedLine(issued, nil))
+	add("credit added/never expires", creditAddedLine(10000, "USD", nil))
+	expires := goldenAt.AddDate(1, 0, 0)
+	add("credit added/expires", creditAddedLine(10000, "USD", &expires))
 	due := int64(4900)
 	add("uncollectible/by payment recovery", uncollectibleLine(inv, &due, true, auto))
 	add("uncollectible/by person", uncollectibleLine(inv, &due, false, person))

@@ -1341,7 +1341,7 @@ test('a promotional grant explains commit and promotional credit', async ({ page
   await page.goto(`/customers/${customer.id}`)
   const credits = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Credits', exact: true }) })
   await expect(credits.getByRole('row').filter({ hasText: 'E2E promo credit' })).toBeVisible()
-  await expect(credits.getByText('Commit credit was bought with a top-up. Promotional credit is free and is used up first.')).toBeVisible()
+  await expect(credits.getByText('Bought credit was paid for with a top-up. Promotional credit is free and is used up first.')).toBeVisible()
 })
 
 test('list pages say what each one is for', async ({ page }) => {

@@ -171,3 +171,22 @@ export function hasDocument(inv: { status?: string | null; billing_reason?: stri
 export function showsActivity(inv: { status?: string | null; billing_reason?: string | null }): boolean {
   return inv.status !== 'draft' || isUnpaidTopup(inv)
 }
+
+/**
+ * The credit a top-up sells, from its one commit line: the amount and the
+ * days it lasts after payment (null: it never expires). Null when no line
+ * sells credit.
+ */
+export function topupCredit(
+  items: ReadonlyArray<{ line_type: string; commit_granted_cents?: number | null; credit_valid_days?: number | null }>,
+): { creditCents: number; validDays: number | null } | null {
+  const line = items.find(i => (i.commit_granted_cents ?? 0) > 0)
+  if (!line || line.commit_granted_cents == null) return null
+  return { creditCents: line.commit_granted_cents, validDays: line.credit_valid_days ?? null }
+}
+
+/** How long a top-up's credit lasts, in the operator's words. */
+export function creditLastsText(validDays: number | null): string {
+  if (validDays == null) return 'Never expires'
+  return validDays === 1 ? 'Lasts 1 day after payment' : `Lasts ${validDays} days after payment`
+}

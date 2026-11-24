@@ -224,25 +224,34 @@ export function SellCreditDialog({ customerId, open, onOpenChange }: {
                 const selected = choice === o.value
                 const offered = o.state === 'available'
                 return (
-                  <button
+                  // The card holds the radio and, when what is missing is set
+                  // up in Settings, a link there: never a link inside the radio.
+                  <div
                     key={o.value}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    aria-disabled={!offered}
-                    onClick={() => { if (offered) { setChoice(o.value); setErrors(e => ({ ...e, choice: undefined })) } }}
                     className={cn(
-                      'flex items-start gap-3 rounded-xl border p-3 text-left transition-colors',
+                      'rounded-xl border p-3 transition-colors',
                       selected ? 'border-primary bg-primary/5' : 'border-border',
-                      offered ? (selected ? '' : 'hover:border-foreground/30') : 'cursor-not-allowed opacity-60',
+                      offered && !selected && 'hover:border-foreground/30',
                     )}
                   >
-                    <span aria-hidden className={cn('mt-0.5 h-4 w-4 shrink-0 rounded-full border', selected ? 'border-[5px] border-primary' : 'border-muted-foreground/50')} />
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium text-foreground">{o.label}</span>
-                      <span className="mt-0.5 block text-xs text-muted-foreground">{o.note}</span>
-                    </span>
-                  </button>
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      aria-disabled={!offered}
+                      onClick={() => { if (offered) { setChoice(o.value); setErrors(e => ({ ...e, choice: undefined })) } }}
+                      className={cn('flex w-full items-start gap-3 text-left', !offered && 'cursor-not-allowed opacity-60')}
+                    >
+                      <span aria-hidden className={cn('mt-0.5 h-4 w-4 shrink-0 rounded-full border', selected ? 'border-[5px] border-primary' : 'border-muted-foreground/50')} />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-foreground">{o.label}</span>
+                        {!o.href && <span className="mt-0.5 block text-xs text-muted-foreground">{o.note}</span>}
+                      </span>
+                    </button>
+                    {o.href && (
+                      <Link to={o.href} className="ml-7 mt-0.5 block text-xs text-primary hover:underline">{o.note}</Link>
+                    )}
+                  </div>
                 )
               })}
             </div>

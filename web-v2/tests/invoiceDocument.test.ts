@@ -2,7 +2,7 @@
 // (it used to show "HARDCOUNT" / "Your Company" and "Issued Oct 16" on a draft).
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { hasDocument, issueDates, sellerBlock, sellerMissing, showsActivity } from '../src/lib/invoiceDocument.ts'
+import { creditLastsText, hasDocument, issueDates, sellerBlock, sellerMissing, showsActivity, topupCredit } from '../src/lib/invoiceDocument.ts'
 
 const fmt = (iso: string) => iso.slice(0, 10)
 
@@ -69,4 +69,13 @@ test('a top-up has a PDF only once paid, and Activity while unpaid', () => {
   assert.equal(showsActivity(topup('draft')), true)
   assert.equal(showsActivity({ status: 'draft', billing_reason: 'manual' }), false)
   assert.equal(showsActivity({ status: 'finalized', billing_reason: 'manual' }), true)
+})
+
+test("a top-up's page says the credit it sells and how long it lasts", () => {
+  assert.deepEqual(topupCredit([{ line_type: 'add_on', commit_granted_cents: 10000 }]), { creditCents: 10000, validDays: null })
+  assert.deepEqual(topupCredit([{ line_type: 'add_on', commit_granted_cents: 10000, credit_valid_days: 365 }]), { creditCents: 10000, validDays: 365 })
+  assert.equal(topupCredit([{ line_type: 'usage' }]), null)
+  assert.equal(creditLastsText(null), 'Never expires')
+  assert.equal(creditLastsText(1), 'Lasts 1 day after payment')
+  assert.equal(creditLastsText(365), 'Lasts 365 days after payment')
 })

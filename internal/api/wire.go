@@ -353,6 +353,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	}
 	emailOutboxStore := email.NewOutboxStore(db)
 	invoiceH.SetEmailEvents(&invoiceEmailEventsAdapter{store: emailOutboxStore})
+	invoiceH.SetTopupGrants(creditStore)
 	customerH.SetSentEmailsLister(&customerSentEmailsAdapter{store: emailOutboxStore})
 	// Postmark reports to one platform route: one Postmark account serves
 	// every tenant (ADR-098).
