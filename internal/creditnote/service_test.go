@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -150,30 +149,6 @@ func (m *memStore) ListPendingClawbackDrafts(_ context.Context, _ int, _ bool) (
 	for _, cn := range m.notes {
 		if cn.IssuePending && cn.Status == domain.CreditNoteDraft {
 			out = append(out, cn)
-		}
-	}
-	return out, nil
-}
-
-// ListPendingClawbackDraftsForClock mirrors the wall-clock double for the
-// catchup path, paged as the real list is; the double ignores clock scoping
-// (the real test_clock_id filter is covered by the real-Postgres store test).
-func (m *memStore) ListPendingClawbackDraftsForClock(_ context.Context, _, _ string, afterCreatedAt time.Time, afterID string, batch int) ([]domain.CreditNote, error) {
-	all, _ := m.ListPendingClawbackDrafts(context.Background(), 0, false)
-	sort.Slice(all, func(i, j int) bool {
-		if !all[i].CreatedAt.Equal(all[j].CreatedAt) {
-			return all[i].CreatedAt.Before(all[j].CreatedAt)
-		}
-		return all[i].ID < all[j].ID
-	})
-	var out []domain.CreditNote
-	for _, cn := range all {
-		if cn.CreatedAt.Before(afterCreatedAt) || (cn.CreatedAt.Equal(afterCreatedAt) && cn.ID <= afterID) {
-			continue
-		}
-		out = append(out, cn)
-		if len(out) == batch {
-			break
 		}
 	}
 	return out, nil

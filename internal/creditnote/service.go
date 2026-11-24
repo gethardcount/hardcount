@@ -18,7 +18,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/money"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/tax"
 )
 
@@ -833,61 +832,6 @@ func (s *Service) RetryPendingClawbackIssue(ctx context.Context, batch int) (int
 		}
 	}
 	return issued, errsOut
-}
-
-// RetryPendingClawbackIssueForClock is the catchup counterpart to
-// RetryPendingClawbackIssue (ADR-029 disjoint flows). The Advance path calls it
-// per clock to issue that clock's DEFERRED simulated clawback drafts — the ones
-// whose source invoice was in-flight when the downgrade ran (ADR-059 defer) and
-// has since settled on a later advance. The wall-clock reconciler skips
-// simulated rows (is_simulated=false), so without this a simulated clawback
-// would either never complete or, pre-fix, get issued against wall-clock time.
-//
-// It binds the clock's frozen_time as effective-now, so every clock.Now(ctx)
-// inside Issue()'s coordinator tx — issued_at, updated_at, the credit-ledger
-// grant (paid source) or amount_due relief (unpaid), and the post-commit tax
-// reversal — lands in SIMULATED time, mirroring the engine's in-band bind on the
-// initial downgrade. Per-row errors are collected, not aborted-on.
-func (s *Service) RetryPendingClawbackIssueForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, batch int) (int, []error) {
-	// WithSim: the clock id rides along with frozen_time, so the credit_note
-	// / grant / tax rows Issue() emits inside its coordinator tx land on the
-	// sim axis (ADR-090 §5) — this is the ONLY issuer for a simulated clawback,
-	// so an unstamped row here would be invisible to the clock filter forever.
-	ctx = clock.WithSim(ctx, clock.Sim{At: frozenTime, TestClockID: clockID})
-	var errsOut []error
-	issued := 0
-	// Every page, each note once: a clock has no next tick, and a note the
-	// issue leaves held stays in the list, so the walk moves past it.
-	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.CreditNote, error) {
-		drafts, err := s.store.ListPendingClawbackDraftsForClock(ctx, tenantID, clockID, after.At, after.ID, limit)
-		if err != nil {
-			return nil, fmt.Errorf("list pending clawback drafts for clock %s: %w", clockID, err)
-		}
-		return drafts, nil
-	}
-	for cn, err := range walk.Walk(ctx, "ListPendingClawbackDraftsForClock", list, pendingClawbackDraftKey, batch) {
-		if err != nil {
-			errsOut = append(errsOut, fmt.Errorf("issue the clock's held relief notes: %w", err))
-			break
-		}
-		note, err := s.Issue(ctx, cn.TenantID, cn.ID)
-		if err != nil {
-			errsOut = append(errsOut, fmt.Errorf("re-issue clawback credit note %s: %w", cn.ID, err))
-			continue
-		}
-		// A note still held (its invoice is a draft, or settles later) comes
-		// back unissued and is not counted: it is tried again at each step.
-		if note.Status == domain.CreditNoteIssued {
-			issued++
-		}
-	}
-	return issued, errsOut
-}
-
-// pendingClawbackDraftKey is a held relief note's place in the clock's list,
-// read by (created_at, id).
-func pendingClawbackDraftKey(cn domain.CreditNote) walk.Key {
-	return walk.Key{At: cn.CreatedAt, ID: cn.ID}
 }
 
 // RetryPendingCreditNoteTaxReversal makes the upstream tax reversal for issued

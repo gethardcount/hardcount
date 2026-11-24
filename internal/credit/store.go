@@ -90,12 +90,6 @@ type Store interface {
 	// draws on (domain.CreditDrawOwedSQL, ADR-071 §2).
 	ListExpiredGrants(ctx context.Context) ([]domain.CreditLedgerEntry, error)
 
-	// ListExpiredGrantsForClock is the catchup-path counterpart to
-	// ListExpiredGrants. ADR-029 Phase 4: clock-pinned customer grants
-	// expire only on operator Advance (against the clock's frozen_time),
-	// never on the wall-clock cron tick.
-	ListExpiredGrantsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time) ([]domain.CreditLedgerEntry, error)
-
 	// RetireCommitGrantForInvoiceTx retires the remaining balance of the
 	// commit grant funded by the given invoice, on the caller's tx — the
 	// void leg of ADR-078. Clean no-op (0, nil) when the invoice funded no

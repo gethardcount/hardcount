@@ -1100,8 +1100,8 @@ func TestBillingFailure_SavedTextIsCuratedOrGeneric(t *testing.T) {
 }
 
 // clockSub pins a due subscription to a ready test clock frozen at the fake
-// clock's instant. The pin is written directly: these tests are about the
-// billing run's clock path, not about how a subscription joins a clock.
+// clock's instant. The pin is written directly: the tests are about what
+// billing does with a pinned subscription, not about how one joins a clock.
 func (env *billFailureEnv) clockSub(t *testing.T, code string, plan domain.Plan) (sub domain.Subscription, clockID string) {
 	t.Helper()
 	sub = env.dueSub(t, code, plan, env.periodEnd)
@@ -1115,67 +1115,4 @@ func (env *billFailureEnv) clockSub(t *testing.T, code string, plan domain.Plan)
 		t.Fatalf("pin to clock: %v", err)
 	}
 	return sub, clockID
-}
-
-// TestRunCycleForClock_SavesNoRecordAndIgnoresOne: the test-clock path is
-// unchanged. A failing clock-pinned subscription saves nothing (the clock has
-// its own failure state and Retry advance), a panic there saves nothing
-// either, and a record that somehow sits on a clock-pinned row neither hides
-// it from Advance nor stops it billing.
-func TestRunCycleForClock_SavesNoRecordAndIgnoresOne(t *testing.T) {
-	env := newBillFailureEnv(t, "Billing Failure Clock")
-	a, clockID := env.clockSub(t, "sub-clock", env.planBad)
-	// The store refuses a clock-pinned row on its own, so blank columns alone
-	// cannot show that the engine did not try. Count the write attempts.
-	// Mutation seam: drop `seen.TestClockID != ""` from recordBillFailure and
-	// the count becomes 1.
-	watched := &observedSubs{subStoreAdapter: &subStoreAdapter{env.subs}}
-	env.engine = env.newEngine(watched, env.pricing)
-	logs := captureLogs(t)
-
-	_, errs := env.engine.RunCycleForClock(env.ctx, env.tenantID, clockID, 50)
-	onlyFailure(t, errs, a.ID)
-	if cols := env.billingColumns(t, a.ID); cols != blankBillingColumns {
-		t.Fatalf("a failing clock-pinned subscription saved a record: %s", cols)
-	}
-	if n := watched.writes.Load(); n != 0 {
-		t.Fatalf("the engine attempted %d failure writes for a clock-pinned subscription", n)
-	}
-	// The log line says why a counted failure was not saved.
-	if !strings.Contains(logs.String(), "class=counted recorded=false not_recorded_reason=test_clock") {
-		t.Fatalf("the failure line does not name the reason it was not saved:\n%s", logs.String())
-	}
-
-	env.pricing.fail = func() error { panic("boom on a clock") }
-	recovered := func() (r any) {
-		defer func() { r = recover() }()
-		env.engine.RunCycleForClock(env.ctx, env.tenantID, clockID, 50)
-		return nil
-	}()
-	if recovered == nil {
-		t.Fatal("the panic did not reach the caller: the catch-up's own recover must see it")
-	}
-	if cols := env.billingColumns(t, a.ID); cols != blankBillingColumns {
-		t.Fatalf("a panic on a clock-pinned subscription saved a record: %s", cols)
-	}
-	if n := watched.writes.Load(); n != 0 {
-		t.Fatalf("the engine attempted %d failure writes after a panic on a clock-pinned subscription", n)
-	}
-
-	// A parked record seeded by hand on the clock-pinned row.
-	if _, err := env.admin.ExecContext(env.ctx, `
-		UPDATE subscriptions SET billing_failed_for = next_billing_at, billing_failure_count = 8,
-		       billing_failed_at = next_billing_at, billing_next_attempt_at = NULL, billing_last_error = 'seeded'
-		 WHERE id = $1`, a.ID); err != nil {
-		t.Fatalf("seed record: %v", err)
-	}
-	env.pricing.fail = nil
-	env.pricing.failing.Store(false)
-	if gen, errs := env.engine.RunCycleForClock(env.ctx, env.tenantID, clockID, 50); gen != 1 || len(errs) != 0 {
-		t.Fatalf("Advance over a seeded record: generated=%d errors=%v, want the period billed", gen, errs)
-	}
-	// The wall-clock scans never return a clock-pinned row.
-	if gen, errs := env.engine.RunCycle(env.ctx, 50, nil); gen != 0 || len(errs) != 0 {
-		t.Fatalf("wall-clock run touched a clock-pinned subscription: generated=%d errors=%v", gen, errs)
-	}
 }

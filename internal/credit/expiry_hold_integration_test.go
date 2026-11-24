@@ -52,17 +52,17 @@ func holdCustomer(t *testing.T, ctx context.Context, db *postgres.DB, tenantID, 
 }
 
 // seedSub inserts a subscription of customerID in status whose next period
-// end is next, as the billing run leaves one. clockID pins it to a test clock
-// ("" for wall clock). The hold reads only the status and the due instant.
-func seedSub(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, customerID, status string, next time.Time, clockID string) string {
+// end is next, as the billing run leaves one. The hold reads only the status
+// and the due instant.
+func seedSub(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, customerID, status string, next time.Time) string {
 	t.Helper()
 	id := postgres.NewID("hc_sub")
 	bypassExec(t, db, ctx, `INSERT INTO subscriptions (
 			id, tenant_id, code, display_name, customer_id, status, billing_time,
 			current_billing_period_start, current_billing_period_end, next_billing_at,
-			livemode, test_clock_id)
-		VALUES ($1, $2, $1, $1, $3, $4, 'calendar', $5, $6, $6, false, $7)`,
-		id, tenantID, customerID, status, next.AddDate(0, -1, 0), next, postgres.NullableString(clockID))
+			livemode)
+		VALUES ($1, $2, $1, $1, $3, $4, 'calendar', $5, $6, $6, false)`,
+		id, tenantID, customerID, status, next.AddDate(0, -1, 0), next)
 	return id
 }
 
@@ -140,17 +140,17 @@ func TestExpireCredits_HoldsAGrantWhileAFailedCloseIsOwed(t *testing.T) {
 	due := now.Add(-30 * time.Hour)
 	expires := now.Add(-28 * time.Hour)
 
-	active := seedSub(t, db, ctx, tenantID, cust.ID, "active", due, "")
+	active := seedSub(t, db, ctx, tenantID, cust.ID, "active", due)
 	recordFailure(t, db, ctx, tenantID, active, due, now)
 	activeGrant := seedExpiredGrant(t, db, ctx, svc, tenantID, cust.ID, 5000, expires)
 
 	trialCust := holdCustomer(t, ctx, db, tenantID, "hold_trial")
-	trial := seedSub(t, db, ctx, tenantID, trialCust, "trialing", due, "")
+	trial := seedSub(t, db, ctx, tenantID, trialCust, "trialing", due)
 	recordFailure(t, db, ctx, tenantID, trial, due, now)
 	trialGrant := seedExpiredGrant(t, db, ctx, svc, tenantID, trialCust, 3000, expires)
 
 	canceledCust := holdCustomer(t, ctx, db, tenantID, "hold_canceled")
-	seedSub(t, db, ctx, tenantID, canceledCust, "canceled", due, "")
+	seedSub(t, db, ctx, tenantID, canceledCust, "canceled", due)
 	canceledGrant := seedExpiredGrant(t, db, ctx, svc, tenantID, canceledCust, 2000, expires)
 
 	expireAll(t, ctx, svc)
@@ -194,7 +194,7 @@ func TestExpireCredits_HoldsAGrantWhileAPeriodInvoiceIsUncollected(t *testing.T)
 	issued := now.Add(-3 * time.Hour)
 	expires := now.Add(-2 * time.Hour)
 
-	sub := seedSub(t, db, ctx, tenantID, cust.ID, "active", issued.AddDate(0, 1, 0), "")
+	sub := seedSub(t, db, ctx, tenantID, cust.ID, "active", issued.AddDate(0, 1, 0))
 	grant := seedExpiredGrant(t, db, ctx, svc, tenantID, cust.ID, 4000, expires)
 	draft := seedPeriodInvoice(t, ctx, invoiceStore, tenantID, cust.ID, sub,
 		domain.BillingReasonSubscriptionCycle, domain.InvoiceDraft, domain.InvoiceTaxPending, issued)
@@ -248,43 +248,6 @@ func TestExpireCredits_HoldsAGrantWhileAPeriodInvoiceIsUncollected(t *testing.T)
 	}
 }
 
-// TestExpireCreditsForClock_HoldsAGrantAFailedCloseNeeds: on a test clock
-// the catch-up runs every phase even when one fails, so the expiry phase
-// runs after a failed period close (testclock catch-up, Phase 1 then
-// Phase 4). The grant expired after the period ended and before the clock's
-// frozen time; it is held while the close is owed, and retired once it ran.
-//
-// Fails before the fix. Mutation: drop the hold from ListExpiredGrantsForClock
-// only.
-func TestExpireCreditsForClock_HoldsAGrantAFailedCloseNeeds(t *testing.T) {
-	db, ctx, tenantID, cust, _, svc, _ := expirySetup(t, "expiry_hold_clock")
-	now := time.Now().UTC().Truncate(time.Microsecond)
-	frozen := now.Add(-10 * 24 * time.Hour)
-	clockID := postgres.NewID("hc_tclk")
-	bypassExec(t, db, ctx, `INSERT INTO test_clocks (id, tenant_id, name, frozen_time, status, livemode)
-		VALUES ($1, $2, 'g8', $3, 'ready', false)`, clockID, tenantID, frozen)
-	bypassExec(t, db, ctx, `UPDATE customers SET test_clock_id = $1 WHERE id = $2`, clockID, cust.ID)
-
-	due := frozen.Add(-30 * time.Hour)
-	sub := seedSub(t, db, ctx, tenantID, cust.ID, "active", due, clockID)
-	grant := seedExpiredGrant(t, db, ctx, svc, tenantID, cust.ID, 5000, frozen.Add(-28*time.Hour))
-
-	if _, errs := svc.ExpireCreditsForClock(ctx, tenantID, clockID, frozen); len(errs) > 0 {
-		t.Fatalf("expire for clock: %v", errs)
-	}
-	if got := grantConsumed(t, db, ctx, grant); got != 0 {
-		t.Fatalf("grant consumed=%d after the clock's expiry phase, want 0: the period close is still owed", got)
-	}
-
-	setNextBilling(t, db, ctx, sub, frozen.Add(20*24*time.Hour))
-	if _, errs := svc.ExpireCreditsForClock(ctx, tenantID, clockID, frozen); len(errs) > 0 {
-		t.Fatalf("expire for clock after the close: %v", errs)
-	}
-	if got := grantConsumed(t, db, ctx, grant); got != 5000 {
-		t.Fatalf("grant consumed=%d after the close ran, want 5000 retired", got)
-	}
-}
-
 // TestExpireCredits_NoGrace_HoldIsTheOwedClose: the sweep no longer waits
 // out INVOICE_GRACE_PERIOD after a grant's expiry. A period that ended 30
 // minutes ago is still inside its grace, its close not yet run, so its
@@ -298,7 +261,7 @@ func TestExpireCreditsForClock_HoldsAGrantAFailedCloseNeeds(t *testing.T) {
 func TestExpireCredits_NoGrace_HoldIsTheOwedClose(t *testing.T) {
 	db, ctx, tenantID, cust, _, svc, _ := expirySetup(t, "expiry_hold_no_grace")
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	seedSub(t, db, ctx, tenantID, cust.ID, "active", now.Add(-30*time.Minute), "")
+	seedSub(t, db, ctx, tenantID, cust.ID, "active", now.Add(-30*time.Minute))
 	held := seedExpiredGrant(t, db, ctx, svc, tenantID, cust.ID, 500, now.Add(-10*time.Minute))
 
 	other := holdCustomer(t, ctx, db, tenantID, "hold_no_sub")
@@ -372,7 +335,7 @@ func TestExpireCredits_HoldsAGrantExpiringAtTheDueInstant(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	due := now.Add(-2 * time.Hour)
 
-	sub := seedSub(t, db, ctx, tenantID, cust.ID, "active", due, "")
+	sub := seedSub(t, db, ctx, tenantID, cust.ID, "active", due)
 	recordFailure(t, db, ctx, tenantID, sub, due, now)
 	grant := seedExpiredGrant(t, db, ctx, svc, tenantID, cust.ID, 5000, due)
 
@@ -400,7 +363,7 @@ func TestExpireCredits_HoldsAGrantExpiringAtAPeriodInvoiceIssue(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	issued := now.Add(-3 * time.Hour)
 
-	sub := seedSub(t, db, ctx, tenantID, cust.ID, "active", issued.AddDate(0, 1, 0), "")
+	sub := seedSub(t, db, ctx, tenantID, cust.ID, "active", issued.AddDate(0, 1, 0))
 	grant := seedExpiredGrant(t, db, ctx, svc, tenantID, cust.ID, 4000, issued)
 	draft := seedPeriodInvoice(t, ctx, invoiceStore, tenantID, cust.ID, sub,
 		domain.BillingReasonSubscriptionCycle, domain.InvoiceDraft, domain.InvoiceTaxPending, issued)

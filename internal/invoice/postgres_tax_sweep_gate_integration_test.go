@@ -12,9 +12,7 @@ import (
 // The wall-clock TAX sweeps (retry + commit) complete the invoice-sweep family
 // gated in #417: they too must exclude SIMULATED invoices by the invoice's own
 // durable is_simulated flag, so a customer-pinned one-off (NULL subscription_id)
-// can't leak into a wall-clock Stripe-Tax retry/commit. Simulated-invoice tax is
-// driven by the catchup counterpart (ListPendingTaxRetryForClock / inline
-// CommitTax during Advance). seedSweepInvoice lives in the sibling
+// can't leak into a wall-clock Stripe-Tax retry/commit. seedSweepInvoice lives in the sibling
 // postgres_sim_sweep_gate_integration_test.go.
 
 func TestListPendingTaxRetry_ExcludesSimulatedOneOff(t *testing.T) {

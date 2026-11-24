@@ -277,13 +277,6 @@ func (m *memStore) ListExpiredGrants(_ context.Context) ([]domain.CreditLedgerEn
 	return nil, nil
 }
 
-// ListExpiredGrantsForClock — ADR-029 Phase 4 stub, same rationale as
-// the cron variant above (postgres integration tests own the SQL,
-// memStore satisfies the interface contract for unit tests).
-func (m *memStore) ListExpiredGrantsForClock(_ context.Context, _, _ string, _ time.Time) ([]domain.CreditLedgerEntry, error) {
-	return nil, nil
-}
-
 func (m *memStore) AdjustAtomic(ctx context.Context, tenantID, customerID, currency, description string, amountCents int64) (domain.CreditLedgerEntry, error) {
 	all, err := m.GetBalance(ctx, tenantID, customerID)
 	if err != nil {

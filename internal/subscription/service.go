@@ -15,7 +15,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/platform/walk"
 )
 
 var slugPattern = regexp.MustCompile(`^[a-zA-Z0-9_\-]+$`)
@@ -1100,8 +1099,7 @@ type ProrationDetail struct {
 	ClawbackDraftIDs []string `json:"-"`
 	// AutoChargeInvoiceID is the freshly-created proration CHARGE invoice to
 	// enroll into the auto-charge sweep on the item change's tx
-	// (enrollAutoChargeTx). The sweep then collects it — wall-clock cron for
-	// live subs, test-clock catchup on advance for clock-pinned. Set only on
+	// (enrollAutoChargeTx). The sweep then collects it. Set only on
 	// fresh creation of a positive proration invoice, never on the
 	// dedup-replay path (that invoice may already be paid). Empty for
 	// credit/adjustment paths. Internal.
@@ -2745,8 +2743,7 @@ func (s *Service) ClearScheduledCancel(ctx context.Context, tenantID, id string)
 // PauseCollectionInput carries the collection-pause intent. Behavior is
 // required and must be one of the supported modes (v1: keep_as_draft).
 // ResumesAt is optional; once it passes, the resume sweep lifts the pause,
-// dated at ResumesAt (ProcessExpiredPauseCollections, or
-// ProcessExpiredPauseCollectionsForClock on a test clock). A period that
+// dated at ResumesAt (ProcessExpiredPauseCollections). A period that
 // ended before ResumesAt still closes first, as a draft. When nil, only an
 // explicit DELETE clears it.
 type PauseCollectionInput struct {
@@ -3040,8 +3037,7 @@ func (s *Service) cancelTrialAtEnd(ctx context.Context, tenantID string, sub dom
 	// The trial-end instant is its OWN fact, under its own key. The row's
 	// sim_effective_at is a separate column the audit writer owns from the
 	// ctx binding (simColumns); the two used to collide on one key, with the
-	// writer silently winning. The catchup binds ctx to trial_end_at before
-	// calling this (B12), so on a test clock both now carry the same instant.
+	// writer silently winning.
 	if sub.TrialEndAt != nil {
 		meta["trial_end_at"] = sub.TrialEndAt.UTC().Format(time.RFC3339)
 	}
@@ -3055,142 +3051,9 @@ func (s *Service) cancelTrialAtEnd(ctx context.Context, tenantID string, sub dom
 	return true, nil
 }
 
-// clockJobPage is how many rows a clock job reads at a time; it reads pages
-// until one comes back short.
-const clockJobPage = 100
-
-// ProcessExpiredTrialsForClock is the catchup Phase 0.5 entry point —
-// scans subs pinned to this clock whose trial has elapsed in sim time
-// and flips each from 'trialing' to 'active' at trial_end_at (not at
-// the later cycle close). Bug #8: without this, status stays
-// 'trialing' for the gap between trial_end_at and the first
-// chargeable cycle close (up to ~30 days for calendar billing).
-//
-// Per sub: ActivateAfterTrialWithBill(at=trial_end_at) does the status
-// flip + activated_at stamp and bills in_advance items' first paid
-// period at trial_end_at in the same tx (ADR-056; Bug #6 coverage
-// carries through). A sub whose cancel schedule is due at trial end is
-// canceled free instead (ADR-069, cancelTrialAtEnd). Failures collected
-// but don't abort the batch — one bad sub doesn't stall the others.
-// Returns (processed_count, errors).
-//
-// Subscriptions matched by the scan but already-EndTrial'd by an
-// operator race will land in ActivateAfterTrialWithBill's InvalidState
-// branch — treated as a no-op (already correct state).
-func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, clockID string, frozen time.Time) (int, []error) {
-	var (
-		processed int
-		batchErrs []error
-	)
-	// Every page: a clock has no next tick to pick up what is left.
-	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.Subscription, error) {
-		expired, err := s.store.ListExpiredTrialsForClock(ctx, tenantID, clockID, frozen, after.At, after.ID, limit)
-		if err != nil {
-			return nil, fmt.Errorf("list expired trials: %w", err)
-		}
-		return expired, nil
-	}
-	for sub, err := range walk.Walk(ctx, "ListExpiredTrialsForClock", list, expiredTrialKey, clockJobPage) {
-		if err != nil {
-			batchErrs = append(batchErrs, fmt.Errorf("end the clock's trials: %w", err))
-			break
-		}
-		trialEndAt := *sub.TrialEndAt
-		// The trial ends at trial_end_at, not wherever the advance landed:
-		// override the instant while keeping the clock, as the pause resume
-		// below does. Every branch runs on this ctx: the flip's audit
-		// row, the day-1 invoice (issued at trial_end_at, see
-		// buildOnCreateInvoice), its finalize row and collection, and the
-		// free cancel's row.
-		bound := clock.WithSim(ctx, clock.Sim{At: trialEndAt, TestClockID: clockID})
-		// A due cancel schedule means cancel free, never activate-and-bill
-		// (ADR-069). The SQL guard on the activation UPDATE is the
-		// atomic backstop for a schedule landing after this snapshot.
-		if trialCancelDue(sub) {
-			handled, cErr := s.cancelTrialAtEnd(bound, tenantID, sub)
-			if cErr != nil {
-				batchErrs = append(batchErrs, fmt.Errorf("trial-end cancel sub %s: %w", sub.ID, cErr))
-			} else if handled {
-				processed++
-			}
-			continue
-		}
-		// The day-1 in_advance invoice is written in the same transaction as
-		// the flip (ADR-056): the cycle scan skips the elapsed segment, so a
-		// later bill would never charge it.
-		var firstInv domain.Invoice
-		var haveInv bool
-		activated, err := s.store.ActivateAfterTrialWithBill(bound, tenantID, sub.ID, trialEndAt, func(tx *sql.Tx, a domain.Subscription) error {
-			if s.biller == nil {
-				return nil
-			}
-			inv, ok, billErr := s.biller.BillOnCreateTx(bound, tx, a, trialEndAt)
-			if billErr != nil {
-				return fmt.Errorf("first-invoice-on-trial-expiry: %w", billErr)
-			}
-			firstInv, haveInv = inv, ok
-			return nil
-		})
-		if err != nil {
-			if errors.Is(err, domain.ErrTrialCancelDue) {
-				// A cancel schedule committed between the snapshot and the
-				// flip — the SQL guard blocked the activation. Route it.
-				fresh, gErr := s.store.Get(bound, tenantID, sub.ID)
-				if gErr != nil {
-					// Not domain.ErrLeftForNextRun: nothing was deferred on
-					// purpose, and what is true of the subscription is not known.
-					batchErrs = append(batchErrs, fmt.Errorf("re-read sub %s after its trial-end cancel came due: %w", sub.ID, gErr))
-					continue
-				}
-				if handled, cErr := s.cancelTrialAtEnd(bound, tenantID, fresh); cErr != nil {
-					batchErrs = append(batchErrs, fmt.Errorf("trial-end cancel sub %s: %w", sub.ID, cErr))
-				} else if handled {
-					processed++
-				}
-				continue
-			}
-			// Operator-EndTrial race: the row already left 'trialing'
-			// between the scan SELECT and the UPDATE. Not an error —
-			// just a no-op for this pass. An Extend trial in the same
-			// window leaves it trialing with a later end: not due yet.
-			if errors.Is(err, errs.ErrInvalidState) || errors.Is(err, domain.ErrTrialNotDue) {
-				continue
-			}
-			batchErrs = append(batchErrs, fmt.Errorf("activate sub %s: %w", sub.ID, err))
-			continue
-		}
-
-		// The trial_ended audit row, as the operator's EndTrial writes it.
-		if s.audit != nil {
-			// trial_end_at is its own fact, on every trial-end writer; the
-			// row's sim axis (test_clock_id + sim_effective_at) comes from the
-			// ctx binding on `bound`, which the audit writer owns and which
-			// is trial_end_at here.
-			_ = s.audit.Log(bound, tenantID, domain.AuditActionUpdate, "subscription", activated.ID, activated.Code, map[string]any{
-				"action":       domain.SubAuditTrialEnded,
-				"customer_id":  activated.CustomerID,
-				"triggered_by": "schedule",
-				"trial_end_at": trialEndAt.UTC().Format(time.RFC3339),
-			})
-		}
-
-		// The day-1 invoice's finalize (tax commit and collection) runs after
-		// the commit: Stripe calls never ride a database transaction.
-		if haveInv {
-			s.biller.FinalizeOnCreateInvoice(bound, activated, firstInv)
-		}
-		// subscription.trial_ended (triggered_by=schedule) is enqueued IN
-		// the ActivateAfterTrial tx (store-level DispatchTx subset).
-		processed++
-	}
-	return processed, batchErrs
-}
-
-// ProcessExpiredTrials is the wall-clock cron counterpart to
-// ProcessExpiredTrialsForClock — scans non-clock-pinned trialing
-// subs whose `trial_end_at` has elapsed in wall-clock time and
-// flips each to active at trial_end_at. Same shape as the catchup
-// Phase 0.5: ActivateAfterTrial (atomic flip + activated_at) +
+// ProcessExpiredTrials scans non-clock-pinned trialing subs whose
+// `trial_end_at` has elapsed in wall-clock time and flips each to active at
+// trial_end_at: ActivateAfterTrial (atomic flip + activated_at) +
 // BillOnCreate (in_advance first-paid-period coverage).
 //
 // Livemode partition comes from ctx (the scheduler fans out per
@@ -3198,8 +3061,7 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 // — same shape as every other scheduler-tick processor.
 //
 // ADR-028 disjoint flows: the store query EXPLICITLY EXCLUDES
-// clock-pinned rows (`test_clock_id IS NULL` filter). Those
-// flow through the catchup orchestrator's Phase 0.5 instead.
+// clock-pinned rows (`test_clock_id IS NULL` filter).
 func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []error) {
 	if batch <= 0 {
 		batch = 100
@@ -3225,9 +3087,9 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 		// One instant for this subscription's work; the tick binds none.
 		ctx := clock.EnsureEffectiveNow(ctx, s.clock)
 		trialEndAt := *sub.TrialEndAt
-		// ADR-069 routing: a due cancel schedule cancels FREE — see the
-		// clock-path twin for the rationale; the activation UPDATE's SQL
-		// guard is the atomic backstop.
+		// ADR-069 routing: a due cancel schedule cancels FREE, never
+		// activate-and-bill; the activation UPDATE's SQL guard is the
+		// atomic backstop for a schedule landing after this snapshot.
 		if trialCancelDue(sub) {
 			handled, cErr := s.cancelTrialAtEnd(ctx, sub.TenantID, sub)
 			if cErr != nil {
@@ -3285,8 +3147,8 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 			continue
 		}
 
-		// Audit the auto-flip (wall-clock counterpart of the catchup path's
-		// trial_ended row — no sim metadata, this scan excludes clock-pinned subs).
+		// Audit the auto-flip, as the operator's EndTrial writes it (no sim
+		// metadata: this scan excludes clock-pinned subs).
 		if s.audit != nil {
 			_ = s.audit.Log(ctx, activated.TenantID, domain.AuditActionUpdate, "subscription", activated.ID, activated.Code, map[string]any{
 				"action":       domain.SubAuditTrialEnded,
@@ -3309,69 +3171,10 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 	return processed, batchErrs
 }
 
-// ProcessExpiredPauseCollectionsForClock is the catchup-orchestrator
-// entry point that scans clock-pinned subs whose
-// pause_collection_resumes_at has passed in simulated time and resumes
-// each (resumeListedPause). Runs as a catchup phase AFTER cycle billing,
-// and the store query skips a sub that still owes a close before
-// resumes_at: that close bills the pause as it stood at the period's end,
-// so the pause must still be on the row when it runs.
-//
-// Stripe-parity rationale: Stripe resumes collection AT resumes_at,
-// not at the next cycle close. The pre-fix gate inside billOnePeriod
-// only fired when a cycle was due, so a sub whose resumes_at had
-// passed but whose next_billing_at was still in the future stayed
-// paused indefinitely — first surfaced by an operator running a test
-// clock past resumes_at and observing the pause hadn't lifted.
-func (s *Service) ProcessExpiredPauseCollectionsForClock(ctx context.Context, tenantID, clockID string, frozen time.Time) (int, []error) {
-	var (
-		processed int
-		batchErrs []error
-	)
-	// Every page: a clock has no next tick to pick up what is left.
-	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.Subscription, error) {
-		expired, err := s.store.ListExpiredPauseCollectionsForClock(ctx, tenantID, clockID, frozen, after.At, after.ID, limit)
-		if err != nil {
-			return nil, fmt.Errorf("list expired pause collections: %w", err)
-		}
-		return expired, nil
-	}
-	for sub, err := range walk.Walk(ctx, "ListExpiredPauseCollectionsForClock", list, expiredPauseCollectionKey, clockJobPage) {
-		if err != nil {
-			batchErrs = append(batchErrs, fmt.Errorf("resume the clock's pauses: %w", err))
-			break
-		}
-		ok, err := s.resumeListedPause(ctx, sub)
-		if err != nil {
-			batchErrs = append(batchErrs, err)
-			continue
-		}
-		if ok {
-			processed++
-		}
-	}
-	return processed, batchErrs
-}
-
-// expiredTrialKey is a trial's place in the expired-trials list, read by
-// (trial_end_at, id). The list's own predicate (trial_end_at IS NOT NULL)
-// means every listed row has one.
-func expiredTrialKey(sub domain.Subscription) walk.Key {
-	return walk.Key{At: *sub.TrialEndAt, ID: sub.ID}
-}
-
-// expiredPauseCollectionKey is a pause's place in the expired-pauses list,
-// read by (pause_collection_resumes_at, id). The list's own predicate
-// (resumes_at <= now) means every listed row has a pause and a resume time.
-func expiredPauseCollectionKey(sub domain.Subscription) walk.Key {
-	return walk.Key{At: *sub.PauseCollection.ResumesAt, ID: sub.ID}
-}
-
-// ProcessExpiredPauseCollections is the wall-clock cron counterpart —
-// scans non-clock-pinned subs whose pause_collection_resumes_at has
-// elapsed in wall-clock time. Same shape as the catchup entry above.
-// Per ADR-028 disjoint flows, the store query explicitly excludes
-// clock-pinned rows.
+// ProcessExpiredPauseCollections scans non-clock-pinned subs whose
+// pause_collection_resumes_at has elapsed in wall-clock time and resumes
+// each (resumeListedPause). Per ADR-028 disjoint flows, the store query
+// explicitly excludes clock-pinned rows.
 func (s *Service) ProcessExpiredPauseCollections(ctx context.Context, batch int) (int, []error) {
 	if batch <= 0 {
 		batch = 100

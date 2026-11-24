@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -15,7 +13,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
-	"github.com/gethardcount/hardcount/internal/platform/walk"
 )
 
 type memStore struct {
@@ -26,10 +23,7 @@ type memStore struct {
 	defaultID string
 	runs      map[string]domain.InvoiceDunningRun
 	events    []domain.InvoiceDunningEvent
-	// heldBy says what holds a run's retry, by run id; a run not in it is
-	// held by nothing.
-	heldBy   map[string]domain.ChargeClaimState
-	hookErrs []error // errors returned by UpdateRunIfActive `then` hooks (non-vetoing)
+	hookErrs  []error // errors returned by UpdateRunIfActive `then` hooks (non-vetoing)
 	// started records the dunning.started payloads StartRun enqueued (the
 	// PostgresStore's in-tx outbox row).
 	started []map[string]any
@@ -369,33 +363,6 @@ func (m *memStore) ClaimExhaustion(_ context.Context, _, runID string, expectedA
 	return true, nil
 }
 
-// ListDueRunsForClock — mirrors ListDueRuns but compares against the
-// caller-supplied frozenTime instead of the cron's wall-clock "now," and
-// pages as the store does: (next_action_at, id) order, after the key, with
-// what holds each run from heldBy. Narrow-test version: ignores the
-// clockID filter since memStore has no clock binding (callers pass
-// single-clock fixtures). Postgres integration tests exercise the real SQL.
-func (m *memStore) ListDueRunsForClock(_ context.Context, _, _ string, frozenTime time.Time, after walk.Key, limit int) ([]DueRun, error) {
-	due, _ := m.ListDueRuns(context.Background(), "", frozenTime, len(m.runs))
-	slices.SortFunc(due, func(a, b domain.InvoiceDunningRun) int {
-		if c := a.NextActionAt.Compare(*b.NextActionAt); c != 0 {
-			return c
-		}
-		return strings.Compare(a.ID, b.ID)
-	})
-	var page []DueRun
-	for _, r := range due {
-		if c := r.NextActionAt.Compare(after.At); c < 0 || (c == 0 && r.ID <= after.ID) {
-			continue
-		}
-		page = append(page, DueRun{InvoiceDunningRun: r, HeldBy: m.heldBy[r.ID]})
-		if len(page) == limit {
-			break
-		}
-	}
-	return page, nil
-}
-
 func (m *memStore) ListDueRuns(_ context.Context, _ string, before time.Time, limit int) ([]domain.InvoiceDunningRun, error) {
 	var result []domain.InvoiceDunningRun
 	for _, r := range m.runs {
@@ -684,66 +651,6 @@ func TestProcessDueRuns_MaxRetriesExhausted(t *testing.T) {
 // passed in — the cycle close — not on frozen.
 func inAdvance(ctx context.Context, frozen time.Time) context.Context {
 	return clock.WithSim(ctx, clock.Sim{At: frozen, TestClockID: "clock_1"})
-}
-
-// stepThrough runs the clock's dunning job as an advance to until does: at
-// each time a run of the store falls due, in order, on a context bound to
-// that time.
-func stepThrough(t *testing.T, svc *Service, store *memStore, until time.Time) {
-	t.Helper()
-	for range 50 {
-		var next *time.Time
-		for _, r := range store.runs {
-			if r.State == domain.DunningActive && !r.Paused && r.NextActionAt != nil && !r.NextActionAt.After(until) &&
-				(next == nil || r.NextActionAt.Before(*next)) {
-				at := *r.NextActionAt
-				next = &at
-			}
-		}
-		if next == nil {
-			return
-		}
-		if _, errs := svc.ProcessDueRunsForClock(inAdvance(context.Background(), *next), "t1", "clock_1", *next, 20); len(errs) > 0 {
-			t.Fatalf("the step at %v: %v", *next, errs)
-		}
-	}
-	t.Fatal("stepThrough took 50 steps without the runs moving past the target")
-}
-
-// TestProcessDueRunsForClock_StopsWhenAllAdvancePastFrozen: a step takes
-// each due run once; a run whose next action is after the step's time waits
-// for its own step.
-func TestProcessDueRunsForClock_StopsWhenAllAdvancePastFrozen(t *testing.T) {
-	store := newMemStore()
-	svc := NewService(store, &failingRetrier{}, nil)
-	ctx := context.Background()
-
-	cycleClose := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
-	// Advance only to May 5 — past May 4 retry #1 but before May 7 retry #2.
-	frozen := time.Date(2024, 5, 5, 0, 0, 0, 0, time.UTC)
-
-	if _, err := svc.StartDunning(inAdvance(ctx, frozen), "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
-		t.Fatalf("start dunning: %v", err)
-	}
-
-	processed, errs := svc.ProcessDueRunsForClock(ctx, "t1", "clock_1", frozen, 20)
-	if len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
-	}
-	// Only retry #1 fires (May 4 ≤ May 5); retry #2 is May 7 > May 5.
-	if processed != 1 {
-		t.Errorf("processed: got %d, want 1 (retry #1 only)", processed)
-	}
-	var only domain.InvoiceDunningRun
-	for _, r := range store.runs {
-		only = r
-	}
-	if only.AttemptCount != 1 {
-		t.Errorf("attempt_count: got %d, want 1", only.AttemptCount)
-	}
-	if only.State != domain.DunningActive {
-		t.Errorf("state: got %q, want active (not yet escalated)", only.State)
-	}
 }
 
 // recordingEmailNotifier captures the per-type email enqueues so
@@ -1088,59 +995,6 @@ func TestProcessDueRuns_RecoveryWritesItsOwnRetryRow(t *testing.T) {
 	}
 	if resolvedRow == nil || !resolvedRow.CreatedAt.Equal(retry2At) {
 		t.Errorf("resolved row: %v, want one at %v", resolvedRow, retry2At)
-	}
-}
-
-// clockCapturingRetrier records the ctx time-binding at RetryPayment — the
-// mechanism the paid_at anchor rides on (the charge stamps PI metadata
-// hardcount_anchor_at from clock.SimOf(ctx)).
-type clockCapturingRetrier struct {
-	sims []clock.Sim
-}
-
-func (c *clockCapturingRetrier) RetryPayment(ctx context.Context, _, _, _ string) error {
-	if sim, ok := clock.SimOf(ctx); ok {
-		c.sims = append(c.sims, sim)
-	} else {
-		c.sims = append(c.sims, clock.Sim{})
-	}
-	return fmt.Errorf("payment declined")
-}
-
-// TestProcessDueRunsForClock_ChargeCtxCarriesAnchoredInstant: each retry's
-// charge must fire under a ctx whose Sim instant is the retry's CONTRACTED
-// next_action_at (clock retained) — that binding is what the payment layer
-// reads into the PI's hardcount_anchor_at, which the settle prefers for
-// paid_at. Pre-fix the ctx carried the catchup's advance-end frozen_time
-// for every retry.
-func TestProcessDueRunsForClock_ChargeCtxCarriesAnchoredInstant(t *testing.T) {
-	store := newMemStore()
-	retrier := &clockCapturingRetrier{}
-	svc := NewService(store, retrier, nil)
-	ctx := clock.WithSim(context.Background(), clock.Sim{At: time.Date(2024, 5, 20, 0, 0, 0, 0, time.UTC), TestClockID: "clock_1"})
-
-	cycleClose := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
-	frozen := time.Date(2024, 5, 20, 0, 0, 0, 0, time.UTC)
-	if _, err := svc.StartDunning(inAdvance(ctx, frozen), "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
-		t.Fatalf("start dunning: %v", err)
-	}
-	stepThrough(t, svc, store, frozen)
-
-	wantInstants := []time.Time{
-		cycleClose.Add(72 * time.Hour),                              // retry #1: May 4
-		cycleClose.Add(72*time.Hour + 72*time.Hour),                 // retry #2: May 7
-		cycleClose.Add(72*time.Hour + 72*time.Hour + 120*time.Hour), // retry #3: May 12
-	}
-	if len(retrier.sims) != len(wantInstants) {
-		t.Fatalf("retries: got %d, want %d", len(retrier.sims), len(wantInstants))
-	}
-	for i, want := range wantInstants {
-		if !retrier.sims[i].At.Equal(want) {
-			t.Errorf("retry #%d charge ctx instant: got %v, want the contracted %v (NOT advance-end %v)", i+1, retrier.sims[i].At, want, frozen)
-		}
-		if retrier.sims[i].TestClockID != "clock_1" {
-			t.Errorf("retry #%d lost its clock: %q (WithEffectiveNow would do this — must be WithSim)", i+1, retrier.sims[i].TestClockID)
-		}
 	}
 }
 

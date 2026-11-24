@@ -8,28 +8,17 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/dunning"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// TestListDueRunsForClock_IncludesOneOffInvoiceRuns is the dunning twin of
-// the #510 stranded-one-off regression (invoice.TestListAutoChargePending-
-// ForClock_IncludesOneOffInvoices): the catchup query resolved clock
-// membership through an INNER JOIN on subscriptions, so a dunning run on a
-// ONE-OFF invoice (subscription_id NULL) for a clock-pinned customer
-// matched no rows — and the wall sweep excludes it via is_simulated, so
-// the run could NEVER advance: no retries, no escalation, no final action,
-// forever "active, next retry in Nd". Clock membership now resolves
-// through customers (the pin's owner, ADR-027); a sub's clock always
-// equals its customer's clock (inherit-only), so sub-backed runs are
-// unchanged.
-//
-// Also locks two sibling fixes from the same audit:
-//   - ListRuns surfaces effective_now + test_clock_id for one-off-invoice
-//     runs (the sub join rendered them wall-anchored and badge-less);
+// TestListRuns_OneOffInvoiceRunOnACustomerClock: a dunning run on a one-off
+// invoice (subscription_id NULL) of a clock-pinned customer resolves its
+// clock through the customer (the pin's owner, ADR-027):
+//   - ListRuns surfaces effective_now + test_clock_id for it (the sub join
+//     rendered it wall-anchored and badge-less);
 //   - ListEvents tie-breaks equal created_at by id (creation-ordered xid),
 //     so same-sim-instant cascades render deterministically causal.
-func TestListDueRunsForClock_IncludesOneOffInvoiceRuns(t *testing.T) {
+func TestListRuns_OneOffInvoiceRunOnACustomerClock(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 
@@ -55,59 +44,22 @@ func TestListDueRunsForClock_IncludesOneOffInvoiceRuns(t *testing.T) {
 		VALUES ($1, $2, 'dunoneoff', $3, 'ready', false)`, clockID, tenantID, frozen)
 	mustExec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email, test_clock_id, created_at, updated_at)
 		VALUES ('cus_dun_pin', $1, 'dun_pin', 'Pin', '', $2, $3, $3)`, tenantID, clockID, frozen)
-	mustExec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email, created_at, updated_at)
-		VALUES ('cus_dun_wall', $1, 'dun_wall', 'Wall', '', $2, $2)`, tenantID, frozen)
-	mustExec(`INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status, livemode, test_clock_id)
-		VALUES ('sub_dun_pin', $1, 'dun-pin', 'dun-pin', 'cus_dun_pin', 'active', false, $2)`, tenantID, clockID)
 	mustExec(`INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default, retry_days, final_subscription_action, final_invoice_action, livemode)
 		VALUES ('dpol_oneoff', $1, 'P', true, true, '[3, 3, 3]', 'pause', 'none', false)`, tenantID)
-	seedInvRun := func(invID, custID, subID, runID string, due time.Time) {
-		sub := any(nil)
-		if subID != "" {
-			sub = subID
-		}
-		mustExec(`INSERT INTO invoices (id, tenant_id, customer_id, subscription_id, invoice_number,
+	// A one-off invoice: subscription_id NULL.
+	mustExec(`INSERT INTO invoices (id, tenant_id, customer_id, invoice_number,
 			status, payment_status, is_simulated, currency, subtotal_cents, total_amount_cents,
 			amount_due_cents, tax_status, billing_period_start, billing_period_end, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $1, 'finalized', 'failed', true, 'USD', 2500, 2500, 2500, 'ok', $5, $5, $5, $5)`,
-			invID, tenantID, custID, sub, frozen.Add(-24*time.Hour))
-		mustExec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason, attempt_count, next_action_at, paused, created_at, updated_at, livemode)
-		VALUES ($1, $2, $3, $4, 'dpol_oneoff', 'active', 'payment_failed', 0, $5, false, $6, $6, false)`,
-			runID, tenantID, invID, custID, due, frozen.Add(-24*time.Hour))
-	}
-	seedInvRun("inv_dun_oneoff", "cus_dun_pin", "", "run_oneoff_pin", frozen.Add(-time.Hour))          // the stranded case
-	seedInvRun("inv_dun_cycle", "cus_dun_pin", "sub_dun_pin", "run_cycle_pin", frozen.Add(-time.Hour)) // sub-backed, unchanged
-	seedInvRun("inv_dun_wall", "cus_dun_wall", "", "run_oneoff_wall", frozen.Add(-time.Hour))          // must not leak in
-	// A future-due run on the pinned customer: frozen compare must exclude it.
-	seedInvRun("inv_dun_future", "cus_dun_pin", "", "run_future_pin", frozen.Add(48*time.Hour))
+		VALUES ('inv_dun_oneoff', $1, 'cus_dun_pin', 'inv_dun_oneoff', 'finalized', 'failed', true, 'USD', 2500, 2500, 2500, 'ok', $2, $2, $2, $2)`,
+		tenantID, frozen.Add(-24*time.Hour))
+	mustExec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason, attempt_count, next_action_at, paused, created_at, updated_at, livemode)
+		VALUES ('run_oneoff_pin', $1, 'inv_dun_oneoff', 'cus_dun_pin', 'dpol_oneoff', 'active', 'payment_failed', 0, $2, false, $3, $3, false)`,
+		tenantID, frozen.Add(-time.Hour), frozen.Add(-24*time.Hour))
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
 
 	dstore := dunning.NewPostgresStore(db)
-
-	t.Run("ForClock includes one-off runs via the customer pin", func(t *testing.T) {
-		due, err := dstore.ListDueRunsForClock(ctx, tenantID, clockID, frozen, walk.Key{}, 50)
-		if err != nil {
-			t.Fatalf("ListDueRunsForClock: %v", err)
-		}
-		got := map[string]bool{}
-		for _, r := range due {
-			got[r.ID] = true
-		}
-		if !got["run_oneoff_pin"] {
-			t.Error("one-off invoice's run NOT returned — the subscriptions join stranded it (the #510 class, dunning twin)")
-		}
-		if !got["run_cycle_pin"] {
-			t.Error("sub-backed run not returned — the customers join must cover sub-backed invoices too")
-		}
-		if got["run_oneoff_wall"] {
-			t.Error("wall customer's run leaked into the clock sweep")
-		}
-		if got["run_future_pin"] {
-			t.Error("future-due run returned — must compare against frozen_time")
-		}
-	})
 
 	t.Run("ListRuns anchors one-off runs on the customer clock", func(t *testing.T) {
 		runs, _, err := dstore.ListRuns(ctx, dunning.RunListFilter{TenantID: tenantID})

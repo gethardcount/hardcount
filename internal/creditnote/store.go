@@ -3,7 +3,6 @@ package creditnote
 import (
 	"context"
 	"database/sql"
-	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
 )
@@ -39,10 +38,6 @@ type Store interface {
 	// post-commit Issue() hasn't succeeded yet (issue_pending, status='draft'),
 	// cross-tenant + scoped by livemode, for RetryPendingClawbackIssue.
 	ListPendingClawbackDrafts(ctx context.Context, batch int, livemode bool) ([]domain.CreditNote, error)
-	// ListPendingClawbackDraftsForClock is the catchup counterpart, scoped to one
-	// test clock's simulated customers (ADR-029 disjoint flows). One page,
-	// after (afterCreatedAt, afterID).
-	ListPendingClawbackDraftsForClock(ctx context.Context, tenantID, clockID string, afterCreatedAt time.Time, afterID string, batch int) ([]domain.CreditNote, error)
 	// ListPendingCreditNoteTaxReversal returns issued credit notes that still
 	// owe their upstream tax reversal (tax_reversal_pending) and whose invoice
 	// has a tax transaction to reverse against,

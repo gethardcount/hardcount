@@ -13,21 +13,14 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// TestClawbackForClock_GatesWallClock_IssuesInFrozenTime is the real-Postgres
-// proof of the clawback disjoint flow (ADR-029 / ADR-086 sim-data gating):
-//
-//   - the wall-clock reconciler scan (ListPendingClawbackDrafts) EXCLUDES a
-//     simulated draft, so it never fires a Stripe refund / tax reversal on fake
-//     data against real time;
-//   - the catchup scan (ListPendingClawbackDraftsForClock) returns ONLY that
-//     clock's simulated draft — not the wall-clock draft;
-//   - RetryPendingClawbackIssueForClock issues the simulated draft and stamps
-//     issued_at in SIMULATED (frozen) time, not wall-clock, and leaves the
-//     wall-clock draft untouched.
-func TestClawbackForClock_GatesWallClock_IssuesInFrozenTime(t *testing.T) {
+// TestListPendingClawbackDrafts_ExcludesASimulatedDraft (ADR-029 / ADR-086
+// sim-data gating): the wall-clock reconciler scan excludes a simulated
+// draft, so it never fires a Stripe refund / tax reversal on fake data
+// against real time.
+func TestListPendingClawbackDrafts_ExcludesASimulatedDraft(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "CN Clawback ForClock")
+	tenantID := testutil.CreateTestTenant(t, db, "CN Clawback Sim Gate")
 
 	custStore := customer.NewPostgresStore(db)
 	invStore := invoice.NewPostgresStore(db)
@@ -74,51 +67,12 @@ func TestClawbackForClock_GatesWallClock_IssuesInFrozenTime(t *testing.T) {
 	// build; set it directly here since we seed the draft through the store).
 	execBypassCN(t, db, `UPDATE credit_notes SET is_simulated = true WHERE id = $1`, simCN.ID)
 
-	// 1. Wall-clock reconciler scan excludes the simulated draft.
 	wall, err := cnStore.ListPendingClawbackDrafts(ctx, 100, false)
 	if err != nil {
 		t.Fatalf("wall scan: %v", err)
 	}
 	if got := cnIDs(wall); len(got) != 1 || got[0] != realCN.ID {
 		t.Errorf("wall-clock scan must return ONLY the real draft %s, got %v", realCN.ID, got)
-	}
-
-	// 2. Catchup scan returns ONLY this clock's simulated draft.
-	forClock, err := cnStore.ListPendingClawbackDraftsForClock(ctx, tenantID, clockID, time.Time{}, "", 100)
-	if err != nil {
-		t.Fatalf("forClock scan: %v", err)
-	}
-	if got := cnIDs(forClock); len(got) != 1 || got[0] != simCN.ID {
-		t.Errorf("forClock scan must return ONLY the sim draft %s, got %v", simCN.ID, got)
-	}
-
-	// 3. Issuing via the catchup path stamps issued_at at frozen_time, and leaves
-	//    the wall-clock draft untouched.
-	frozen := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
-	svc := creditnote.NewService(cnStore, invStore, nil, okGranterTx{})
-	n, issueErrs := svc.RetryPendingClawbackIssueForClock(ctx, tenantID, clockID, frozen, 100)
-	if len(issueErrs) > 0 {
-		t.Fatalf("RetryPendingClawbackIssueForClock: %v", issueErrs)
-	}
-	if n != 1 {
-		t.Fatalf("issued count: got %d, want 1", n)
-	}
-	got, err := cnStore.Get(ctx, tenantID, simCN.ID)
-	if err != nil {
-		t.Fatalf("get sim CN: %v", err)
-	}
-	if got.Status != domain.CreditNoteIssued {
-		t.Errorf("sim CN status: got %q, want issued", got.Status)
-	}
-	if got.IssuedAt == nil || !got.IssuedAt.Equal(frozen) {
-		t.Errorf("issued_at: got %v, want frozen %v — must stamp simulated time, not wall-clock", got.IssuedAt, frozen)
-	}
-	realGot, err := cnStore.Get(ctx, tenantID, realCN.ID)
-	if err != nil {
-		t.Fatalf("get real CN: %v", err)
-	}
-	if realGot.Status != domain.CreditNoteDraft {
-		t.Errorf("the wall-clock draft must be untouched by the ForClock issuer, got status %q", realGot.Status)
 	}
 }
 

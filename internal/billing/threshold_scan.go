@@ -132,59 +132,8 @@ func (e *Engine) ScanThresholds(ctx context.Context, batchSize int) (int, []erro
 	return fired, errsOut
 }
 
-// ScanThresholdsForClock is the catchup-path counterpart to
-// ScanThresholds. ADR-029 Phase 3: the wall-clock cron's
-// ListWithThresholds excludes clock-pinned subs; this method is the
-// disjoint per-clock entry point called by the catchup orchestrator
-// after period generation but before charge retry.
-//
-// Per-sub scan logic is identical to the cron path — the only
-// difference is the candidate-fetch scope. Errors collected per-sub,
-// not aborted-on.
-func (e *Engine) ScanThresholdsForClock(ctx context.Context, tenantID, clockID string, batchSize int) (int, []error) {
-	if batchSize <= 0 {
-		batchSize = 50
-	}
-	// Read the clock's whole candidate set, as ScanThresholds does: a clock
-	// with more than batchSize threshold subs must scan all of them in one
-	// Advance.
-	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.Subscription, error) {
-		candidates, err := e.subs.ListWithThresholdsForClock(ctx, tenantID, clockID, after.ID, limit)
-		if err != nil {
-			return nil, fmt.Errorf("list threshold candidates: %w", err)
-		}
-		return candidates, nil
-	}
-	fired := 0
-	var errsOut []error
-	for sub, err := range walk.Walk(ctx, "ListWithThresholdsForClock", list, thresholdCandidateKey, batchSize) {
-		if err != nil {
-			errsOut = append(errsOut, fmt.Errorf("threshold scan on clock %s: %w", clockID, err))
-			break
-		}
-		didFire, err := e.scanOneThreshold(ctx, sub)
-		if err != nil {
-			slog.Error("threshold scan failed for clock-pinned subscription",
-				"subscription_id", sub.ID,
-				"tenant_id", sub.TenantID,
-				"clock_id", clockID,
-				"error", err,
-			)
-			errsOut = append(errsOut, fmt.Errorf("subscription %s: %w", sub.ID, err))
-			continue
-		}
-		if didFire {
-			fired++
-		}
-	}
-	if fired > 0 {
-		slog.Info("threshold scan fired invoices on advance", "clock_id", clockID, "count", fired)
-	}
-	return fired, errsOut
-}
-
-// thresholdCandidateKey is a subscription's place in the threshold lists,
-// which both scans read by id.
+// thresholdCandidateKey is a subscription's place in the threshold list,
+// which the scan reads by id.
 func thresholdCandidateKey(sub domain.Subscription) walk.Key { return walk.Key{ID: sub.ID} }
 
 // scanOneThreshold evaluates a single subscription. Builds running line items
@@ -868,11 +817,8 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 		CreatedAt:          now,
 		NetPaymentTermDays: netDays,
 		BillingReason:      domain.BillingReasonThreshold,
-		// Threshold invoices fire on clock-pinned subs too (the
-		// ScanThresholdsForClock catchup path); without this stamp the
-		// invoice landed is_simulated=false and rendered without the
-		// Simulated badge while sibling cycle/proration invoices on the
-		// same clock showed it. Matches every other engine writer.
+		// A clock-pinned sub's invoice is simulated, as every other engine
+		// writer stamps it.
 		IsSimulated: sub.TestClockID != "",
 	}
 

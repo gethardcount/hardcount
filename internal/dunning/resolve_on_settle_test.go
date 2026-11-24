@@ -428,7 +428,7 @@ func TestProcessRun_StaleSnapshot_DoesNotChargeOrClobber(t *testing.T) {
 	store.runs[run.ID] = sibling
 
 	stale := run // snapshot from before the sibling's attempt (count=1)
-	if err := svc.processRun(context.Background(), "t1", stale, false); err != nil {
+	if err := svc.processRun(context.Background(), "t1", stale); err != nil {
 		t.Fatalf("a stale snapshot must skip quietly, got: %v", err)
 	}
 	if retrier.calls != 0 {

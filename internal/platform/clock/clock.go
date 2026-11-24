@@ -136,10 +136,8 @@ type simKeyType struct{}
 var simKey = simKeyType{}
 
 // WithSim binds a full simulated-time context, instant and clock, to ctx.
-// It is called where the clock is known: by the ForClock and catch-up
-// drivers, which hold the clock id and its frozen_time, and by Decide, which
-// resolves a record's clock. (Catch-up is the work that runs everything that
-// fell due in the time a test clock skipped.)
+// It is called where the clock is known: by Decide, which resolves a
+// record's clock, and where work re-dates an instant on a clock it holds.
 // Every Clock.Now(ctx) below reads s.At.
 // The audit Logger itself stamps every audit row on this ctx onto the sim
 // axis (ADR-090 §5).

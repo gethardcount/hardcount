@@ -537,10 +537,10 @@ func TestCollect_CardRefusalWithoutDeclineCodeIsADecline(t *testing.T) {
 	}
 }
 
-// Which collection job fails on a definite refusal with no decline code: a
-// card refusal fails neither (on a clock the advance goes on; in real time
-// the sweep counts no error); an invalid request fails both, as a fault of
-// the request, so the sweep's failed count and a clock's advance show it.
+// Whether the collection sweep fails on a definite refusal with no decline
+// code: a card refusal does not (the sweep counts no error); an invalid
+// request does, as a fault of the request, so the sweep's failed count shows
+// it.
 func TestCollect_RefusalWithoutDeclineCode_WhichJobsFail(t *testing.T) {
 	for _, c := range []struct {
 		name    string
@@ -550,13 +550,6 @@ func TestCollect_RefusalWithoutDeclineCode_WhichJobsFail(t *testing.T) {
 		{"a card refusal", func(m *mockInvoices) InvoiceCharger { return cardRefusingCharger{store: m} }, 0},
 		{"an invalid request", func(m *mockInvoices) InvoiceCharger { return refusingCharger{store: m} }, 1},
 	} {
-		t.Run(c.name+", on a clock", func(t *testing.T) {
-			inv, _, _, engine := leftHarness(t)
-			engine.charger = c.charger(inv)
-			if _, errs := engine.RetryPendingChargesForClock(postgres.WithLivemode(context.Background(), false), "t1", "tc_1", 50); len(errs) != c.errs {
-				t.Errorf("errors = %v, want %d", errs, c.errs)
-			}
-		})
 		t.Run(c.name+", in real time", func(t *testing.T) {
 			inv, _, _, engine := leftHarness(t)
 			engine.charger = c.charger(inv)

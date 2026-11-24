@@ -162,9 +162,8 @@ func ptr(t time.Time) *time.Time { return &t }
 // TestDueScans_WaitingAndParkedAreSkippedBeforeLimit locks the billing-failure
 // gate in the three wall-clock scans (ADR-119). The oldest due sub is waiting
 // and the second is parked; each scan, asked for ONE row, must return the
-// third. Once the run's instant passes the wait, the first comes back. The
-// clock scan is the control: it carries no gate and returns a row with a
-// parked record.
+// third. Once the run's instant passes the wait, the first comes back. A
+// clock-pinned row with a parked record reads back no record.
 //
 // Mutation seam: drop domain.SubscriptionBillingGateSQL from any gated scan
 // and its subtest fails.
@@ -257,14 +256,7 @@ func TestDueScans_WaitingAndParkedAreSkippedBeforeLimit(t *testing.T) {
 		}
 	})
 
-	t.Run("control: GetDueBillingForClock carries no gate", func(t *testing.T) {
-		got, err := s.store.GetDueBillingForClock(s.ctx, s.tenantID, s.clockID, nil, 50)
-		if err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		if g := ids(got); !slices.Equal(g, []string{"sub_bf_clk_parked"}) {
-			t.Fatalf("got %v, want [sub_bf_clk_parked]: a record on a clock-pinned row must not hide it from Advance", g)
-		}
+	t.Run("a clock-pinned row reads back no record", func(t *testing.T) {
 		if bf := s.get("sub_bf_clk_parked").BillingFailure; bf != nil {
 			t.Fatalf("a clock-pinned row read back a billing failure: %+v", bf)
 		}

@@ -408,117 +408,18 @@ func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
 	}
 }
 
-// A clock-pinned invoice charged on a LATER Advance than its issue (a paused
-// subscription's draft finalized later): its first retry counts from the
-// charge, so the Advance that charged it runs ONE retry and stops — not the
-// whole campaign. Counting from the issue put every retry in the past (each
-// chains off the last in simulated time) and one dunning phase exhausted the
-// run. Real store, real resolver, the catchup's own due-run loop.
-func TestStartDunning_ClockPinnedChargedLater_OneRetryNotTheCampaign_RealStore(t *testing.T) {
-	h := newCollectHarness(t)
-	dstore := dunning.NewPostgresStore(h.db)
-	if _, err := dstore.UpsertPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone,
-	}); err != nil {
-		t.Fatalf("upsert policy: %v", err)
-	}
-	svc := dunning.NewService(dstore, decliningRetrier{}, nil)
-	resolver := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, nil)
-	resolver.SetCustomerReader(customer.NewPostgresStore(h.db))
-	resolver.SetTestClockReader(testclock.NewReader(h.db))
-
-	issued := time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC)  // cycle close; paused → draft
-	charged := time.Date(2027, 6, 1, 0, 0, 0, 0, time.UTC) // finalized and declined on a later Advance
-	frozen := time.Date(2027, 6, 5, 0, 0, 0, 0, time.UTC)  // that Advance's target
-	clockID := postgres.NewID("hc_tclk")
-	execTx(t, h.db, h.ctx, h.tenantID,
-		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)
-		 VALUES ($1, $2, false, 'Charged Later', $3, 'ready')`, clockID, h.tenantID, frozen)
-	cust, err := customer.NewPostgresStore(h.db).Create(h.ctx, h.tenantID, domain.Customer{ExternalID: "cus_charged_later", DisplayName: "Charged Later", TestClockID: clockID})
+// execTx runs one statement in its own tenant transaction.
+func execTx(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, q string, args ...any) {
+	t.Helper()
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		t.Fatalf("create customer: %v", err)
+		t.Fatalf("begin: %v", err)
 	}
-	inv, err := h.invoices.CreateWithLineItems(h.ctx, h.tenantID, domain.Invoice{
-		CustomerID: cust.ID, InvoiceNumber: "INV-CHARGED-LATER",
-		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed,
-		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
-		IssuedAt: &issued,
-	}, nil)
-	if err != nil {
-		t.Fatalf("create invoice: %v", err)
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(ctx, q, args...); err != nil {
+		t.Fatalf("exec %q: %v", q, err)
 	}
-
-	// The failure that starts dunning is decided at the invoice's clock.
-	run, err := svc.StartDunning(testutil.DecidedFor(t, resolver, clock.Pin{TenantID: h.tenantID, InvoiceID: inv.ID}), h.tenantID, inv.ID, cust.ID, charged, domain.DunningCausePaymentFailed)
-	if err != nil {
-		t.Fatalf("start dunning: %v", err)
-	}
-	if want := charged.Add(3 * 24 * time.Hour); run.NextActionAt == nil || !run.NextActionAt.Equal(want) {
-		t.Fatalf("first retry = %v, want %v (charge + 3d)", run.NextActionAt, want)
-	}
-
-	// The clock's dunning job runs at the clock's time.
-	if _, errs := svc.ProcessDueRunsForClock(clock.WithSim(h.ctx, clock.Sim{At: frozen, TestClockID: clockID}), h.tenantID, clockID, frozen, 50); len(errs) > 0 {
-		t.Fatalf("process due runs for clock: %v", errs)
-	}
-	got, err := dstore.GetRunByInvoice(h.ctx, h.tenantID, inv.ID)
-	if err != nil {
-		t.Fatalf("get run: %v", err)
-	}
-	if got.AttemptCount != 1 || got.State != domain.DunningActive {
-		t.Errorf("after the Advance to %v: attempt_count=%d state=%s, want 1 retry (Jun 4) and still active — the next is Jun 7",
-			frozen, got.AttemptCount, got.State)
-	}
-}
-
-// The card-less twin: a paused subscription's draft (issued at the May 1 cycle
-// close) finalized on a later Advance enters collection only then, so its
-// no_payment_method run counts from that collection — not from May 1, which
-// put every retry in the past and let one dunning phase escalate it.
-func TestCollector_CardlessDraftCollectedLater_CountsFromCollection_RealStore(t *testing.T) {
-	h := newCollectHarness(t)
-	dstore := dunning.NewPostgresStore(h.db)
-	if _, err := dstore.UpsertPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone,
-	}); err != nil {
-		t.Fatalf("upsert policy: %v", err)
-	}
-	svc := dunning.NewService(dstore, nil, nil)
-	e := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, dunningServiceStarter{svc: svc})
-	e.SetCustomerReader(customer.NewPostgresStore(h.db))
-	e.SetTestClockReader(testclock.NewReader(h.db))
-
-	issued := time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC)
-	frozen := time.Date(2027, 6, 5, 0, 0, 0, 0, time.UTC) // the Advance that collects it
-	clockID := postgres.NewID("hc_tclk")
-	execTx(t, h.db, h.ctx, h.tenantID,
-		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)
-		 VALUES ($1, $2, false, 'Cardless Later', $3, 'ready')`, clockID, h.tenantID, frozen)
-	cust, err := customer.NewPostgresStore(h.db).Create(h.ctx, h.tenantID, domain.Customer{ExternalID: "cus_cardless_later", DisplayName: "Cardless Later", TestClockID: clockID})
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
-	inv, err := h.invoices.CreateWithLineItems(h.ctx, h.tenantID, domain.Invoice{
-		CustomerID: cust.ID, InvoiceNumber: "INV-CARDLESS-LATER",
-		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
-		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
-		BillingReason: domain.BillingReasonSubscriptionCycle, IssuedAt: &issued,
-	}, nil)
-	if err != nil {
-		t.Fatalf("create invoice: %v", err)
-	}
-
-	advCtx := clock.WithSim(h.ctx, clock.Sim{At: frozen, TestClockID: clockID})
-	if _, errs := e.RetryPendingChargesForClock(advCtx, h.tenantID, clockID, 50); len(errs) > 0 {
-		t.Fatalf("retry pending charges for clock: %v", errs)
-	}
-	run, err := dstore.GetRunByInvoice(h.ctx, h.tenantID, inv.ID)
-	if err != nil {
-		t.Fatalf("card-less invoice must have a dunning run: %v", err)
-	}
-	if want := frozen.Add(3 * 24 * time.Hour); run.NextActionAt == nil || !run.NextActionAt.Equal(want) {
-		t.Errorf("first retry = %v, want %v (collection + 3d), not %v (issue + 3d)", run.NextActionAt, want, issued.Add(3*24*time.Hour))
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
 	}
 }

@@ -15,10 +15,8 @@ import (
 var errChargeClaimRefused = errors.New("another charge of the invoice was running")
 
 // chargeNotMade is a charge this run did not make and a later run makes:
-// domain.ErrLeftForNextRun, joined with why. Its operator message says what
-// happened and what to do. It is true where a test clock's failure reason
-// shows it and in a real-time run's log, which is why each sentence names
-// both.
+// domain.ErrLeftForNextRun, joined with why. Its operator message, in the
+// run's log, says what happened and what to do.
 type chargeNotMade struct {
 	invoice    string // as the operator knows it: its number, else its id
 	why        string // what stopped the charge, in plain words
@@ -32,13 +30,13 @@ type chargeNotMade struct {
 func (e *chargeNotMade) OperatorSafeMessage() string {
 	switch {
 	case e.held && e.keyRefused:
-		return fmt.Sprintf("Invoice %s: Stripe refused this account's API key while charging it, so the result of that charge is not known, and the invoice is not charged again until it is: it cannot be charged twice. Fix the key under Settings → Payments; Hardcount then reads the result on a billing run, within the hour. Retry advance once it has; in real time a later run charges what is left.", e.invoice)
+		return fmt.Sprintf("Invoice %s: Stripe refused this account's API key while charging it, so the result of that charge is not known, and the invoice is not charged again until it is: it cannot be charged twice. Fix the key under Settings → Payments; Hardcount then reads the result on a billing run, within the hour, and a later run charges what is left.", e.invoice)
 	case e.held:
-		return fmt.Sprintf("Invoice %s: an earlier charge attempt has not finished, so it was not charged again: it cannot be charged twice. Hardcount checks that attempt on a billing run, within the hour. Retry advance once the attempt is done; in real time a later run charges what is left.", e.invoice)
+		return fmt.Sprintf("Invoice %s: an earlier charge attempt has not finished, so it was not charged again: it cannot be charged twice. Hardcount checks that attempt on a billing run, within the hour, and a later run charges what is left.", e.invoice)
 	case e.keyRefused:
-		return fmt.Sprintf("Invoice %s was not charged: Stripe refused this account's API key, or none is connected. Nothing was charged. Fix the key under Settings → Payments, then Retry advance; in real time a later run charges it.", e.invoice)
+		return fmt.Sprintf("Invoice %s was not charged: Stripe refused this account's API key, or none is connected. Nothing was charged. Fix the key under Settings → Payments, and a later run charges it.", e.invoice)
 	default:
-		return fmt.Sprintf("Invoice %s was not charged: %s. Nothing was charged. Retry advance; in real time a later run charges it.", e.invoice, e.why)
+		return fmt.Sprintf("Invoice %s was not charged: %s. Nothing was charged. A later run charges it.", e.invoice, e.why)
 	}
 }
 

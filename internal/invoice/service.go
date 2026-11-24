@@ -16,7 +16,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/logging"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/tax"
 )
 
@@ -3075,72 +3074,6 @@ func (s *Service) RetryPendingTaxReversal(ctx context.Context, batch int) (int, 
 		recovered++
 	}
 	return recovered, errsOut
-}
-
-// RetryPendingTaxForClock is the catchup-path counterpart to
-// RetryPendingTax. ADR-029 Phase 2: tax retries on clock-pinned
-// invoices fire only when an operator advances the clock — the
-// wall-clock cron's ListPendingTaxRetry filters them out via NOT
-// EXISTS so the two paths process disjoint row sets.
-//
-// One retry per row per Advance (no backoff gate). Operator-friendly:
-// each click does something visible. Faithful per-window retry-
-// sequence simulation (Stripe-parity event-walking) is deferred —
-// it's a niche use case operators don't typically run, and the
-// trade-off "I clicked Advance and nothing happened" is a worse
-// failure mode for the workflows operators actually exercise.
-//
-// Catchup-side ordering: this runs BEFORE the auto-charge phase so
-// any invoices that get unstuck (tax_status: pending → ok) become
-// charge-eligible in the same Advance click. Without this ordering,
-// an operator who fixes the tax provider then clicks Advance would
-// see the period-gen + auto-charge phases run, but the still-pending
-// tax invoices wouldn't retry until the NEXT advance — confusing.
-func (s *Service) RetryPendingTaxForClock(ctx context.Context, tenantID, clockID string, batch int) (int, []error) {
-	// An advance that skipped the tax retry would end ready with its drafts
-	// still waiting for tax.
-	if s.taxRetrier == nil {
-		return 0, []error{errors.New("retry tax on the clock's invoices: the invoice service has no tax retrier")}
-	}
-	// Same single source as the wall cron above — the catchup scan had
-	// the identical hand-rolled list with the identical drift.
-	codes := domain.TaxRetryableErrorCodes()
-	maxAttempts := domain.MaxTaxRetryAttempts
-	var (
-		processed int
-		errs      []error
-	)
-	// Every page, each draft once: a clock has no next tick, and a draft the
-	// retry leaves waiting stays in the list, so the walk moves past it.
-	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error) {
-		stuck, err := s.store.ListPendingTaxRetryForClock(ctx, tenantID, clockID, codes, maxAttempts,
-			after, limit)
-		if err != nil {
-			return nil, fmt.Errorf("list pending tax retries for clock %s: %w", clockID, err)
-		}
-		return stuck, nil
-	}
-	for inv, err := range walk.Walk(ctx, "ListPendingTaxRetryForClock", list, pendingTaxRetryKey, batch) {
-		if err != nil {
-			errs = append(errs, fmt.Errorf("retry tax on the clock's invoices: %w", err))
-			break
-		}
-		if ctx.Err() != nil {
-			continue // the walk reports the stop once, at its next page
-		}
-		if err := s.retryTaxOne(ctx, inv); err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		processed++
-	}
-	return processed, errs
-}
-
-// pendingTaxRetryKey is a draft's place in the clock's tax-retry list, read
-// by (created_at, id).
-func pendingTaxRetryKey(inv domain.Invoice) walk.Key {
-	return walk.Key{At: inv.CreatedAt, ID: inv.ID}
 }
 
 // retryTaxOne retries tax on one invoice, under the invoice's own tenant:

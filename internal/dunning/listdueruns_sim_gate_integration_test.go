@@ -18,8 +18,7 @@ import (
 // ListDueRuns (the wall-clock dunning-retry sweep) must exclude a run whose
 // invoice is SIMULATED, keyed on the invoice's OWN durable is_simulated flag —
 // the subscriptions-join it replaced missed customer-pinned one-offs, letting a
-// simulated invoice be dunned against wall-clock time (ADR-029). Simulated
-// dunning is driven by the catchup counterpart ListDueRunsForClock instead.
+// simulated invoice be dunned against wall-clock time (ADR-029).
 func TestListDueRuns_ExcludesSimulatedInvoiceRun(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleDunning)

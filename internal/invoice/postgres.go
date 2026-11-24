@@ -2722,10 +2722,9 @@ func (s *PostgresStore) ChargeClaimStateOf(ctx context.Context, tenantID, id str
 }
 
 // invoiceClockNowSQL is the invoice's own now, on the database: the frozen
-// time of the test clock its customer is pinned to, else now(). These are the
-// instants the two sweeps' lists read the pause at (ListAutoChargePending and
-// ListAutoChargePendingForClock), so the claim and the lists agree on whether
-// a timed pause still holds.
+// time of the test clock its customer is pinned to, else now(). now() is the
+// instant the sweep's list (ListAutoChargePending) reads the pause at, so the
+// claim and the list agree on whether a timed pause still holds.
 const invoiceClockNowSQL = `COALESCE((SELECT tc.frozen_time FROM customers pc
 		JOIN test_clocks tc ON tc.id = pc.test_clock_id
 		WHERE pc.id = invoices.customer_id), now())`
@@ -3209,7 +3208,7 @@ func (s *PostgresStore) SetTaxTransaction(ctx context.Context, tenantID, id stri
 	return tx.Commit()
 }
 
-// notPausedForCollection is the SQL predicate both auto-charge sweeps and the
+// notPausedForCollection is the SQL predicate the auto-charge sweep and the
 // auto-charge claim (ClaimAutoCharge) use to honour `pause_collection`. A
 // paused subscription means the operator (or dunning's `pause` final action)
 // stopped automatic collection on it, so nothing automatic may charge its
@@ -3277,8 +3276,7 @@ func (s *PostgresStore) CollectionPausedTx(ctx context.Context, tx *sql.Tx, invo
 //
 // Excludes clock-pinned subscriptions per ADR-029: simulation
 // time progresses only on operator Advance, so the wall-clock scheduler
-// must never charge a clock-pinned invoice. The test-clock catch-up uses
-// ListAutoChargePendingForClock as the disjoint per-clock entry point.
+// must never charge a clock-pinned invoice.
 func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error) {
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
@@ -3302,9 +3300,8 @@ func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after walk.Ke
 	// customer-pinned one-off (empty subscription_id → nothing to join
 	// through), which then leaked into this wall-clock sweep and got
 	// auto-charged/dunned against sim time (ADR-029 violation). Gating on
-	// is_simulated catches every simulated invoice — sub-owned or one-off
-	// — while the catchup path (ListAutoChargePendingForClock) charges the
-	// simulated ones in sim time. Mirrors ListPendingTaxReversal's gate.
+	// is_simulated catches every simulated invoice — sub-owned or one-off.
+	// Mirrors ListPendingTaxReversal's gate.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+invCols+` FROM invoices i
 		WHERE i.auto_charge_pending = TRUE
@@ -3380,68 +3377,6 @@ func (s *PostgresStore) ListFailedWithoutDunningRun(ctx context.Context, olderTh
 		ORDER BY i.updated_at ASC
 		LIMIT $3
 	`, live, olderThan, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var invoices []domain.Invoice
-	for rows.Next() {
-		var inv domain.Invoice
-		if err := rows.Scan(s.scanInvDest(&inv)...); err != nil {
-			return nil, err
-		}
-		invoices = append(invoices, inv)
-	}
-	return invoices, rows.Err()
-}
-
-// ListAutoChargePendingForClock is the catchup-path counterpart to
-// ListAutoChargePending. Returns invoices whose owning CUSTOMER is
-// pinned to the given clock and need auto-charge retry. ADR-029 Phase 1.
-//
-// Clock membership resolves through customers, NOT a subscriptions
-// join: the pin is customer-level (ADR-027; a sub only ever inherits
-// its customer's clock), and an inner subscriptions join silently
-// dropped one-off invoices (subscription_id NULL) — the wall sweep
-// correctly skips them via is_simulated, so a sub-joined catchup left
-// them stranded UNCHARGEABLE forever (found live in FLOW TC4: a
-// clock-pinned one-off with a card on file survived two wall ticks
-// AND an Advance uncharged). Same fix applied to
-// ListPendingTaxRetryForClock below; every other ForClock candidate
-// query already resolves via customers.
-//
-// Time predicate is implicit: the test-clock catch-up calls this AFTER it
-// has finalized any newly-due periods for the same clock, so any
-// auto_charge_pending row that exists is by definition due for a
-// retry attempt. No separate "due_at" filter — cycle math is owned by
-// the period-generation phase.
-//
-// Scoped by tenantID + clockID; livemode is implied (test clocks are
-// test-mode-only, enforced by the test_clocks CHECK constraint).
-func (s *PostgresStore) ListAutoChargePendingForClock(ctx context.Context, tenantID, clockID string, after walk.Key, limit int) ([]domain.Invoice, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
-	if err != nil {
-		return nil, err
-	}
-	defer postgres.Rollback(tx)
-
-	if limit <= 0 {
-		limit = 50
-	}
-	rows, err := tx.QueryContext(ctx, `
-		SELECT `+qualifiedInvCols("i")+` FROM invoices i
-		JOIN customers c ON c.id = i.customer_id
-		WHERE i.auto_charge_pending = TRUE
-		  AND i.payment_status = 'pending'
-		  AND i.status = 'finalized'
-		  AND i.tenant_id = $1
-		  AND c.test_clock_id = $2
-		  AND `+notPausedForCollection("i", "(SELECT tc.frozen_time FROM test_clocks tc WHERE tc.id = $2)")+`
-		  AND (i.created_at, i.id) > ($4, $5)
-		ORDER BY i.created_at ASC, i.id ASC
-		LIMIT $3
-	`, tenantID, clockID, limit, after.At, after.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -3607,11 +3542,9 @@ func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.
 // narrow the scan; the predicate matches the index where clause
 // exactly so the planner picks it.
 // ListPendingTaxRetry — CRON path. ADR-029 Phase 2: clock-pinned
-// invoices are excluded; the test-clock catchup orchestrator drives
-// tax retry for clock-pinned subs via ListPendingTaxRetryForClock.
-// Without this filter the wall-clock scheduler would retry tax on a
-// clock-pinned invoice every tick — same drip-bill smell ADR-028
-// closed for period generation.
+// invoices are excluded. Without this filter the wall-clock scheduler
+// would retry tax on a clock-pinned invoice every tick — same drip-bill
+// smell ADR-028 closed for period generation.
 func (s *PostgresStore) ListPendingTaxRetry(ctx context.Context, batch int, retryableCodes []string, maxAttempts int, livemode bool) ([]domain.Invoice, error) {
 	if batch <= 0 {
 		batch = 50
@@ -3683,18 +3616,7 @@ func (s *PostgresStore) ListPendingTaxRetry(ctx context.Context, batch int, retr
 // invoices never deferred first, then the longest-waiting. The list is across
 // tenants, so without that one tenant's failing invoices held its head.
 //
-// Clock-pinned invoices are excluded — but, unlike ListPendingTaxRetry (which
-// has a real catchup counterpart, ListPendingTaxRetryForClock), there is NO
-// commit-reconciler ForClock half: nothing auto-recovers a clock-pinned commit
-// orphan. This is a deliberate scope cut, not a TODO, because clock-pinned
-// invoices are test-mode by construction (test clocks are livemode=false by DB
-// CHECK constraint, so CommitTax runs against the tenant's sk_test_ Stripe
-// account with no real tax authority). A stranded tax_transaction_id here only
-// breaks *simulated* reversal fidelity on a *simulated* void — never real
-// reporting — and the operator recovers it for free by replaying the clock.
-// Build RetryPendingTaxCommitForClock (mirroring the #267 wall-clock reconciler
-// + ADR-029's ForClock pattern) only when a design partner's test-clock
-// void/credit-note simulation reports a silently no-op'd tax reversal.
+// Clock-pinned invoices are excluded (ADR-029).
 func (s *PostgresStore) ListPendingTaxCommit(ctx context.Context, batch int, livemode bool) ([]domain.Invoice, error) {
 	if batch <= 0 {
 		batch = 50
@@ -3814,11 +3736,7 @@ func (s *PostgresStore) ListPendingTaxCommit(ctx context.Context, batch int, liv
 // Simulated (test-clock) invoices are excluded via is_simulated — the durable
 // write-time flag (ADR-030), which covers BOTH subscription-pinned and
 // customer-pinned one-off invoices (a subscriptions-only NOT EXISTS would miss
-// the latter). Like ListPendingTaxCommit there is no ForClock half: a stranded
-// reversal on a test-mode (livemode=false) void only breaks SIMULATED fidelity,
-// never real tax reporting, and replaying the clock recovers it. Build a
-// ForClock counterpart only when a DP's test-clock void simulation reports a
-// silently no-op'd reversal.
+// the latter).
 func (s *PostgresStore) ListPendingTaxReversal(ctx context.Context, batch int, livemode bool) ([]domain.Invoice, error) {
 	if batch <= 0 {
 		batch = 50
@@ -3907,73 +3825,6 @@ func (s *PostgresStore) MarkTaxReversed(ctx context.Context, tenantID, id string
 		return err
 	}
 	return tx.Commit()
-}
-
-// ListPendingTaxRetryForClock is the catchup-path counterpart to
-// ListPendingTaxRetry. ADR-029 Phase 2.
-//
-// Differences from the cron path:
-//   - Scoped to (tenant, clock) — clock-pinned subs only.
-//   - No `tax_next_retry_at <= now()` predicate. The catchup
-//     orchestrator drives this exactly once per Advance, so backoff
-//     scheduling against simulated instants would silently no-op
-//     small advances and confuse operators (they click Advance
-//     expecting "one shot per pending row"). The retry-count cap
-//     (maxAttempts) still applies as a defense against runaway
-//     retries chewing through the 10-min catchup ceiling.
-//
-// It returns the page after the keyset after: a draft the retry leaves
-// waiting stays in the list, and the cursor moves past it.
-//
-// Design choice (operator-friendly over production-fidelity): each
-// Advance gives every pending row exactly one retry attempt. An
-// operator running through a tax-error rehearsal scenario clicks
-// Advance, sees count go up by 1 per row, and can predict the
-// behaviour without doing backoff arithmetic. Faithful per-window
-// retry-sequence simulation (Stripe-parity event-walking) is
-// deferred to a follow-up ADR — it's a niche use case operators
-// don't typically run, while operator-confusion from "I clicked
-// Advance and nothing happened" is a daily failure mode.
-func (s *PostgresStore) ListPendingTaxRetryForClock(ctx context.Context, tenantID, clockID string, retryableCodes []string, maxAttempts int, after walk.Key, limit int) ([]domain.Invoice, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	if len(retryableCodes) == 0 {
-		return nil, nil
-	}
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
-	if err != nil {
-		return nil, err
-	}
-	defer postgres.Rollback(tx)
-
-	rows, err := tx.QueryContext(ctx, `
-		SELECT `+qualifiedInvCols("i")+` FROM invoices i
-		JOIN customers c ON c.id = i.customer_id
-		WHERE i.tenant_id = $1
-		  AND c.test_clock_id = $2
-		  AND i.status = 'draft'
-		  AND i.tax_status = 'pending'
-		  AND COALESCE(i.tax_error_code, '') = ANY($3)
-		  AND i.tax_retry_count < $4
-		  AND (i.created_at, i.id) > ($5, $6)
-		ORDER BY i.created_at, i.id
-		LIMIT $7
-	`, tenantID, clockID, retryableCodes, maxAttempts, after.At, after.ID, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var out []domain.Invoice
-	for rows.Next() {
-		var inv domain.Invoice
-		if err := rows.Scan(s.scanInvDest(&inv)...); err != nil {
-			return nil, err
-		}
-		out = append(out, inv)
-	}
-	return out, rows.Err()
 }
 
 // ListProviderConfigErrors returns draft invoices stuck on Stripe-

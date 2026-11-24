@@ -67,10 +67,9 @@ type ProrationInvoiceCreator interface {
 	CreateInvoiceWithLineItemsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error)
 	NextInvoiceNumberTx(ctx context.Context, tx *sql.Tx, tenantID string) (string, error)
 	// SetAutoChargePendingTx enrolls a proration CHARGE invoice into the
-	// auto-charge sweep on the item change's transaction, so it collects:
-	// wall-clock RetryPendingCharges for live subs, RetryPendingChargesForClock
-	// during catchup for clock-pinned subs. Without it an
-	// upgrade/add/qty-increase invoice is finalized but never charged, unlike
+	// auto-charge sweep (RetryPendingCharges) on the item change's
+	// transaction, so it collects. Without it an upgrade/add/qty-increase
+	// invoice is finalized but never charged, unlike
 	// engine cycle/create invoices. Idempotent. The sweep's
 	// status='finalized' AND payment_status='pending' filter gates when it
 	// fires, so enrolling a still-draft tax-pending invoice is safe: it stays

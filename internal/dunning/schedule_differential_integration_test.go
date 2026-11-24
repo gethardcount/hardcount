@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,25 +17,20 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
-	"github.com/gethardcount/hardcount/internal/subscription/subscriptiontest"
 	"github.com/gethardcount/hardcount/internal/tenant"
-	"github.com/gethardcount/hardcount/internal/testclock"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // scheduleCase is one dunning schedule and what it must produce. The golden
-// half (wantDays, wantOutcome) is written as days after the failed payment,
-// in neither the old nor the new policy shape, so the same golden checks the
-// schedule however the policy is written.
+// half (wantDays) is written as days after the failed payment, in neither the
+// old nor the new policy shape, so the same golden checks the schedule
+// however the policy is written.
 type scheduleCase struct {
 	name   string
 	policy domain.DunningPolicy
 	// wantDays: the day, counted from the failed payment, of each retry.
 	wantDays []int
-	// wantOutcome: the escalated event's reason (what the final actions did).
-	wantOutcome string
 }
 
 // scheduleCases covers the schedules written today: the seeded default, the
@@ -53,37 +47,37 @@ func scheduleCases() []scheduleCase {
 			name: "seeded default",
 			policy: domain.DunningPolicy{RetryDays: []int{3, 4, 7},
 				FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone},
-			wantDays: []int{3, 7, 14}, wantOutcome: "",
+			wantDays: []int{3, 7, 14},
 		},
 		{
 			name: "recipe policy",
 			policy: domain.DunningPolicy{RetryDays: []int{3, 1, 3, 7},
 				FinalSubscriptionAction: domain.SubActionPause, FinalInvoiceAction: domain.InvActionMarkUncollectible},
-			wantDays: []int{3, 4, 7, 14}, wantOutcome: "subscription_paused+invoice_marked_uncollectible",
+			wantDays: []int{3, 4, 7, 14},
 		},
 		{
 			name: "one retry",
 			policy: domain.DunningPolicy{RetryDays: []int{1},
 				FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionNone},
-			wantDays: []int{1}, wantOutcome: "subscription_canceled",
+			wantDays: []int{1},
 		},
 		{
 			name: "entries past the last retry",
 			policy: domain.DunningPolicy{RetryDays: []int{2, 2},
 				FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible},
-			wantDays: []int{2, 4}, wantOutcome: "invoice_marked_uncollectible",
+			wantDays: []int{2, 4},
 		},
 		{
 			name: "fifteen retries",
 			policy: domain.DunningPolicy{RetryDays: []int{30, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
 				FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone},
-			wantDays: []int{30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44}, wantOutcome: "",
+			wantDays: []int{30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44},
 		},
 		{
 			name: "uneven waits",
 			policy: domain.DunningPolicy{RetryDays: []int{5, 5, 1, 10},
 				FinalSubscriptionAction: domain.SubActionPause, FinalInvoiceAction: domain.InvActionNone},
-			wantDays: []int{5, 10, 11, 21}, wantOutcome: "subscription_paused",
+			wantDays: []int{5, 10, 11, 21},
 		},
 	}
 }
@@ -94,72 +88,29 @@ var diffFailedAt = time.Date(2027, 3, 10, 9, 30, 0, 0, time.UTC)
 
 const diffHorizonDays = 60 // past every case's last retry
 
-// oneClockResolver resolves every pin to the one test clock this test puts
-// all its entities on, reading frozen_time from the database each time: the
-// answer billing.Engine's resolvers give for a pinned entity.
-type oneClockResolver struct {
-	clocks   *testclock.Reader
-	tenantID string
-	clockID  string
-}
-
-func (r oneClockResolver) sim(ctx context.Context) (clock.Sim, error) {
-	tc, err := r.clocks.Get(ctx, r.tenantID, r.clockID)
-	if err != nil {
-		return clock.Sim{}, err
-	}
-	return clock.Sim{At: tc.FrozenTime, TestClockID: r.clockID}, nil
-}
-
-func (r oneClockResolver) SimForCustomer(ctx context.Context, _, _ string) (clock.Sim, error) {
-	return r.sim(ctx)
-}
-func (r oneClockResolver) SimForSubscription(ctx context.Context, _, _ string) (clock.Sim, error) {
-	return r.sim(ctx)
-}
-func (r oneClockResolver) SimForInvoice(ctx context.Context, _, _ string) (clock.Sim, error) {
-	return r.sim(ctx)
-}
-
 // TestSchedule_Differential pins every retry instant, every reminder and
 // escalation email, and the final action, for each schedule in
-// scheduleCases, on two timelines: a test clock advanced a day at a time,
-// and the wall clock ticked a day at a time.
+// scheduleCases, with the wall clock ticked a day at a time.
 //
 // The goldens were recorded with today's policy shape. Changing how the
 // schedule is written (#B8) must leave every one of them unchanged.
 func TestSchedule_Differential(t *testing.T) {
 	for _, tc := range scheduleCases() {
-		for _, arm := range []string{"test clock, daily advances", "wall clock, daily ticks"} {
-			t.Run(tc.name+"/"+arm, func(t *testing.T) {
-				runScheduleCase(t, tc, arm)
-			})
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			runScheduleCase(t, tc)
+		})
 	}
 }
 
-func runScheduleCase(t *testing.T, tc scheduleCase, arm string) {
+func runScheduleCase(t *testing.T, tc scheduleCase) {
 	db := testutil.SetupTestDB(t)
 	admin := testutil.AdminPool(t)
 	ctx := leadertest.Token(t, admin, postgres.WithLivemode(context.Background(), false), leader.RoleDunning)
 	tenantID := testutil.CreateTestTenant(t, db, "Schedule Differential")
-	onClock := arm != "wall clock, daily ticks"
-
-	var clockID string
-	var resolver clock.Resolver
-	clocks := testclock.NewReader(db)
-	if onClock {
-		clockID = postgres.NewID("hc_tclk")
-		if _, err := admin.Exec(`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)
-			VALUES ($1, $2, false, 'schedule differential', $3, 'advancing')`, clockID, tenantID, diffFailedAt); err != nil {
-			t.Fatalf("insert clock: %v", err)
-		}
-		resolver = oneClockResolver{clocks: clocks, tenantID: tenantID, clockID: clockID}
-	}
 	wall := clock.NewFake(diffFailedAt)
 
 	cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{
-		ExternalID: "cus_sched_diff", DisplayName: "Schedule Differential", TestClockID: clockID,
+		ExternalID: "cus_sched_diff", DisplayName: "Schedule Differential",
 	})
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
@@ -168,41 +119,13 @@ func runScheduleCase(t *testing.T, tc scheduleCase, arm string) {
 	draft := domain.Invoice{
 		CustomerID: cust.ID, InvoiceNumber: "INV-SCHED-DIFF",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, Currency: "USD",
-		SubtotalCents: 4900, TotalAmountCents: 4900, AmountDueCents: 4900, IsSimulated: onClock,
+		SubtotalCents: 4900, TotalAmountCents: 4900, AmountDueCents: 4900,
 		BillingPeriodStart: diffFailedAt.Add(-24 * time.Hour), BillingPeriodEnd: diffFailedAt, IssuedAt: &diffFailedAt,
 	}
-	// The subscription's final action needs a subscription. On the wall
-	// clock the subscription movers date from the real clock, not the fake
-	// one, so that arm checks the schedule on a one-off invoice: the
-	// subscription half of the outcome is then nothing, by design.
+	// The subscription movers date from the real clock, not the fake one, so
+	// the schedule is checked on a one-off invoice: the subscription half of
+	// the outcome is then nothing, by design.
 	subStore := subscription.NewPostgresStore(db)
-	var subID string
-	if onClock {
-		plan, err := pricing.NewPostgresStore(db).CreatePlan(ctx, tenantID, domain.Plan{
-			Code: "pro", Name: "Pro", Currency: "USD", BillingInterval: domain.BillingMonthly,
-			Status: domain.PlanActive, BaseAmountCents: 4900, BaseBillTiming: domain.BillInAdvance,
-		})
-		if err != nil {
-			t.Fatalf("create plan: %v", err)
-		}
-		// The current period outlasts the horizon, so no final action has a
-		// period end to bill first.
-		periodStart := diffFailedAt.Add(-24 * time.Hour)
-		periodEnd := periodStart.AddDate(0, 3, 0)
-		sub, err := subStore.Create(ctx, tenantID, domain.Subscription{
-			Code: "sub-sched-diff", DisplayName: "Schedule Differential", CustomerID: cust.ID, TestClockID: clockID,
-			Items:  []domain.SubscriptionItem{{PlanID: plan.ID, Quantity: 1}},
-			Status: domain.SubscriptionActive, BillingTime: domain.BillingTimeCalendar,
-			StartedAt: &periodStart, CurrentBillingPeriodStart: &periodStart, CurrentBillingPeriodEnd: &periodEnd,
-		})
-		if err != nil {
-			t.Fatalf("create subscription: %v", err)
-		}
-		subscriptiontest.SetBillingCycle(t, ctx, db, tenantID, sub.ID, periodStart, periodEnd, periodEnd, 0)
-		subID = sub.ID
-		draft.SubscriptionID = sub.ID
-		draft.BillingPeriodStart, draft.BillingPeriodEnd = periodStart, periodEnd
-	}
 	inv, err := invoices.CreateWithLineItems(ctx, tenantID, draft, nil)
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
@@ -211,16 +134,8 @@ func runScheduleCase(t *testing.T, tc scheduleCase, arm string) {
 	runs := dunning.NewPostgresStore(db)
 	retrier := &declinedRetry{invoices: invoices}
 	svc := dunning.NewService(runs, retrier, wall)
-	svcClock := clock.Clock(clock.Real())
-	if !onClock {
-		svcClock = wall
-	}
-	subSvc := subscription.NewService(subStore, svcClock)
-	invSvc := invoice.NewService(invoices, svcClock, tenant.NewSettingsStore(db))
-	if onClock {
-		subSvc.SetResolver(resolver)
-		invSvc.SetResolver(resolver)
-	}
+	subSvc := subscription.NewService(subStore, wall)
+	invSvc := invoice.NewService(invoices, wall, tenant.NewSettingsStore(db))
 	subSvc.SetAuditLogger(audit.NewLogger(db))
 	svc.SetSubscriptionPauser(dunningMovers{svc: subSvc}, invoices)
 	svc.SetSubscriptionCanceler(dunningMovers{svc: subSvc})
@@ -239,15 +154,8 @@ func runScheduleCase(t *testing.T, tc scheduleCase, arm string) {
 		t.Fatalf("set default policy: %v", err)
 	}
 
-	// The failure that starts dunning is decided at the invoice's time: its
-	// clock on the clock arm, real time on the wall-clock arm.
-	failCtx := clock.WithRealTime(ctx)
-	if onClock {
-		if failCtx, err = clock.Decide(ctx, resolver, clock.Pin{TenantID: tenantID, InvoiceID: inv.ID}); err != nil {
-			t.Fatalf("decide the failure's time: %v", err)
-		}
-	}
-	run, err := svc.StartDunning(failCtx, tenantID, inv.ID, cust.ID, diffFailedAt, domain.DunningCausePaymentFailed)
+	// The failure that starts dunning is decided at real time.
+	run, err := svc.StartDunning(clock.WithRealTime(ctx), tenantID, inv.ID, cust.ID, diffFailedAt, domain.DunningCausePaymentFailed)
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}
@@ -257,16 +165,6 @@ func runScheduleCase(t *testing.T, tc scheduleCase, arm string) {
 
 	advance := func(to time.Time) {
 		t.Helper()
-		if onClock {
-			if _, err := admin.Exec(`UPDATE test_clocks SET frozen_time = $1 WHERE id = $2`, to, clockID); err != nil {
-				t.Fatalf("advance clock: %v", err)
-			}
-			simCtx := clock.WithSim(ctx, clock.Sim{At: to, TestClockID: clockID})
-			if _, errs := svc.ProcessDueRunsForClock(simCtx, tenantID, clockID, to, 20); len(errs) != 0 {
-				t.Fatalf("dunning catchup to %s: %v", to, errs)
-			}
-			return
-		}
 		wall.Set(to)
 		if _, errs := svc.ProcessDueRuns(ctx, tenantID, 20); len(errs) != 0 {
 			t.Fatalf("dunning tick at %s: %v", to, errs)
@@ -315,9 +213,6 @@ func runScheduleCase(t *testing.T, tc scheduleCase, arm string) {
 		case domain.DunningEventEscalated:
 			escalated++
 			wantInstant(t, "escalated event", e.CreatedAt, last)
-			if e.Reason != tc.wantOutcome && onClock {
-				t.Errorf("escalated reason %q, want %q", e.Reason, tc.wantOutcome)
-			}
 		}
 	}
 	if fmt.Sprint(instants(retryAt)) != fmt.Sprint(instants(want)) {
@@ -338,15 +233,10 @@ func runScheduleCase(t *testing.T, tc scheduleCase, arm string) {
 	var wantEmails []sent
 	for i := range want[:len(want)-1] {
 		wantEmails = append(wantEmails, sent{Type: email.TypeDunningWarning, Attempt: i + 1, Max: len(want),
-			NextRetryDate: want[i+1].Format("January 2, 2006"), SimAt: simStamp(onClock, want[i])})
+			NextRetryDate: want[i+1].Format("January 2, 2006")})
 	}
-	escalation := sent{Type: email.TypeDunningEscalation, SimAt: simStamp(onClock, last)}
-	if onClock {
-		escalation.Outcome = outcomeOf(tc.wantOutcome)
-	} else {
-		escalation.Outcome = domain.DunningEscalationOutcome{InvoiceWrittenOff: tc.policy.FinalInvoiceAction == domain.InvActionMarkUncollectible}
-	}
-	wantEmails = append(wantEmails, escalation)
+	wantEmails = append(wantEmails, sent{Type: email.TypeDunningEscalation,
+		Outcome: domain.DunningEscalationOutcome{InvoiceWrittenOff: tc.policy.FinalInvoiceAction == domain.InvActionMarkUncollectible}})
 
 	rows, err := admin.Query(`SELECT email_type, payload,
 			CASE WHEN test_clock_id IS NOT NULL THEN effective_at END FROM email_outbox
@@ -395,31 +285,6 @@ func runScheduleCase(t *testing.T, tc scheduleCase, arm string) {
 	if (gotInv.Status == domain.InvoiceUncollectible) != wantWrittenOff {
 		t.Errorf("invoice status %s, want written off: %v", gotInv.Status, wantWrittenOff)
 	}
-	if wantWrittenOff && onClock {
-		if gotInv.UncollectibleAt == nil || !gotInv.UncollectibleAt.Equal(last) {
-			t.Errorf("uncollectible_at = %v, want %v", gotInv.UncollectibleAt, last)
-		}
-	}
-	if onClock {
-		sub, err := subStore.Get(ctx, tenantID, subID)
-		if err != nil {
-			t.Fatalf("read subscription: %v", err)
-		}
-		switch tc.policy.FinalSubscriptionAction {
-		case domain.SubActionCancel:
-			if sub.Status != domain.SubscriptionCanceled {
-				t.Errorf("subscription %s, want canceled", sub.Status)
-			}
-		case domain.SubActionPause:
-			if sub.PauseCollection == nil {
-				t.Errorf("subscription collection not paused")
-			}
-		case domain.SubActionNone:
-			if sub.Status != domain.SubscriptionActive || sub.PauseCollection != nil {
-				t.Errorf("subscription %s pause=%v, want untouched", sub.Status, sub.PauseCollection)
-			}
-		}
-	}
 }
 
 func instants(ts []time.Time) []string {
@@ -428,28 +293,4 @@ func instants(ts []time.Time) []string {
 		out[i] = t.UTC().Format(time.RFC3339)
 	}
 	return out
-}
-
-// simStamp is the email row's effective_at on a test clock: the simulated
-// instant; none is compared on the wall clock.
-func simStamp(onClock bool, at time.Time) string {
-	if !onClock {
-		return ""
-	}
-	return at.UTC().Format(time.RFC3339)
-}
-
-func outcomeOf(reason string) domain.DunningEscalationOutcome {
-	var o domain.DunningEscalationOutcome
-	for _, part := range strings.Split(reason, "+") {
-		switch part {
-		case "subscription_paused":
-			o.SubscriptionPaused = true
-		case "subscription_canceled":
-			o.SubscriptionCanceled = true
-		case "invoice_marked_uncollectible":
-			o.InvoiceWrittenOff = true
-		}
-	}
-	return o
 }

@@ -1,12 +1,10 @@
 package domain
 
-import "strconv"
-
 // A charge of an open invoice is in flight while its payment's result is not
 // known yet (unknown or processing), while a charge attempt holds it (a
 // charge hold, live or stale), or while the customer may be paying it on the
-// hosted page. Every charge claim refuses such an invoice, and both dunning
-// due lists leave its run out. One definition, so they cannot drift apart:
+// hosted page. Every charge claim refuses such an invoice, and the dunning
+// due list leaves its run out. One definition, so they cannot drift apart:
 // each condition below holds when its reason does NOT apply. alias names the
 // invoices row in the query, "invoices" when the table has no alias; it is
 // never empty, since the hosted-page condition's subquery has an id of its
@@ -59,15 +57,3 @@ func ChargeNotInFlightSQL(alias string) string {
 }
 
 func column(alias, name string) string { return alias + "." + name }
-
-// ChargeInFlightStateSQL says what holds an invoice's charge: for the first
-// of ChargeNotInFlight(alias) that is not true (false or NULL, as a WHERE
-// takes neither), its IfFalse; else ChargeClaimable. The states are written
-// as their integers, so the result scans into a ChargeClaimState.
-func ChargeInFlightStateSQL(alias string) string {
-	s := "CASE"
-	for _, c := range ChargeNotInFlight(alias) {
-		s += " WHEN (" + c.SQL + ") IS NOT TRUE THEN " + strconv.Itoa(int(c.IfFalse))
-	}
-	return s + " ELSE " + strconv.Itoa(int(ChargeClaimable)) + " END"
-}

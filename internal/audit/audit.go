@@ -248,16 +248,14 @@ type Entry struct {
 
 // SIM-AXIS COVERAGE (ADR-090 §5) — what ?test_clock_id= can and cannot see.
 //
-// COVERED: every path that runs under a clock binding. That is every ForClock /
-// catchup phase (the advance binds clock.WithSim, so finalize, cancel, clawback
-// issue, dunning and threshold rows all inherit it), every entry point whose
-// time is decided from its record (clock.Decide binds the record's clock id
-// with its instant: the API's door, and the functions that decide their own
-// time), the handler-level emitters that bind explicitly before emitting
-// (invoice, subscription, customer — including CREATE, which binds from the
-// clock it is handed because the customer pin does not exist yet — dunning),
-// and the test-clock service, which binds each change's row to the clock it
-// changes.
+// COVERED: every path that runs under a clock binding. That is every entry
+// point whose time is decided from its record (clock.Decide binds the
+// record's clock id with its instant: the API's door, and the functions that
+// decide their own time), the handler-level emitters that bind explicitly
+// before emitting (invoice, subscription, customer — including CREATE, which
+// binds from the clock it is handed because the customer pin does not exist
+// yet — dunning), and the test-clock service, which binds each change's row
+// to the clock it changes.
 // Credit notes are covered on every route: each request is decided from its
 // credit note or invoice (the API's door; a create, from the invoice its body
 // names) and creditnote.Service keeps that decision, so the in-tx rows and
@@ -338,8 +336,7 @@ type Entry struct {
 // own key — do not overload this one.
 //
 // Both halves come from one clock.Sim, resolved from one read of the clock
-// (clock.Resolver / the ForClock drivers), so the column pair can never
-// disagree with itself. A partial binding reports Simulated()=false and is
+// (clock.Resolver), so the column pair can never disagree with itself. A partial binding reports Simulated()=false and is
 // treated as absent rather than half-stamped: a row with a clock id and a
 // wall-clock instant would sit IN the partial index and answer sim-time
 // queries with a lie.

@@ -37,10 +37,6 @@ func (a *subStoreAdapter) GetDueBilling(ctx context.Context, now, dueBy time.Tim
 	return a.store.GetDueBilling(ctx, now, dueBy, exclude, limit)
 }
 
-func (a *subStoreAdapter) GetDueBillingForClock(ctx context.Context, tenantID, clockID string, exclude []string, limit int) ([]domain.Subscription, error) {
-	return a.store.GetDueBillingForClock(ctx, tenantID, clockID, exclude, limit)
-}
-
 func (a *subStoreAdapter) GetDueBillingForTenant(ctx context.Context, tenantID string, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
 	return a.store.GetDueBillingForTenant(ctx, tenantID, now, dueBy, exclude, limit)
 }
@@ -79,10 +75,6 @@ func (a *subStoreAdapter) ClearPauseCollection(ctx context.Context, tenantID, id
 
 func (a *subStoreAdapter) ListWithThresholds(ctx context.Context, livemode bool, afterID string, limit int) ([]domain.Subscription, error) {
 	return a.store.ListWithThresholds(ctx, livemode, afterID, limit)
-}
-
-func (a *subStoreAdapter) ListWithThresholdsForClock(ctx context.Context, tenantID, clockID, afterID string, limit int) ([]domain.Subscription, error) {
-	return a.store.ListWithThresholdsForClock(ctx, tenantID, clockID, afterID, limit)
 }
 
 func (a *subStoreAdapter) ListItemChangesInPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) ([]domain.SubscriptionItemChange, error) {
@@ -170,10 +162,6 @@ func (a *invoiceStoreAdapter) ListAutoChargePending(ctx context.Context, after w
 
 func (a *invoiceStoreAdapter) ListFailedWithoutDunningRun(ctx context.Context, olderThan time.Time, limit int) ([]domain.Invoice, error) {
 	return a.store.ListFailedWithoutDunningRun(ctx, olderThan, limit)
-}
-
-func (a *invoiceStoreAdapter) ListAutoChargePendingForClock(ctx context.Context, tenantID, clockID string, after walk.Key, limit int) ([]domain.Invoice, error) {
-	return a.store.ListAutoChargePendingForClock(ctx, tenantID, clockID, after, limit)
 }
 
 func (a *invoiceStoreAdapter) SetTaxTransaction(ctx context.Context, tenantID, id string, taxTransactionID string) error {
