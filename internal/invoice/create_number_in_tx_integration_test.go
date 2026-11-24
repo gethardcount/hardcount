@@ -269,16 +269,23 @@ func (p *pausingEmitter) LogInTx(ctx context.Context, tx *sql.Tx, _ audit.Entry)
 }
 
 // waitForBackendBlockedBy returns the statement of a backend that waits for a
-// lock the backend pid holds, once one does.
+// lock the backend pid holds, once one does. The waiter's statement is read in
+// a query of its own: pg_stat_activity is a snapshot taken when a query first
+// reads it, while pg_blocking_pids is read live, so the query that finds the
+// waiter can still show the statement it ran before the one that waits.
 func waitForBackendBlockedBy(t *testing.T, ctx context.Context, admin *sql.DB, pid int) string {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		var query string
+		var waiter int
 		err := admin.QueryRowContext(ctx,
-			`SELECT query FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)) LIMIT 1`, pid).Scan(&query)
+			`SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)) LIMIT 1`, pid).Scan(&waiter)
 		switch {
 		case err == nil:
+			var query string
+			if err := admin.QueryRowContext(ctx, `SELECT query FROM pg_stat_activity WHERE pid = $1`, waiter).Scan(&query); err != nil {
+				t.Fatalf("read the waiting backend's statement: %v", err)
+			}
 			return query
 		case !errors.Is(err, sql.ErrNoRows):
 			t.Fatalf("read pg_stat_activity: %v", err)
