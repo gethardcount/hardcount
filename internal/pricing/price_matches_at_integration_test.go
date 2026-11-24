@@ -18,15 +18,10 @@ import (
 
 // PriceMatchesAt, ingest's one read of every open period's pins, answers
 // each pin with the meter and dimension_match of every price of PlanPricesAt
-// at that pin: in wall time, on a test clock with stamps, and on a clock
-// without.
+// at that pin. Each pin also says whether it had passed: whether it is
+// before now.
 //
-// Each pin also says whether it had passed in its time domain: a wall pin
-// before now, a clock pin at or before the clock's time.
-//
-// Mutation: read the versions in wall time for every pin (drop the clock),
-// and the clock pins answer the wall-time meters. Answer every pin passed →
-// the future wall pin and the clock pins ahead of clock C pass.
+// Mutation: answer every pin passed → the future pin passes.
 func TestPostgresStore_PriceMatchesAtMatchesPlanPricesAt(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	store := pricing.NewPostgresStore(db)
@@ -54,10 +49,8 @@ func TestPostgresStore_PriceMatchesAtMatchesPlanPricesAt(t *testing.T) {
 		t.Fatalf("plan: %v", err)
 	}
 
-	// From t1 in wall time, and from t2 on clock C: m2's price is removed
-	// and m3 is priced. Clock D has no stamps.
+	// From t1, m2's price is removed and m3 is priced.
 	t1 := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	t2 := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID) // test mode: the rows' livemode
 	if err != nil {
 		t.Fatal(err)
@@ -69,16 +62,9 @@ func TestPostgresStore_PriceMatchesAtMatchesPlanPricesAt(t *testing.T) {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
-	for _, c := range []string{"hc_tclk_mpa_c", "hc_tclk_mpa_d"} {
-		exec(`INSERT INTO test_clocks (id, tenant_id, name, frozen_time, status) VALUES ($1, $2, $1, $3, 'ready')`, c, tenantID, t1)
-	}
 	exec(`INSERT INTO plan_prices (id, tenant_id, plan_id, meter_id, dimension_match) VALUES ('hc_prc_mpa3', $1, $2, $3, '{}')`, tenantID, plan.ID, m3)
 	exec(`INSERT INTO plan_price_versions (id, tenant_id, price_id, valid_from, removed) VALUES ('hc_ppv_mpa2', $1, $2, $3, true)`, tenantID, prices[2].ID, t1)
 	exec(`INSERT INTO plan_price_versions (id, tenant_id, price_id, valid_from, mode, unit_amount_cents) VALUES ('hc_ppv_mpa3', $1, 'hc_prc_mpa3', $2, 'per_unit', 1)`, tenantID, t1)
-	for _, v := range []string{"hc_ppv_mpa2", "hc_ppv_mpa3"} {
-		exec(`INSERT INTO plan_price_version_clocks (tenant_id, version_id, test_clock_id, valid_from) VALUES ($1, $2, 'hc_tclk_mpa_c', $3)`, tenantID, v, t2)
-	}
-
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
@@ -86,16 +72,12 @@ func TestPostgresStore_PriceMatchesAtMatchesPlanPricesAt(t *testing.T) {
 	pins := []pricing.PlanPin{
 		{PlanID: plan.ID, At: t1.Add(-time.Hour)},
 		{PlanID: plan.ID, At: t1},
-		{PlanID: plan.ID, At: t2.Add(-time.Hour), ClockID: "hc_tclk_mpa_c"},
-		{PlanID: plan.ID, At: t2, ClockID: "hc_tclk_mpa_c"},
-		{PlanID: plan.ID, At: t1.Add(-time.Hour), ClockID: "hc_tclk_mpa_d"},
 		{PlanID: "hc_pln_none", At: t1},
 		{PlanID: plan.ID, At: time.Now().UTC().Add(time.Hour)},
-		{PlanID: plan.ID, At: t1, ClockID: "hc_tclk_mpa_d"},
 	}
 	m1x := m1 + `{"model":"x","tier":"1"}`
-	want := [][]string{{m1 + "{}", m1x, m2 + "{}"}, {m1 + "{}", m1x, m3 + "{}"}, {m1 + "{}", m1x, m2 + "{}"}, {m1 + "{}", m1x, m3 + "{}"}, {m1 + "{}", m1x, m3 + "{}"}, nil, {m1 + "{}", m1x, m3 + "{}"}, {m1 + "{}", m1x, m3 + "{}"}}
-	wantPassed := []bool{true, true, false, false, true, true, false, true}
+	want := [][]string{{m1 + "{}", m1x, m2 + "{}"}, {m1 + "{}", m1x, m3 + "{}"}, nil, {m1 + "{}", m1x, m3 + "{}"}}
+	wantPassed := []bool{true, true, true, false}
 	got, err := store.PriceMatchesAt(ctx, tenantID, pins)
 	if err != nil {
 		t.Fatalf("PriceMatchesAt: %v", err)
@@ -111,7 +93,7 @@ func TestPostgresStore_PriceMatchesAtMatchesPlanPricesAt(t *testing.T) {
 		return meterID + string(b)
 	}
 	for i, pin := range pins {
-		one, err := store.PlanPricesAt(ctx, tenantID, pin.PlanID, pin.At, pin.ClockID)
+		one, err := store.PlanPricesAt(ctx, tenantID, pin.PlanID, pin.At)
 		if err != nil {
 			t.Fatalf("PlanPricesAt: %v", err)
 		}

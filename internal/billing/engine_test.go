@@ -747,7 +747,7 @@ func (m *mockPricing) GetMeter(_ context.Context, _, id string) (domain.Meter, e
 }
 
 // PlanPricesAt is the plan's prices in claim order, as the store answers.
-func (m *mockPricing) PlanPricesAt(_ context.Context, _, planID string, _ time.Time, _ string) ([]domain.PlanPrice, error) {
+func (m *mockPricing) PlanPricesAt(_ context.Context, _, planID string, _ time.Time) ([]domain.PlanPrice, error) {
 	if m.pricesErr != nil {
 		return nil, m.pricesErr
 	}

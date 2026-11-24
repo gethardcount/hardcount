@@ -112,7 +112,7 @@ is a break. v0.9.0 is also a clean break: there is no upgrade from Hardcount
   - `plan_price_versions`: a price's content over time (`valid_from`, a
     tombstone flag, the shape fields).
   - `plan_price_version_clocks`: when a version takes effect on one test
-    clock (section 7).
+    clock (section 7). Unused from 2026-11-24 (section 7).
 - Removed: `rating_rule_versions`, `meter_pricing_rules`,
   `meters.rating_rule_version_id` and `plans.meter_ids`. With them go the
   meter's default price, `priority`, the rule key, the rule lifecycle and
@@ -288,8 +288,9 @@ back (section 6). So the winner for any event is unique: two matching
 candidates agree on every shared key, and equal key counts were refused.
 A removed price and a later tying price are never in force at one pin,
 because versions on a plan take effect in the order their writes commit
-(section 7). On a plan that is never-used again after a teardown, a write
-first puts every price of the plan at its latest version from the
+(section 7). On a plan that is never-used again (its only references were
+scheduled plan changes onto it, cleared or replaced before they applied), a
+write first puts every price of the plan at its latest version from the
 beginning of time (section 5), so a price removed while the plan was used
 is removed at every pin there too.
 The check is D05's compatibility clause without the priority term
@@ -303,7 +304,7 @@ names it.
 
 | What | Never-used plan | Used plan |
 |---|---|---|
-| Usage price add, edit, remove | Applies at once. The price keeps one version, from the beginning of time; the write replaces every earlier version and its clock stamps. Every other price of the plan keeps only its latest version, also from the beginning of time, with no clock stamps. | Applies from each subscriber's next period. The write appends a version that takes effect when it commits (section 7); a removal appends a tombstone and ends the price's overrides (section 6). No period already open changes, except one that starts while the write is saving (section 7). A subscription that starts later the same day gets it from its second period, and one that moves to the plan mid-period gets it from its next period (Risks). *Amended 2026-10-26 (section 4): a subscription that first joins the plan in a period after the write, by starting on it, a swap onto it or an added item, gets it in that period.* |
+| Usage price add, edit, remove | Applies at once. The price keeps one version, from the beginning of time; the write replaces every earlier version and its clock stamps. Every other price of the plan keeps only its latest version, also from the beginning of time, with no clock stamps. *(Clock stamps removed 2026-11-24, section 7.)* | Applies from each subscriber's next period. The write appends a version that takes effect when it commits (section 7); a removal appends a tombstone and ends the price's overrides (section 6). No period already open changes, except one that starts while the write is saving (section 7). A subscription that starts later the same day gets it from its second period, and one that moves to the plan mid-period gets it from its next period (Risks). *Amended 2026-10-26 (section 4): a subscription that first joins the plan in a period after the write, by starting on it, a swap onto it or an added item, gets it in that period.* |
 | Base fee | Editable. | Refused while a live subscription uses the plan (ADR-034). To change it, create a new plan and move subscribers to it. |
 | `base_bill_timing` | Editable, but not to `in_advance` at a base of 0 (section 14). | Locked. |
 | `code`, `currency`, `billing_interval` | Fixed. | Fixed. |
@@ -315,8 +316,9 @@ names it.
 - Every price write answers with the price and `effective: "now"` or
   `"next_period"`.
 - "Used" is conservative on purpose. A plan whose subscribers all canceled
-  still waits a period per edit. A test-clock teardown deletes that
-  clock's subscriptions, so their plan can become never-used again.
+  still waits a period per edit. A plan whose only references were
+  scheduled plan changes onto it becomes never-used again when they are
+  cleared or replaced before they apply (amended 2026-11-24, section 7).
 - A price added to a used plan takes part from the next period. Until
   then the plan's other prices bill its usage as before. A less specific
   price that matches, such as `{}`, bills it this period. With no matching
@@ -355,14 +357,15 @@ before any code, so the base-fee row above is ADR-034's lock, as before.
 - Its window is `[created_at, deactivated_at)`. A create, replace or
   delete stamps it after the write's locks (section 8), in the customer's
   own time: wall time read with `clock_timestamp()`, or the customer's
-  clock time plus 1 microsecond. Not `now()`: that is the transaction's
+  clock time plus 1 microsecond (removed 2026-11-24, section 7). Not
+  `now()`: that is the transaction's
   start, so a write that waited for a lock across a period start would
   change the period already open.
 - Removing the price ends it. In the removal's transaction, each open
   override of the price is closed at the instant the tombstone takes
   effect for its customer. For a customer without a test clock that is
   the tombstone's `valid_from`; for a clock customer, the tombstone's
-  stamp for its clock (section 7). So at every pin an override is open
+  stamp for its clock (removed 2026-11-24, section 7). So at every pin an override is open
   exactly while its price takes part, and the open period keeps the
   negotiated rate. On a never-used plan the
   removal applies at once, so it empties every window of the price's
@@ -371,12 +374,24 @@ before any code, so the base-fee row above is ADR-034's lock, as before.
   `dimension_match`) appends a version to the same row, so the price keeps
   its id. Its old overrides do not come back.
 - An override write takes the plan row `FOR KEY SHARE` and then the price
-  row, before it reads the customer's clock (section 8). So it waits for a
+  row, before its override rows (section 8). So it waits for a
   removal in progress. An override write on a removed price is refused
   with 409 `invalid_state`.
 - A plan swap does not carry it: the new plan's price is another row.
 
 ### 7. Test clocks: every price resolves in the subscription's own time (PR-4)
+
+**Amendment (2026-11-24, test clocks removed in v0.11.0):** price and
+override writes no longer read, lock or stamp test clocks, and nothing
+writes or reads `plan_price_version_clocks`. A version is in force from its
+`valid_from`, still `clock_timestamp()` read after the plan lock. An
+override is stamped with `clock_timestamp()` after its locks, and a removal
+ends it at the tombstone's `valid_from` (section 6). Step 5 of section 8 is
+gone: the order is plans, prices, meters, then override rows and the rest,
+with no lock added or moved. A plan whose only references were scheduled
+plan changes onto it is never-used again once they are cleared or replaced
+before they apply, so a never-used write still settles the plan's versions
+(section 5).
 
 - On a used plan, a version's `valid_from` is wall time read with
   `clock_timestamp()` after the plan lock, and at least 1 microsecond after
@@ -422,8 +437,8 @@ before any code, so the base-fee row above is ADR-034's lock, as before.
 
 Subscription writers, price writes and override writes take rows in this
 order. Once one holds a row of one step, it takes no row of an earlier
-step. A test-clock teardown is one exception, and the clock reads of a
-price write and of a subscription create are the others (below).
+step. A subscription create's read of its customer's test clock is the
+one exception (below).
 
 1. the subscription row ([ADR-115](115-one-closer-for-the-billing-period.md));
    1a. the customer-rules lock, for the writers of a customer-scoped rule
@@ -434,14 +449,14 @@ price write and of a subscription create are the others (below).
 3. price rows, `FOR KEY SHARE` only; no path locks a price row
    exclusively;
 4. meter rows, ascending;
-5. test clocks, ascending, `FOR SHARE`;
+5. test clocks, ascending, `FOR SHARE` (removed 2026-11-24, section 7);
 6. the rest a money path writes: override rows, the tenant's number row
    (`tenant_settings`, which numbers invoices and credit notes) and
    invoice rows.
 
-So an override write takes its plan and its price before it reads the
-customer's clock, and a writer takes its plans before it numbers an
-invoice or a credit note. Until PR-4, D05's meter edit takes its meter and
+So an override write takes its plan and its price before its override
+rows, and a writer takes its plans before it numbers an invoice or a
+credit note. Until PR-4, D05's meter edit takes its meter and
 then plans; no writer takes a plan and then a meter before PR-4, so this
 makes no cycle.
 
@@ -451,43 +466,20 @@ holds the number row takes no new credit-note lock. A credit-note create
 takes its invoice row (`FOR KEY SHARE`) before it numbers the note, and a
 relief void takes the voided invoice's row before the number row.
 
-**A test-clock teardown is outside this order.** It deletes bottom-up for
-foreign keys: invoice rows before the subscription row, override rows
-before the clock row (`internal/testclock/postgres.go:150-221`). From PR-4,
-its first lock is its clock row, `FOR UPDATE`. A price write or override
-write reads that clock `FOR SHARE` before it touches a row teardown
-deletes: the clock's stamp rows or an override of its customer (section
-7). So one of the two waits for the other at the clock row, and they make
-no cycle. Teardown takes no plan or price row. Without the clock lock
-first, a removal and a teardown deadlock: the removal holds the clock and
-waits for an override row, and the teardown holds that override row and
-waits to delete the clock. A real-Postgres model aborted one with `40P01`;
-with the clock lock first, both committed. An override write on the
-clock's customer deadlocks with a teardown the same way, and the clock lock
-first fixes it too. A never-used write that deleted the clock's stamps
-without reading the clock deadlocked even with a clock-first teardown;
-reading the clock first fixed it.
+*Removed 2026-11-24 (section 7): the test-clock teardown, which was
+outside this order, and the clock reads of a price write and an override
+write, which ordered them against it.*
 
-A subscription create for a clock customer is the third writer that meets
-a teardown (amended 2026-10-26, third review of #1386). Its insert's
-foreign keys lock the customer row and then the clock row. A create that
-inserted while a teardown held the clock waited there holding the
-customer, and the teardown then waited to delete that customer: a
-real-Postgres test aborted one with `40P01`. So a create reads its clock
+A subscription create for a clock customer reads its clock first (amended
+2026-10-26, third review of #1386). Its insert's foreign keys lock the
+customer row and then the clock row. A create that inserted while a
+teardown held the clock waited there holding the customer, and the
+teardown then waited to delete that customer: a real-Postgres test
+aborted one with `40P01`. So a create reads its clock
 `FOR KEY SHARE` before the insert, waits at the clock holding nothing the
 teardown deletes, and answers 404 when the teardown took the customer.
-
-**A price write reads the test clocks before its plan** (amended
-2026-10-25, review of #1386). A teardown holds its clock `FOR UPDATE` while
-it waits to delete a subscription row. A subscription writer holding that
-row next takes its plans `FOR KEY SHARE`. A price write that held the plan
-`FOR UPDATE` while it waited for the clock closed a three-party cycle: a
-real-Postgres test aborted the teardown with `40P01`. So a price write
-takes the clocks `FOR SHARE` first, then its plan. This is safe because
-every transaction that locks a clock row exclusively (a teardown, a clock
-state change) takes the clock first and holds no plan, and `FOR SHARE`
-does not conflict with an override write's `FOR SHARE` read of its
-customer's clock.
+Teardown is removed (2026-11-24, section 7), and no customer is on a clock,
+so the read finds none.
 
 **Step 1a: the customer-rules lock** (amended 2026-11-10, [#1659](https://github.com/gethardcount/hardcount/pull/1659)).
 Four rules span a customer's subscriptions:
@@ -517,8 +509,9 @@ twice.
   payment-method lock. A holder takes no subscription row other than its
   own, and no clock row. No transaction that holds a lock of a later step
   asks for it. So it adds no cycle.
-- **Teardown.** A test-clock teardown never takes it. A create waits for
-  it while holding only its clock `FOR KEY SHARE`, which teardown orders
+- **Teardown** (removed 2026-11-24, section 7). A test-clock teardown
+  never takes it. A create waits for it while holding only its clock
+  `FOR KEY SHARE`, which teardown orders
   at the clock as before. A customer update and a profile write take no
   clock lock and hold their row only for their last statement.
 - **Who does not wait.** Bounce and complaint marks, the other single-row
@@ -867,7 +860,8 @@ The breaks that concerned moving 0.8.x data went with the clean break.
   time is read before it commits. A period that starts in between gets the
   write (section 7), and one ingest `no_price` flag can be wrong (section
   12).
-- **A test-clock teardown is outside the lock order.** It takes its clock
+- **A test-clock teardown is outside the lock order** (removed 2026-11-24,
+  section 7). It takes its clock
   row first, which orders it against price writes, override writes and
   subscription creates on the clock (section 8).
 - **Price add against a concurrent subscription create is check-then-act.**

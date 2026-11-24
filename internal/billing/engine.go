@@ -557,12 +557,11 @@ type PricingReader interface {
 	GetMeter(ctx context.Context, tenantID, id string) (domain.Meter, error)
 	// PlanPricesAt is the ONE price resolution every rating path shares
 	// (ADR-130 §4): the plan's prices that take part at `at`, the plan's pin
-	// of the period being priced, in the subscription's time domain (clockID,
-	// "" for wall time), each with its version in force then, in claim
-	// order. Close, cancel, threshold fire, preview and live balance agree
-	// by construction, and an edit saved mid-close cannot mix versions
+	// of the period being priced, each with its version in force then, in
+	// claim order. Close, cancel, threshold fire, preview and live balance
+	// agree by construction, and an edit saved mid-close cannot mix versions
 	// inside one invoice.
-	PlanPricesAt(ctx context.Context, tenantID, planID string, at time.Time, clockID string) ([]domain.PlanPrice, error)
+	PlanPricesAt(ctx context.Context, tenantID, planID string, at time.Time) ([]domain.PlanPrice, error)
 	// GetOverrideAt resolves the customer's negotiated price in force at
 	// the plan's pin. errs.ErrNotFound = no override (list price); ANY
 	// other error aborts the rating path — a transient DB failure must

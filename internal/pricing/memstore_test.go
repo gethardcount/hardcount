@@ -288,7 +288,7 @@ func (m *memStore) ListPrices(_ context.Context, tenantID string, planIDs []stri
 	return out, nil
 }
 
-func (m *memStore) PlanPricesAt(ctx context.Context, tenantID, planID string, _ time.Time, _ string) ([]domain.PlanPrice, error) {
+func (m *memStore) PlanPricesAt(ctx context.Context, tenantID, planID string, _ time.Time) ([]domain.PlanPrice, error) {
 	byPlan, err := m.ListPrices(ctx, tenantID, []string{planID})
 	if err != nil {
 		return nil, err

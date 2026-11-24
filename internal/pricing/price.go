@@ -196,11 +196,11 @@ func (s *Service) ListPrices(ctx context.Context, tenantID string, planIDs []str
 	return s.store.ListPrices(ctx, tenantID, planIDs)
 }
 
-// PlanPricesAt returns the plan's prices taking part at `at` in the time
-// domain of clockID ("" is wall time), in claim order per meter: the one
-// price resolution every reader of a billing period shares (ADR-130 §4).
-func (s *Service) PlanPricesAt(ctx context.Context, tenantID, planID string, at time.Time, clockID string) ([]domain.PlanPrice, error) {
-	return s.store.PlanPricesAt(ctx, tenantID, planID, at, clockID)
+// PlanPricesAt returns the plan's prices taking part at `at`, in claim order
+// per meter: the one price resolution every reader of a billing period
+// shares (ADR-130 §4).
+func (s *Service) PlanPricesAt(ctx context.Context, tenantID, planID string, at time.Time) ([]domain.PlanPrice, error) {
+	return s.store.PlanPricesAt(ctx, tenantID, planID, at)
 }
 
 // PlanMeterIDs returns every meter the plan has ever priced: the set the

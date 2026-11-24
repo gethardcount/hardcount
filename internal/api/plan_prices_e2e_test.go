@@ -523,6 +523,58 @@ func TestE2E_PlanPrices_NeverUsedPlanAppliesAtOnce(t *testing.T) {
 	wantUsage(t, "first period", r.cycle(sub, p0), map[string]int64{ids[0]: 60})
 }
 
+// TestE2E_PlanPrices_NeverUsedAgainForgetsVersionsWrittenWhileUsed: a plan
+// named only as a subscription's pending plan is used, so a price edit or
+// removal on it waits for the next period and leaves the old version in
+// force before it. Cancelling the scheduled change leaves the plan never-used
+// again, and its next write applies at once: every price goes to its latest
+// content from the beginning of time (ADR-130 §5). An add that ties with the
+// removed price then takes its events, and the edited price bills its latest
+// rate. The other ways a pending plan loses its last reference: another
+// schedule replaces it, an immediate swap drops it, or the subscription is
+// cancelled.
+//
+// Mutations in settleNeverUsedTx: do nothing, and the prices keep the
+// versions written while the plan was used; keep each price's oldest version
+// instead of its latest, and the removed price ties with the added price and
+// wins by age, and the edited price bills its old rate. Doing nothing fails
+// only the version count here: a subscriber's prices are pinned at its
+// request's arrival, so the kept versions bill only a subscriber that
+// arrived before they were written, such as a create that waited on a lock
+// meanwhile. This subscriber arrives after them.
+func TestE2E_PlanPrices_NeverUsedAgainForgetsVersionsWrittenWhileUsed(t *testing.T) {
+	r := newPPRig(t, "never used again")
+	tokens := r.meter("tokens", "sum")
+	calls := r.meter("calls", "sum")
+	current, _ := r.plan("current", perUnit(calls, "1", nil))
+	plan, ids := r.plan("pending", perUnit(tokens, "1", map[string]string{"model": "a"}), perUnit(calls, "1", nil))
+	removed, edited := ids[0], ids[1]
+
+	sub, _, _ := r.subscribe(time.Time{}, r.customer("pp-pending"), current)
+	item := flowStr(flowList(r.must(time.Time{}, http.MethodGet, "/v1/subscriptions/"+sub, nil, http.StatusOK), "items")[0], "id")
+	r.must(time.Time{}, http.MethodPatch, "/v1/subscriptions/"+sub+"/items/"+item,
+		map[string]any{"new_plan_id": plan, "immediate": false}, http.StatusOK)
+	r.editTo(plan, edited, "3", "next_period")
+	r.must(time.Time{}, http.MethodDelete, "/v1/plans/"+plan+"/prices/"+removed, nil, http.StatusOK)
+	r.must(time.Time{}, http.MethodDelete, "/v1/subscriptions/"+sub+"/items/"+item+"/pending-change", nil, http.StatusOK)
+
+	add := r.must(time.Time{}, http.MethodPost, "/v1/plans/"+plan+"/prices", perUnit(tokens, "9", map[string]string{"token_type": "input"}), http.StatusCreated)
+	if flowStr(add, "effective") != "now" {
+		t.Fatalf("add on a plan never used again: effective %q, want now", flowStr(add, "effective"))
+	}
+	added := flowStr(add, "id")
+	if n := r.count(`SELECT count(*) FROM plan_price_versions v JOIN plan_prices p ON p.id = v.price_id
+		WHERE p.plan_id = $1 AND v.valid_from <> '-infinity'`, plan); n != 0 {
+		t.Errorf("versions not from the beginning of time after the never-used write = %d, want 0", n)
+	}
+
+	newSub, p0, p1 := r.subscribe(time.Time{}, r.customer("pp-new-on-pending"), plan)
+	r.ingest(time.Time{}, "pp-new-on-pending", "tokens", 10, recent(p0), map[string]string{"model": "a", "token_type": "input"})
+	r.ingest(time.Time{}, "pp-new-on-pending", "calls", 10, recent(p0), nil)
+	r.run(p1.Add(time.Hour))
+	wantUsage(t, "the added price and the edited rate", r.cycle(newSub, p0), map[string]int64{added: 90, edited: 30})
+}
+
 // TestE2E_PlanPrices_UsedPlanAppliesNextPeriod: on a plan a subscription has
 // used, a price edit, add or removal applies from each subscriber's next
 // billing period (effective "next_period"). The open period keeps the prices

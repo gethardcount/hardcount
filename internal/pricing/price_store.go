@@ -18,44 +18,38 @@ import (
 // The plan price store (ADR-130 §1, §4-§8).
 //
 // A price is a plan_prices row, its identity, and a list of versions, its
-// content over time. Which version prices a billing period depends on two
-// things: whether the plan has been used, and the time domain of the
-// subscription being priced.
+// content over time. Which version prices a billing period depends on
+// whether the plan has been used.
 //
 //   - On a plan no subscription has used, a write applies at once: the price
 //     keeps one version, from the beginning of time ('-infinity'), and the
-//     write replaces every earlier version and its clock stamps. Every other
-//     price of the plan keeps only its latest version, from the beginning of
-//     time too (settleNeverUsedTx).
+//     write replaces every earlier version. Every other price of the plan
+//     keeps only its latest version, from the beginning of time too
+//     (settleNeverUsedTx).
 //   - On a used plan, a write appends a version that takes effect when it
 //     commits: valid_from is clock_timestamp() read after the plan lock, and
 //     at least 1 microsecond after the plan's latest valid_from, so versions
-//     on a plan take effect in the order their writes commit. On a test-mode
-//     plan it also stamps every test clock of the account with the clock's
-//     time plus 1 microsecond (plan_price_version_clocks), read FOR SHARE.
+//     on a plan take effect in the order their writes commit.
 //
 // A plan is priced at its pin of the period: the period start, or the first
 // instant in the period the subscription joined the plan (ADR-130 §4 step
-// 3). In wall time a version is in force at the pin when valid_from <= pin;
-// on test clock C, when its stamp for C is, a version with no stamp for C
-// counting as always in force. The latest such version wins, ties broken by
-// valid_from. A price whose winning version is a removal takes no part.
+// 3). A version is in force at the pin when valid_from <= pin, and the
+// latest such version wins. A price whose winning version is a removal takes
+// no part.
 
-// versionInForce is the price version in force for a reader: at $2 in the
-// time domain of clock $3 (” is wall time), from the version list of p.
-var versionInForce = versionInForceAt("$2", "$3::text")
+// versionInForce is the price version in force at $2, from the version list
+// of p.
+var versionInForce = versionInForceAt("$2")
 
-// versionInForceAt is versionInForce with the instant and the clock given as
-// SQL expressions.
-func versionInForceAt(at, clockID string) string {
-	validFrom := `(CASE WHEN ` + clockID + ` = '' THEN v.valid_from ELSE COALESCE(c.valid_from, '-infinity') END)`
+// versionInForceAt is versionInForce with the instant given as an SQL
+// expression.
+func versionInForceAt(at string) string {
 	return `
 	SELECT v.id, v.removed, v.mode, v.unit_amount_cents, v.tiers, v.package_size, v.package_amount_cents, v.created_at
 	FROM plan_price_versions v
-	LEFT JOIN plan_price_version_clocks c ON c.version_id = v.id AND c.test_clock_id = ` + clockID + `
 	WHERE v.price_id = p.id
-	  AND ` + validFrom + ` <= ` + at + `
-	ORDER BY ` + validFrom + ` DESC, v.valid_from DESC
+	  AND v.valid_from <= ` + at + `
+	ORDER BY v.valid_from DESC
 	LIMIT 1`
 }
 
@@ -138,9 +132,9 @@ func scanPriceRows(rows *sql.Rows) ([]priceRow, error) {
 	return out, rows.Err()
 }
 
-// PlanPricesAt returns the plan's prices taking part at `at` in clockID's
-// time, in claim order per meter.
-func (s *PostgresStore) PlanPricesAt(ctx context.Context, tenantID, planID string, at time.Time, clockID string) ([]domain.PlanPrice, error) {
+// PlanPricesAt returns the plan's prices taking part at `at`, in claim order
+// per meter.
+func (s *PostgresStore) PlanPricesAt(ctx context.Context, tenantID, planID string, at time.Time) ([]domain.PlanPrice, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, err
@@ -150,7 +144,7 @@ func (s *PostgresStore) PlanPricesAt(ctx context.Context, tenantID, planID strin
 		SELECT `+priceIdentityColumns+`, `+versionColumns+`
 		FROM plan_prices p
 		CROSS JOIN LATERAL (`+versionInForce+`) v
-		WHERE p.plan_id = $1 AND NOT v.removed`, planID, at, clockID)
+		WHERE p.plan_id = $1 AND NOT v.removed`, planID, at)
 	if err != nil {
 		return nil, fmt.Errorf("read prices of plan %s: %w", planID, err)
 	}
@@ -166,12 +160,10 @@ func (s *PostgresStore) PlanPricesAt(ctx context.Context, tenantID, planID strin
 	return out, nil
 }
 
-// PlanPin is one read of a plan's prices: at At in the time domain of
-// ClockID ("" is wall time).
+// PlanPin is one read of a plan's prices, at At.
 type PlanPin struct {
-	PlanID  string
-	At      time.Time
-	ClockID string
+	PlanID string
+	At     time.Time
 }
 
 // PriceMatch is one price as usage ingest reads it: its meter and the labels
@@ -186,10 +178,10 @@ type PinPrices struct {
 	// Matches is the meter and dimension_match of every price the plan has
 	// taking part at the pin (the prices of PlanPricesAt).
 	Matches []PriceMatch
-	// Passed: the pin had passed in its time domain when the prices were
-	// read, so a price saved after the read is not in force at it (a used
-	// plan's version takes effect from its write, ADR-130 §7). At a pin still
-	// ahead (the next period's start, a trial end) a price saved now is.
+	// Passed: the pin had passed when the prices were read, so a price saved
+	// after the read is not in force at it (a used plan's version takes
+	// effect from its write, ADR-130 §7). At a pin still ahead (the next
+	// period's start, a trial end) a price saved now is.
 	Passed bool
 }
 
@@ -197,15 +189,8 @@ type PinPrices struct {
 // every price its plan has taking part then (the prices of PlanPricesAt),
 // and whether the pin had passed, in one transaction. Ingest reads every
 // open period's pins once per customer per request, before it writes, and
-// matches each event's labels against them in Go (usage.takes).
-//
-// A wall-time pin has passed when it is before the transaction's start. A
-// pin on test clock C has passed when it is at or before C's time, read
-// first: a price write stamps C with C's time plus 1 microsecond, read FOR
-// SHARE, so an advance that this read saw waited for every write that read
-// the clock before it, and the prices read next see those writes. Ingest's
-// pins are never after C's time (an item joins, and a period starts, at or
-// before it), so frozen_time answers them even while C advances.
+// matches each event's labels against them in Go (usage.takes). A pin has
+// passed when it is before the transaction's start.
 func (s *PostgresStore) PriceMatchesAt(ctx context.Context, tenantID string, pins []PlanPin) ([]PinPrices, error) {
 	out := make([]PinPrices, len(pins))
 	if len(pins) == 0 {
@@ -213,23 +198,20 @@ func (s *PostgresStore) PriceMatchesAt(ctx context.Context, tenantID string, pin
 	}
 	planIDs := make([]string, len(pins))
 	ats := make([]string, len(pins))
-	clockIDs := make([]string, len(pins))
 	for i, p := range pins {
 		planIDs[i] = p.PlanID
 		// Microseconds, truncated: what a timestamptz parameter carries.
 		ats[i] = p.At.UTC().Format("2006-01-02T15:04:05.999999Z07:00")
-		clockIDs[i] = p.ClockID
 	}
-	args := []any{planIDs, ats, clockIDs}
+	args := []any{planIDs, ats}
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer postgres.Rollback(tx)
 	passed, err := tx.QueryContext(ctx, `
-		SELECT r.ord, CASE WHEN r.clock_id = '' THEN r.at < now()
-		       ELSE COALESCE(r.at <= (SELECT c.frozen_time FROM test_clocks c WHERE c.id = r.clock_id), false) END
-		FROM unnest($1::text[], $2::text[]::timestamptz[], $3::text[]) WITH ORDINALITY AS r(plan_id, at, clock_id, ord)`, args...)
+		SELECT r.ord, r.at < now()
+		FROM unnest($1::text[], $2::text[]::timestamptz[]) WITH ORDINALITY AS r(plan_id, at, ord)`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read whether the pins have passed: %w", err)
 	}
@@ -250,9 +232,9 @@ func (s *PostgresStore) PriceMatchesAt(ctx context.Context, tenantID string, pin
 	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT r.ord, p.meter_id, p.dimension_match
-		FROM unnest($1::text[], $2::text[]::timestamptz[], $3::text[]) WITH ORDINALITY AS r(plan_id, at, clock_id, ord)
+		FROM unnest($1::text[], $2::text[]::timestamptz[]) WITH ORDINALITY AS r(plan_id, at, ord)
 		JOIN plan_prices p ON p.plan_id = r.plan_id
-		CROSS JOIN LATERAL (`+versionInForceAt("r.at", "r.clock_id")+`) v
+		CROSS JOIN LATERAL (`+versionInForceAt("r.at")+`) v
 		WHERE NOT v.removed
 		ORDER BY r.ord, p.meter_id, p.id`, args...)
 	if err != nil {
@@ -354,31 +336,6 @@ func latestPriceTx(ctx context.Context, tx *sql.Tx, planID, priceID string) (pri
 		WHERE p.id = $1 AND p.plan_id = $2`, priceID, planID))
 }
 
-// lockClocksTx reads the id of every test clock of the account FOR SHARE, in id order,
-// before the plan lock (ADR-130 §8). FOR SHARE orders the write against a
-// clock advance (MarkAdvancing, the only writer of frozen_time) and against
-// a teardown, which takes its clock FOR UPDATE first. Every writer that takes
-// a clock row exclusively takes it first and holds no plan, so reading the
-// clocks before the plan makes no cycle. Row-level security scopes the read
-// to the tenant and the mode, so in live mode it reads nothing: a test clock
-// is always test mode.
-func lockClocksTx(ctx context.Context, tx *sql.Tx) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM test_clocks ORDER BY id FOR SHARE`)
-	if err != nil {
-		return nil, fmt.Errorf("lock test clocks: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	var out []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out = append(out, id)
-	}
-	return out, rows.Err()
-}
-
 // WritePrice applies ch to the plan's prices. See the top of this file.
 func (s *PostgresStore) WritePrice(ctx context.Context, tenantID, planID string, ch PriceChange, emit func(tx *sql.Tx, r PriceWrite) error) (PriceWrite, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -387,17 +344,9 @@ func (s *PostgresStore) WritePrice(ctx context.Context, tenantID, planID string,
 	}
 	defer postgres.Rollback(tx)
 
-	// Lock order (ADR-130 §8): the test clocks, FOR SHARE, before the plan;
-	// the plan, FOR UPDATE as a writer of plan content; the meter, FOR KEY
-	// SHARE through the new price's foreign key; then the override rows a
-	// removal ends. The clocks come first because a teardown holds its clock
-	// FOR UPDATE while it waits for subscription rows, and a subscription
-	// writer holding one of those rows waits for its plans: a price write
-	// that held the plan while it waited for the clock would close the cycle.
-	clocks, err := lockClocksTx(ctx, tx)
-	if err != nil {
-		return PriceWrite{}, err
-	}
+	// Lock order (ADR-130 §8): the plan, FOR UPDATE as a writer of plan
+	// content; the meter, FOR KEY SHARE through the new price's foreign key;
+	// then the override rows a removal ends.
 	if _, err := lockPlanTx(ctx, tx, planID); err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
 			return PriceWrite{}, errs.NotFound("plan")
@@ -445,7 +394,7 @@ func (s *PostgresStore) WritePrice(ctx context.Context, tenantID, planID string,
 			return PriceWrite{}, err
 		}
 	}
-	v, err := writeVersionTx(ctx, tx, tenantID, planID, target.price.ID, used, ch.Op == PriceRemove, ch.Shape, clocks)
+	v, err := writeVersionTx(ctx, tx, tenantID, planID, target.price.ID, used, ch.Op == PriceRemove, ch.Shape)
 	if err != nil {
 		return PriceWrite{}, err
 	}
@@ -559,15 +508,14 @@ func insertPriceTx(ctx context.Context, tx *sql.Tx, tenantID, planID, meterID st
 }
 
 // settleNeverUsedTx puts every price of a never-used plan at its latest
-// version from the beginning of time, with no clock stamps (ADR-130 §5). A
-// plan is never-used again only when the upgrade that removed test clocks
-// deleted its subscriptions, and then it can hold versions written while it
-// was used. A
-// write to a never-used plan applies at once, so no older version may stay
-// in force at an earlier pin: a price removed while the plan was used would
-// otherwise still take events at those pins, beside a price added now that
-// ties with it. No period of the plan has been priced, so nothing billed
-// read the versions it drops.
+// version from the beginning of time (ADR-130 §5). A plan whose only
+// references were scheduled plan changes onto it is never-used again once
+// they are cleared or replaced before they apply, and then it can hold
+// versions written while it was used. A write to a never-used plan applies
+// at once, so no older version may stay in force at an earlier pin: a price
+// removed while the plan was used would otherwise still take events at those
+// pins, beside a price added now that ties with it. No period of the plan
+// has been priced, so nothing billed read the versions it drops.
 func settleNeverUsedTx(ctx context.Context, tx *sql.Tx, planID string) error {
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM plan_price_versions v
@@ -576,13 +524,6 @@ func settleNeverUsedTx(ctx context.Context, tx *sql.Tx, planID string) error {
 		  AND v.id <> (SELECT l.id FROM plan_price_versions l WHERE l.price_id = v.price_id ORDER BY l.valid_from DESC LIMIT 1)`,
 		planID); err != nil {
 		return fmt.Errorf("drop the older price versions of plan %s: %w", planID, err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM plan_price_version_clocks c
-		USING plan_price_versions v, plan_prices p
-		WHERE c.version_id = v.id AND p.id = v.price_id AND p.plan_id = $1`,
-		planID); err != nil {
-		return fmt.Errorf("drop the clock stamps of plan %s: %w", planID, err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE plan_price_versions v SET valid_from = '-infinity'
@@ -603,12 +544,9 @@ type writtenVersion struct {
 }
 
 // writeVersionTx writes the price's next version. On a plan never used it
-// replaces every version (and, by the foreign key's cascade, their clock
-// stamps) with one from the beginning of time: after a test-clock teardown
-// the plan can be never-used again with several versions, and updating only
-// one would leave a later one winning every future pin. On a used plan it
-// appends a version from now, and a stamp for every clock in clocks.
-func writeVersionTx(ctx context.Context, tx *sql.Tx, tenantID, planID, priceID string, used, removed bool, shape domain.PriceShape, clocks []string) (writtenVersion, error) {
+// replaces the price's versions with one from the beginning of time; on a
+// used plan it appends one from now.
+func writeVersionTx(ctx context.Context, tx *sql.Tx, tenantID, planID, priceID string, used, removed bool, shape domain.PriceShape) (writtenVersion, error) {
 	v := writtenVersion{id: postgres.NewID("hc_ppv")}
 	if !used {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM plan_price_versions WHERE price_id = $1`, priceID); err != nil {
@@ -664,49 +602,23 @@ func writeVersionTx(ctx context.Context, tx *sql.Tx, tenantID, planID, priceID s
 		v.id, tenantID, priceID, validFrom, removed, mode, unit, tiers, pkgSize, pkgAmount).Scan(&v.createdAt); err != nil {
 		return writtenVersion{}, fmt.Errorf("write a version of price %s: %w", priceID, err)
 	}
-	if v.infinite || len(clocks) == 0 {
-		// A never-used plan's version is in force at every pin on every
-		// clock: a stamp would leave a clock customer's first period, which
-		// starts at midnight before the clock's time, with no price.
-		return v, nil
-	}
-	// The extra microsecond keeps the old price for a period that opens
-	// exactly at the clock's time (an advance to a boundary), as a live
-	// period that opened before the edit does. While a clock advances, its
-	// time here is the advance's target, so the advance keeps the price it
-	// began with.
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO plan_price_version_clocks (tenant_id, version_id, test_clock_id, valid_from)
-		SELECT $1, $2, c.id, COALESCE(c.advance_target, c.frozen_time) + interval '1 microsecond'
-		FROM test_clocks c WHERE c.id = ANY($3::text[])`,
-		tenantID, v.id, clocks); err != nil {
-		return writtenVersion{}, fmt.Errorf("stamp version %s for the test clocks: %w", v.id, err)
-	}
 	return v, nil
 }
 
 // endOverridesTx ends every open override of a removed price (ADR-130 §6),
-// at the instant the removal takes effect for its customer: the tombstone's
-// valid_from, or its stamp for the customer's clock (a clock without one, a
-// clock made after the write read the clocks, takes the tombstone at every
-// pin). So at every pin an override is open exactly while its price takes
-// part, and the open period keeps the negotiated rate. On a plan never used
-// the removal applies at once, so each window becomes empty.
+// at the instant the removal takes effect: the tombstone's valid_from. So at
+// every pin an override is open exactly while its price takes part, and the
+// open period keeps the negotiated rate. On a plan never used the removal
+// applies at once, so each window becomes empty.
 func endOverridesTx(ctx context.Context, tx *sql.Tx, priceID string, used bool, v writtenVersion) ([]EndedOverride, error) {
 	var rows *sql.Rows
 	var err error
 	if used {
 		rows, err = tx.QueryContext(ctx, `
 			UPDATE customer_price_overrides o
-			SET active = false, updated_at = now(),
-			    deactivated_at = GREATEST(o.created_at, CASE
-			        WHEN c.test_clock_id IS NULL THEN $2::timestamptz
-			        ELSE COALESCE((SELECT s.valid_from FROM plan_price_version_clocks s
-			                       WHERE s.version_id = $3 AND s.test_clock_id = c.test_clock_id), '-infinity')
-			    END)
-			FROM customers c
-			WHERE c.id = o.customer_id AND o.price_id = $1 AND o.active
-			RETURNING o.id, o.customer_id`, priceID, v.validFrom, v.id)
+			SET active = false, updated_at = now(), deactivated_at = GREATEST(o.created_at, $2::timestamptz)
+			WHERE o.price_id = $1 AND o.active
+			RETURNING o.id, o.customer_id`, priceID, v.validFrom)
 	} else {
 		rows, err = tx.QueryContext(ctx, `
 			UPDATE customer_price_overrides o
@@ -791,7 +703,7 @@ func (s *PostgresStore) WritePricesTx(ctx context.Context, tx *sql.Tx, planID st
 		if err != nil {
 			return nil, err
 		}
-		v, err := writeVersionTx(ctx, tx, tenantID, planID, p.ID, false, false, ch.Shape, nil)
+		v, err := writeVersionTx(ctx, tx, tenantID, planID, p.ID, false, false, ch.Shape)
 		if err != nil {
 			return nil, err
 		}
