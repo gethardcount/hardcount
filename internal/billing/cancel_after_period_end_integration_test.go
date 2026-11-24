@@ -710,7 +710,7 @@ func TestImmediateCancel_TestClock_AfterPeriodEnd(t *testing.T) {
 		clockID, r.f.tenantID, frozen)
 	r.exec(t, `UPDATE customers SET test_clock_id = $1 WHERE id = $2`, clockID, r.f.customerID)
 	r.exec(t, `UPDATE subscriptions SET test_clock_id = $1 WHERE id = $2`, clockID, r.f.subID)
-	r.f.engine.SetTestClockReader(testclock.NewPostgresStore(r.f.db))
+	r.f.engine.SetTestClockReader(testclock.NewReader(r.f.db))
 	r.f.subSvc.SetResolver(r.f.engine)
 	// The request's time, as the API's door decides it for the subscription.
 	onClock := testutil.DecidedFor(t, r.f.engine, clock.Pin{TenantID: r.f.tenantID, SubscriptionID: r.f.subID})

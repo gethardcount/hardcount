@@ -155,18 +155,17 @@ export function sentEmailStatus(em: { status: string; delivery_state?: string })
 }
 
 // genericStatus covers everything else (customers, plans, credit notes,
-// invitations, webhook deliveries, API keys, test clocks): a known tone per
-// code and a sentence-case label.
+// invitations, webhook deliveries, API keys): a known tone per code and a
+// sentence-case label.
 const TONES: Record<string, StatusTone> = {
   active: 'success', succeeded: 'success', delivered: 'success', resolved: 'success', ready: 'success', recovered: 'success',
-  pending: 'warning', paused: 'warning', escalated: 'warning', advancing: 'info', processing: 'info', trialing: 'info',
-  failed: 'danger', revoked: 'danger', expired: 'danger', internal_failure: 'danger', disabled: 'neutral',
+  pending: 'warning', paused: 'warning', escalated: 'warning', processing: 'info', trialing: 'info',
+  failed: 'danger', revoked: 'danger', expired: 'danger', disabled: 'neutral',
   archived: 'neutral', canceled: 'neutral', draft: 'neutral', skipped: 'neutral', no_endpoints: 'neutral',
   issued: 'info', accepted: 'success', voided: 'neutral',
 }
 const LABELS: Record<string, string> = {
   no_endpoints: 'No endpoint',
-  internal_failure: 'Failed',
   voided: 'Void',
 }
 

@@ -17,8 +17,7 @@ Hardcount makes a subscription's invoice when a billing period ends:
    minutes when `APP_ENV` is `local` or not set.
 
 So by default the invoice appears 1 to 2 hours after the period ends. A
-period with nothing to bill makes no invoice. On a test clock, moving the
-clock past the period end makes the invoice at once, with no grace period.
+period with nothing to bill makes no invoice.
 
 Hardcount also makes an invoice:
 
@@ -177,9 +176,9 @@ period's own invoice gives it. So a threshold invoice is built at least one
 grace after the usage that crossed it, at the first billing run after that.
 A crossing within the last grace of a period makes no invoice: the period's
 own invoice bills that usage. A credit grant that expires within the grace
-before the invoice is built does not pay it. A subscription on a test clock
-gets no wait. Usage of a `max` or `last` meter waits for the period's own
-invoice. `DELETE /v1/subscriptions/{id}/billing-thresholds` removes them.
+before the invoice is built does not pay it. Usage of a `max` or `last`
+meter waits for the period's own invoice.
+`DELETE /v1/subscriptions/{id}/billing-thresholds` removes them.
 
 What happens to the usage a spend-threshold invoice billed depends on what
 you do with that invoice, and when:

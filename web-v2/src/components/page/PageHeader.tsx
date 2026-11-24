@@ -10,13 +10,13 @@ import { cn } from '@/lib/utils'
 // `actions`; everything else is outline, ghost or in an overflow menu.
 //
 //   ← Customers
-//   Globex Corporation  [Active] [Simulated]        [New invoice] [⋯]
+//   Globex Corporation  [Active]        [New invoice] [⋯]
 //   globex · finance@globex.test · since Jul 13, 2026
 export interface PageHeaderProps {
   title: ReactNode
   // Back link to the parent list ("← Customers"). Detail pages set it.
   back?: { to: string; label: string }
-  // Badges rendered right after the title (status, simulated, archived).
+  // Badges rendered right after the title (status, archived).
   badges?: ReactNode
   // One muted line of key facts under the title.
   meta?: ReactNode

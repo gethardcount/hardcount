@@ -30,7 +30,7 @@ import (
 // today, and a price written during the test is written inside P0. The
 // period closes are run later in simulated wall time (the server's clock and
 // the request's effective now), as the scheduler would run them at the end of
-// each period. Test-clock subscriptions use their own clocks.
+// each period.
 
 type ppRig struct {
 	t        *testing.T
@@ -42,7 +42,7 @@ type ppRig struct {
 	seq      int
 }
 
-// newPPRig is a tenant with a test-mode key (test clocks need test mode).
+// newPPRig is a tenant with a test-mode key.
 func newPPRig(t *testing.T, name string) *ppRig {
 	t.Helper()
 	db := testutil.SetupTestDB(t)
@@ -131,13 +131,19 @@ func (r *ppRig) plan(code string, prices ...map[string]any) (string, []string) {
 	return flowStr(out, "id"), ids
 }
 
-func (r *ppRig) customer(ext, clockID string) string {
+func (r *ppRig) customer(ext string) string {
 	r.t.Helper()
 	body := map[string]any{"external_id": ext, "display_name": ext, "email": ext + "@example.test"}
-	if clockID != "" {
-		body["test_clock_id"] = clockID
-	}
 	return flowStr(r.must(time.Time{}, http.MethodPost, "/v1/customers", body, http.StatusCreated), "id")
+}
+
+// editTo sets the per_unit price's rate and wants effective.
+func (r *ppRig) editTo(planID, priceID, cents, effective string) {
+	r.t.Helper()
+	out := r.must(time.Time{}, http.MethodPatch, "/v1/plans/"+planID+"/prices/"+priceID, map[string]any{"mode": "per_unit", "unit_amount_cents": cents}, http.StatusOK)
+	if got := flowStr(out, "effective"); got != effective {
+		r.t.Fatalf("edit to %s: effective %q, want %s", cents, got, effective)
+	}
 }
 
 // subscribe starts a subscription now (at, or real now) on planID, billed on
@@ -343,7 +349,7 @@ func TestE2E_PlanPrices_TwoPlansPriceOneMeterDifferently(t *testing.T) {
 	ent, entPrices := r.plan("enterprise",
 		perUnit(tokens, "2", map[string]string{"model": "a"}),
 		perUnit(tokens, "1", nil))
-	custA, custB := r.customer("pp-a", ""), r.customer("pp-b", "")
+	custA, custB := r.customer("pp-a"), r.customer("pp-b")
 	subA, p0, p1 := r.subscribe(time.Time{}, custA, pro)
 	subB, _, _ := r.subscribe(time.Time{}, custB, ent)
 	at := recent(p0)
@@ -369,7 +375,7 @@ func TestE2E_PlanPrices_MostSpecificWins(t *testing.T) {
 		perUnit(tokens, "1", nil),
 		perUnit(tokens, "2", map[string]string{"model": "a"}),
 		perUnit(tokens, "5", map[string]string{"model": "a", "token_type": "input"}))
-	cust := r.customer("pp-ms", "")
+	cust := r.customer("pp-ms")
 	sub, p0, p1 := r.subscribe(time.Time{}, cust, plan)
 	at := recent(p0)
 	r.ingest(time.Time{}, "pp-ms", "tokens", 10, at, map[string]string{"model": "a", "token_type": "input"})
@@ -510,7 +516,7 @@ func TestE2E_PlanPrices_NeverUsedPlanAppliesAtOnce(t *testing.T) {
 		t.Errorf("the price added back has id %s, want its old id %s", flowStr(back, "id"), ids[0])
 	}
 
-	cust := r.customer("pp-nu", "")
+	cust := r.customer("pp-nu")
 	sub, p0, p1 := r.subscribe(time.Time{}, cust, plan)
 	r.ingest(time.Time{}, "pp-nu", "calls", 10, recent(p0), nil)
 	r.run(p1.Add(time.Hour))
@@ -529,7 +535,7 @@ func TestE2E_PlanPrices_UsedPlanAppliesNextPeriod(t *testing.T) {
 	tokens := r.meter("tokens", "sum")
 	plan, ids := r.plan("pro", perUnit(tokens, "1", nil))
 	catchAll := ids[0]
-	cust := r.customer("pp-used", "")
+	cust := r.customer("pp-used")
 	sub, p0, p1 := r.subscribe(time.Time{}, cust, plan)
 	p2 := monthAfter(p1, p0.Day())
 	r.ingest(time.Time{}, "pp-used", "tokens", 10, recent(p0), map[string]string{"model": "a"})
@@ -586,7 +592,7 @@ func TestE2E_PlanPrices_RemovalEndsOverrides(t *testing.T) {
 	r := newPPRig(t, "removal overrides")
 	calls := r.meter("calls", "sum")
 	plan, ids := r.plan("pro", perUnit(calls, "10", nil))
-	cust := r.customer("pp-ro", "")
+	cust := r.customer("pp-ro")
 	sub, p0, p1 := r.subscribe(time.Time{}, cust, plan)
 	p2 := monthAfter(p1, p0.Day())
 	o := r.must(time.Time{}, http.MethodPost, "/v1/price-overrides", map[string]any{
@@ -629,7 +635,7 @@ func TestE2E_PlanPrices_OverrideFromTheNextPeriod(t *testing.T) {
 	r := newPPRig(t, "override next period")
 	calls := r.meter("calls", "sum")
 	plan, ids := r.plan("pro", perUnit(calls, "10", nil))
-	cust := r.customer("pp-onp", "")
+	cust := r.customer("pp-onp")
 	sub, p0, p1 := r.subscribe(time.Time{}, cust, plan)
 	p2 := monthAfter(p1, p0.Day())
 	r.must(time.Time{}, http.MethodPost, "/v1/price-overrides", map[string]any{
@@ -656,7 +662,7 @@ func TestE2E_PlanPrices_OverrideDeletedMidPeriod(t *testing.T) {
 	r := newPPRig(t, "override deleted mid-period")
 	calls := r.meter("calls", "sum")
 	plan, ids := r.plan("pro", perUnit(calls, "10", nil))
-	cust := r.customer("pp-odm", "")
+	cust := r.customer("pp-odm")
 	sub, p0, p1 := r.subscribe(time.Now().UTC().AddDate(0, 0, -40), cust, plan)
 	p2 := monthAfter(p1, p0.Day())
 	p3 := monthAfter(p2, p0.Day())
@@ -761,7 +767,7 @@ func TestE2E_PlanPrices_SwapPricesEachWindowByItsPlan(t *testing.T) {
 	calls := r.meter("calls", "sum")
 	planA, aIDs := r.plan("plan_a", perUnit(calls, "1", nil))
 	planB, bIDs := r.plan("plan_b", perUnit(calls, "3", nil))
-	cust := r.customer("pp-swap", "")
+	cust := r.customer("pp-swap")
 	sub, p0, p1 := r.subscribe(time.Time{}, cust, planA)
 	swapAt := time.Now().UTC()
 	r.ingest(swapAt, "pp-swap", "calls", 10, recent(p0), nil)

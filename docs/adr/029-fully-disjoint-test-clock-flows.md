@@ -4,6 +4,7 @@
 **Date:** 2026-05-08
 **Implemented**: 2026-05-08 (single session, six phases)
 **Supersedes**: amends ADR-028 (deferred-decoupling section — now resolved)
+**Superseded:** test clocks were removed in v0.11.0.
 
 ## Summary
 

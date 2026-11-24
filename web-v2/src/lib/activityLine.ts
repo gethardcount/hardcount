@@ -116,7 +116,7 @@ export function partTime(iso: string, tz: string | undefined): string {
 // recordedTime is the Recorded part's date and time: the real moment, which
 // is on the other calendar, so it keeps its date. The year shows only when
 // it is not the current year. The Recorded part is the real moment, so
-// "current" is the wall clock's year, never a test clock's.
+// "current" is the wall clock's year.
 export function recordedTime(iso: string, tz: string | undefined, nowMs: number = wallClockNow()): string {
   const sameYear = dayKey(iso, tz).slice(0, 4) === dayKey(new Date(nowMs).toISOString(), tz).slice(0, 4)
   return new Date(iso).toLocaleString('en-US', {

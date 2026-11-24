@@ -8,9 +8,9 @@ import { toast } from 'sonner'
 import { ArrowLeft, ChevronDown, ChevronRight, Inbox, RefreshCw } from 'lucide-react'
 
 import { api, type EndpointDelivery } from '@/lib/api'
-// Webhook deliveries are infrastructure egress — never clock-pinned — so
-// their timestamps are genuinely wall-clock, same family as the audit log
-// and the events live tail (ADR-030 forensic layer).
+// Webhook deliveries are infrastructure egress, so their timestamps are
+// genuinely wall-clock, same family as the audit log and the events live
+// tail (ADR-030 forensic layer).
 import { timeAgo, timeUntil, wallClockNow } from '@/lib/effectiveNow'
 import { showApiError } from '@/lib/formErrors'
 import { pausedEndpointNotice, isAllEvents } from '@/lib/webhookNotices'

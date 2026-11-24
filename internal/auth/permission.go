@@ -29,8 +29,6 @@ const (
 	// in internal/api/route_table.go say what each guards.
 	PermAPIKeyRead  Permission = "apikey:read"
 	PermAPIKeyWrite Permission = "apikey:write"
-
-	PermTestClockWrite Permission = "testclock:write"
 )
 
 // Writes reports whether p is a write permission: one that lets its holder

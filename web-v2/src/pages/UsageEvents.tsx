@@ -14,7 +14,6 @@ import { wallClockNow } from '@/lib/effectiveNow'
 import { showApiError } from '@/lib/formErrors'
 import { LoadError } from '@/components/LoadError'
 import { toast } from 'sonner'
-import { SimulatedBadge } from '@/components/TestClockBadge'
 import { HeldUsageNotice } from '@/components/HeldUsageNotice'
 import { cn } from '@/lib/utils'
 import { fillDays, meterModeBadge, meterValueCaption, sparklinePoints } from '@/lib/usageSummary'
@@ -435,12 +434,6 @@ export default function UsageEventsPage() {
                         <TableCell className="text-sm text-foreground">
                           <span className="inline-flex items-center gap-2">
                             {formatDateTime(ev.timestamp)}
-                            {/* Events for clock-pinned customers are stamped at the
-                                clock's simulated instant, not wall-clock ingestion
-                                time (clock-design review 2026-07-21). */}
-                            {customerMap[ev.customer_id]?.test_clock_id && (
-                              <SimulatedBadge />
-                            )}
                           </span>
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">

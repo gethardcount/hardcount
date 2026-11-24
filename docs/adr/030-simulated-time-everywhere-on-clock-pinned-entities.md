@@ -4,6 +4,7 @@
 **Date:** 2026-05-08
 **Implemented**: 2026-05-08
 **Supersedes**: closes the deferred-decoupling section ADR-029 left open for non-load-bearing timestamps
+**Superseded:** test clocks were removed in v0.11.0.
 
 ## Summary
 

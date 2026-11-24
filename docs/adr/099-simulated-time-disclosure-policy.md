@@ -4,6 +4,7 @@
 **Status:** Accepted (amended 2026-10-15: the banner is one line, see the end)
 **Extends:** ADR-030 (simulated time on clock-pinned entities), ADR-086 §4 (FE relative-time anchors).
 **Supersedes (partially):** the per-row Activity chip clause of ADR-030's 2026-07-18 amendment — its sim-primary / wall-subline rendering rule stands; only the redundant chip is gone (noted in place there).
+**Superseded:** test clocks were removed in v0.11.0.
 
 ## Summary
 

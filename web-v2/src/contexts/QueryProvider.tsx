@@ -9,8 +9,8 @@ import { ModeQueryClientsContext } from '@/contexts/modeQueryClients'
 // so aggressive time/focus-based refetching just churns the single HTTP/1.1
 // dev origin (and prod) with duplicate global queries. staleTime=30s lets
 // normal page-to-page navigation serve from cache; refetchOnWindowFocus=false
-// stops a full re-fetch on every alt-tab. Real-time surfaces (test-clock
-// advancing, invoice payment status) opt into polling via per-query
+// stops a full re-fetch on every alt-tab. Real-time surfaces (invoice
+// payment status) opt into polling via per-query
 // refetchInterval, which is independent of these defaults.
 //
 // retry: one retry for a failed load, except a 429 (Too many requests). A

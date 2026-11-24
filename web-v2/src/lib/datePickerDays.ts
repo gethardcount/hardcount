@@ -9,7 +9,7 @@ import type { EffectiveNow } from './effectiveNow'
 // Nov 8 sees Nov 9, which is already today in Tokyo.
 export interface PickerDays {
   // The day marked as today, and the one the Today button picks: the day of
-  // the customer's now, a test clock's now when the customer is on one.
+  // the customer's now.
   today: string
   // False when today is before the first day the picker allows.
   todayAllowed: boolean

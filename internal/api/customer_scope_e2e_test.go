@@ -150,8 +150,8 @@ func (r scopeRefs) ids() []string {
 
 // TestE2E_ReferencedIDsAreTenantAndModeScoped widens the test above from
 // three endpoints to every operator endpoint that writes a row naming another
-// object: by a customer, subscription, invoice, plan, meter, price,
-// dunning policy or test clock id in the body, or by the id in the path.
+// object: by a customer, subscription, invoice, plan, meter, price or
+// dunning policy id in the body, or by the id in the path.
 //
 // Each request is sent three times, naming another tenant's object, the same
 // tenant's object in the other mode, and an id that does not exist. It must
@@ -177,7 +177,6 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 	keyATest := createAPIKeyWithMode(t, db, tenantA, false)
 	keyBLive := createAPIKeyWithMode(t, db, tenantB, true)
 	aLive, aTest, bLive := "Bearer "+keyALive, "Bearer "+keyATest, "Bearer "+keyBLive
-	bTest := "Bearer " + createAPIKeyWithMode(t, db, tenantB, false)
 
 	call := func(method, path, auth string, body any) (int, map[string]any) {
 		t.Helper()
@@ -602,42 +601,6 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 			}
 		})
 	}
-
-	// Test clocks exist only in test mode, so the caller is tenant A's test
-	// key and there is no other-mode clock to name. A live key naming a
-	// test-mode clock is the closest case.
-	newClock := func(auth, name string) string {
-		code, out := call("POST", "/v1/test-clocks", auth, map[string]any{"name": name, "frozen_time": "2026-03-01T00:00:00Z"})
-		if code != 201 {
-			t.Fatalf("seed test clock: %d %v", code, out)
-		}
-		return out["id"].(string)
-	}
-	ownClock, otherClock := newClock(aTest, "own"), newClock(bTest, "other")
-	for _, c := range []struct {
-		name, auth, clockID string
-		customer, path      int
-	}{
-		{"another tenant's", aTest, otherClock, 422, 404},
-		{"unknown id", aTest, "hc_clk_missing", 422, 404},
-		{"live key, test-mode clock", aLive, ownClock, 422, 403},
-	} {
-		ids := []string{c.clockID}
-		t.Run("customer create [test_clock_id]/"+c.name, func(t *testing.T) {
-			refuse(t, "POST", "/v1/customers", c.auth, map[string]any{"external_id": "clock_" + suffix(c.clockID), "display_name": "c", "test_clock_id": c.clockID}, ids, c.customer, "", false)
-		})
-		t.Run("test clock advance [path clock]/"+c.name, func(t *testing.T) {
-			refuse(t, "POST", "/v1/test-clocks/"+c.clockID+"/advance", c.auth, map[string]any{"frozen_time": "2026-03-02T00:00:00Z"}, ids, c.path, "", false)
-		})
-		t.Run("test clock delete [path clock]/"+c.name, func(t *testing.T) {
-			refuse(t, "DELETE", "/v1/test-clocks/"+c.clockID, c.auth, nil, ids, c.path, "", false)
-		})
-	}
-	t.Run("customer create [test_clock_id]/own", func(t *testing.T) {
-		if code, out := call("POST", "/v1/customers", aTest, map[string]any{"external_id": "clock_own", "display_name": "c", "test_clock_id": ownClock}); code != 201 {
-			t.Errorf("status = %d, want 201; body: %v", code, out)
-		}
-	})
 
 	// Card setup session with Stripe connected: a customer outside the
 	// caller's tenant and mode gets 404 before any Stripe call. (The removed

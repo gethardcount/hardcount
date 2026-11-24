@@ -94,17 +94,6 @@ func (m *memoryStore) List(_ context.Context, filter ListFilter) ([]domain.Custo
 	return result, len(result), nil
 }
 
-func (m *memoryStore) ListByTestClockID(_ context.Context, tenantID, clockID string, _, _ int) ([]domain.Customer, int, error) {
-	var result []domain.Customer
-	for _, c := range m.customers {
-		if c.TenantID != tenantID || c.TestClockID != clockID {
-			continue
-		}
-		result = append(result, c)
-	}
-	return result, len(result), nil
-}
-
 // WithCustomerRulesLock: the fake has no locks or transactions, so fn runs
 // with a nil *sql.Tx on the stored customer. The lock's ordering is tested
 // against Postgres (internal/api customer_rules_lock_e2e_test.go).
@@ -275,66 +264,6 @@ func TestCustomerService_Create(t *testing.T) {
 			t.Fatal("expected error for duplicate external_id")
 		}
 	})
-
-	t.Run("test_clock_id rejected when checker not wired (ADR-027)", func(t *testing.T) {
-		// New service — no checker. Defensive default: any
-		// test_clock_id gets rejected with a clear validation
-		// error. Production wires the real checker via router.
-		svc := NewService(newMemoryStore())
-		_, err := svc.Create(ctx, "tenant1", CreateInput{
-			ExternalID:  "cus_safety",
-			DisplayName: "Safety",
-			TestClockID: "hc_tclk_anything",
-		})
-		if err == nil {
-			t.Fatal("expected error when test_clock_id is set but checker is unwired")
-		}
-	})
-
-	t.Run("test_clock_id rejected when clock not found (ADR-027)", func(t *testing.T) {
-		svc := NewService(newMemoryStore())
-		svc.SetTestClockChecker(stubClockChecker{exists: false})
-		_, err := svc.Create(ctx, "tenant1", CreateInput{
-			ExternalID:  "cus_404",
-			DisplayName: "Not found",
-			TestClockID: "hc_tclk_nonexistent",
-		})
-		if err == nil {
-			t.Fatal("expected error when clock doesn't exist")
-		}
-	})
-
-	t.Run("test_clock_id accepted when clock exists (ADR-027)", func(t *testing.T) {
-		svc := NewService(newMemoryStore())
-		svc.SetTestClockChecker(stubClockChecker{exists: true})
-		c, err := svc.Create(ctx, "tenant1", CreateInput{
-			ExternalID:  "cus_pinned",
-			DisplayName: "Pinned",
-			TestClockID: "hc_tclk_real",
-		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if c.TestClockID != "hc_tclk_real" {
-			t.Errorf("got test_clock_id %q, want %q", c.TestClockID, "hc_tclk_real")
-		}
-	})
-}
-
-// stubClockChecker is a fixed-result implementation of TestClockChecker
-// for service-level unit tests. The real implementation lives in
-// internal/testclock/postgres.go.
-type stubClockChecker struct {
-	exists bool
-	frozen time.Time
-	err    error
-}
-
-func (s stubClockChecker) ResolveSim(_ context.Context, _, clockID string) (clock.Sim, bool, error) {
-	if !s.exists || s.err != nil {
-		return clock.Sim{}, false, s.err
-	}
-	return clock.Sim{At: s.frozen, TestClockID: clockID}, true, nil
 }
 
 // simCapturingAudit records the clock binding present on the ctx the emission
@@ -350,61 +279,22 @@ func (a *simCapturingAudit) LogInTx(ctx context.Context, _ *sql.Tx, _ audit.Entr
 	return nil
 }
 
-// A customer created INTO a simulation must have its create row on the sim
-// axis. Create is the one customer mutation that cannot bind from the customer
-// pin — the customer does not exist yet — so it binds from the clock it was
-// handed. Without that bind the row lands with NULL sim columns and is invisible
-// to ?test_clock_id=, which matters more here than anywhere else: ADR-086
-// teardown hard-deletes the customer, leaving this row as the only evidence the
-// customer was ever in the clock's world.
-func TestCreate_ClockPinnedCustomerBindsTheSimAxis(t *testing.T) {
-	ctx := context.Background()
-	frozen := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
-
-	t.Run("pinned create binds the clock and its instant", func(t *testing.T) {
-		svc := NewService(newMemoryStore())
-		spy := &simCapturingAudit{}
-		svc.SetAuditLogger(spy)
-		svc.SetTestClockChecker(stubClockChecker{exists: true, frozen: frozen})
-
-		if _, err := svc.Create(ctx, "tenant1", CreateInput{
-			ExternalID:  "cus_pinned",
-			DisplayName: "Pinned",
-			TestClockID: "hc_tclk_real",
-		}); err != nil {
-			t.Fatalf("create: %v", err)
-		}
-
-		if !spy.bound {
-			t.Fatal("emission ran on an UNBOUND ctx — the create row lands with NULL sim columns and the customer's origin is invisible to the clock filter")
-		}
-		if spy.sim.TestClockID != "hc_tclk_real" {
-			t.Errorf("bound clock = %q, want hc_tclk_real", spy.sim.TestClockID)
-		}
-		if !spy.sim.At.Equal(frozen) {
-			t.Errorf("bound instant = %s, want the clock's frozen_time %s", spy.sim.At, frozen)
-		}
-	})
-
-	// The mirror: an ordinary live customer must NOT be stamped, or the partial
-	// index (0148) fills with wall-clock rows and the clock filter starts
-	// returning customers that were never in any simulation.
-	t.Run("unpinned create stays off the axis", func(t *testing.T) {
-		svc := NewService(newMemoryStore())
-		spy := &simCapturingAudit{}
-		svc.SetAuditLogger(spy)
-		svc.SetTestClockChecker(stubClockChecker{exists: true, frozen: frozen})
-
-		if _, err := svc.Create(ctx, "tenant1", CreateInput{
-			ExternalID:  "cus_live",
-			DisplayName: "Live",
-		}); err != nil {
-			t.Fatalf("create: %v", err)
-		}
-		if spy.bound {
-			t.Errorf("an unpinned create bound a sim context (%+v) — it must stay wall-clock", spy.sim)
-		}
-	})
+// A create stays off the sim axis: a stamped row would fill the partial
+// index (0148) with wall-clock rows, and the clock filter would return
+// customers that were never on a clock.
+func TestCreate_StaysOffTheSimAxis(t *testing.T) {
+	svc := NewService(newMemoryStore())
+	spy := &simCapturingAudit{}
+	svc.SetAuditLogger(spy)
+	if _, err := svc.Create(context.Background(), "tenant1", CreateInput{
+		ExternalID:  "cus_live",
+		DisplayName: "Live",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if spy.bound {
+		t.Errorf("a create bound a sim context (%+v); it must stay wall-clock", spy.sim)
+	}
 }
 
 func TestCustomerService_Get(t *testing.T) {
@@ -654,37 +544,20 @@ func (a *instantCapturingAudit) LogInTx(ctx context.Context, _ *sql.Tx, _ audit.
 	return nil
 }
 
-// A create runs on one instant: pinned into a clock, the clock's frozen
-// time, with no read of the server's clock; naming no clock, one read of the
-// server's clock, which the row and its audit row both carry.
+// A create runs on one instant: one read of the server's clock, which the
+// row and its audit row both carry.
 func TestCreate_RunsOnOneInstant(t *testing.T) {
-	frozen := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
-	for _, c := range []struct {
-		name            string
-		clockID         string
-		wantAt          time.Time
-		wantServerReads int
-	}{
-		{"pinned into a clock", "hc_tclk_one", frozen, 0},
-		{"naming no clock", "", createServerAt, 1},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			svc := NewService(newMemoryStore())
-			server := &createServer{}
-			svc.SetClock(server)
-			spy := &instantCapturingAudit{}
-			svc.SetAuditLogger(spy)
-			svc.SetTestClockChecker(stubClockChecker{exists: true, frozen: frozen})
-			created, err := svc.Create(context.Background(), "tenant1", CreateInput{
-				ExternalID: "cus_one", DisplayName: "One", TestClockID: c.clockID,
-			})
-			if err != nil {
-				t.Fatalf("create: %v", err)
-			}
-			if !spy.at.Equal(c.wantAt) || !created.CreatedAt.Equal(c.wantAt) || !created.UpdatedAt.Equal(c.wantAt) || server.reads != c.wantServerReads {
-				t.Errorf("row created %v, updated %v, audit row %v after %d server reads; want all at %v after %d",
-					created.CreatedAt, created.UpdatedAt, spy.at, server.reads, c.wantAt, c.wantServerReads)
-			}
-		})
+	svc := NewService(newMemoryStore())
+	server := &createServer{}
+	svc.SetClock(server)
+	spy := &instantCapturingAudit{}
+	svc.SetAuditLogger(spy)
+	created, err := svc.Create(context.Background(), "tenant1", CreateInput{ExternalID: "cus_one", DisplayName: "One"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if !spy.at.Equal(createServerAt) || !created.CreatedAt.Equal(createServerAt) || !created.UpdatedAt.Equal(createServerAt) || server.reads != 1 {
+		t.Errorf("row created %v, updated %v, audit row %v after %d server reads; want all at %v after 1",
+			created.CreatedAt, created.UpdatedAt, spy.at, server.reads, createServerAt)
 	}
 }

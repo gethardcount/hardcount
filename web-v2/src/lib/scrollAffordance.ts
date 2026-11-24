@@ -5,8 +5,8 @@
 // makes "there is more below" and "that is everything" render identically.
 //
 // The sidebar hit exactly this (walked 2026-08-03): at an 800px window, 229px
-// of navigation sat below the fold — Audit Log, Webhooks, API Keys, Settings
-// and Test Clocks — with the list appearing to simply end at "Dunning
+// of navigation sat below the fold — Audit Log, Webhooks, API Keys and
+// Settings — with the list appearing to simply end at "Dunning
 // policies". Nothing was broken: the pane scrolls fine and every item is
 // reachable and clickable. It just gave no reason to try.
 //

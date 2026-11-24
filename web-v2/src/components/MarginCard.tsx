@@ -40,11 +40,8 @@ export function MarginCard({ customer, currency }: { customer: Customer; currenc
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
 
-  // For a clock-pinned customer, anchor the rolling presets' upper bound to
-  // the clock's frozen_time: provider-costed usage events are stamped in
-  // simulation time (usage/service.go), so a wall-clock "last 30 days" sits
-  // before them. The billing periods come from the server, already on the
-  // customer's clock. Custom absolute dates are left untouched. While now is
+  // The rolling presets end at the customer's now. The billing periods come
+  // from the server. Custom absolute dates are left untouched. While now is
   // not known, a rolling window waits and the card shows its spinner.
   const now = useNowFor(customer)
   const tz = useTenantTimezone()

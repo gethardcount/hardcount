@@ -38,8 +38,8 @@ const (
 	RoleWebhookOutbox   Role = "webhook_outbox"
 	RoleEmailOutbox     Role = "email_outbox"
 	RoleWebhookDelivery Role = "webhook_delivery"
-	// RoleTestClockCatchup runs the test-clock catch-up: the work that fell
-	// due in the time an advancing test clock skipped (ADR-140).
+	// RoleTestClockCatchup has no runner: it stays while the leases CHECK
+	// names it.
 	RoleTestClockCatchup Role = "testclock_catchup"
 )
 

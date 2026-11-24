@@ -320,8 +320,7 @@ to the cache, so Hardcount takes those out of `input`.
 
 The idempotency key is a unique ID for each event. If LiteLLM sends the same
 call again, Hardcount counts it once. Hardcount saves a call's events together, or
-none of them. Each event is dated with the time the call ended, or, for a
-customer on a test clock, with the clock's time.
+none of them. Each event is dated with the time the call ended.
 
 `<call>` is LiteLLM's call ID, the same ID as the call's row in
 LiteLLM's spend log, so a replay from that log counts each call once.
@@ -640,9 +639,8 @@ exist, Hardcount holds the call's events instead of billing them:
   ```
 
   Each held event becomes a usage event under its original idempotency
-  key and time (for a customer on a test clock, the clock's time), so a
-  call LiteLLM sent again after you created the customer is not counted
-  twice. Releasing twice adds nothing. If the
+  key and time, so a call LiteLLM sent again after you created the
+  customer is not counted twice. Releasing twice adds nothing. If the
   `user` value had a typo, pass `"customer_id":"hc_cus_…"` to release
   into the right customer. One release takes at most 5,000 events;
   `more_to_release` counts the rest, and releasing again takes them.

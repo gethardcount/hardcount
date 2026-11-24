@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { useForm, useFieldArray } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { Loader2, Plus, Trash2 } from 'lucide-react'
 
 import { api, type Customer, type Plan, type Subscription } from '@/lib/api'
@@ -80,9 +80,6 @@ interface Props {
   // to this customer (CustomerDetail entry point). When unset, the
   // dialog renders its own server-searched picker.
   lockedCustomer?: Customer
-  // Clock id → display name for the ADR-027 inherit hint. Both entry
-  // points compute this; passing nothing just hides the hint.
-  clockNameMap?: Record<string, string>
   onCreated: (sub: Subscription) => void
 }
 
@@ -91,7 +88,6 @@ export function CreateSubscriptionDialog({
   onOpenChange,
   plans,
   lockedCustomer,
-  clockNameMap = {},
   onCreated,
 }: Props) {
   const form = useForm<FormData>({
@@ -140,21 +136,6 @@ export function CreateSubscriptionDialog({
   })
 
   const onSubmit = form.handleSubmit((data) => mutation.mutate(data))
-
-  const watchedCustomerId = form.watch('customer_id')
-  // The clock-inherit hint needs the selected customer's test_clock_id.
-  // With the server-searched picker there is no local customers list, so
-  // fetch the picked customer directly (cheap ids= point read).
-  const { data: pickedCustomerData } = useQuery({
-    queryKey: ['create-sub-picked-customer', watchedCustomerId],
-    queryFn: () => api.listCustomers(`ids=${watchedCustomerId}&limit=1`),
-    enabled: !lockedCustomer && !!watchedCustomerId,
-    staleTime: 30_000,
-  })
-  const inheritCustomer = lockedCustomer ?? pickedCustomerData?.data?.[0] ?? null
-  const inheritedClockName = inheritCustomer?.test_clock_id
-    ? (clockNameMap[inheritCustomer.test_clock_id] || inheritCustomer.test_clock_id)
-    : ''
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -220,12 +201,6 @@ export function CreateSubscriptionDialog({
                   </FormItem>
                 )}
               />
-            )}
-
-            {inheritedClockName && (
-              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                This subscription will inherit the customer's test clock — <span className="font-medium">{inheritedClockName}</span>.
-              </div>
             )}
 
             {/* Items — dynamic array. Backend rejects duplicate plan_ids

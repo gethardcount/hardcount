@@ -31,8 +31,7 @@ Every usage event carries its own key. It names that one event, such as
 - **It is required.** An event without one, or with only spaces, is refused
   with `422` and `param: idempotency_key`.
 - **It is at most 255 characters.** A longer one is refused with `422`.
-- **It is unique for each account and mode (test or live), forever.** Only
-  deleting a test clock frees keys: it deletes its customers' events.
+- **It is unique for each account and mode (test or live), forever.**
 - **A key that was used before keeps the first event.** Hardcount drops the
   new one without comparing the two. A single event gets `200`, the first
   event, and the header `Idempotent-Replayed: true`. A batch counts it in

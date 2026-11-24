@@ -39,10 +39,4 @@ export type CreateCustomerBody = {
      * @maxItems 10
      */
   additional_emails?: string[];
-  /**
-     * Test mode only. Runs the customer on this test clock,
-     * which must exist in the account and mode. Fixed after
-     * create.
-     */
-  test_clock_id?: string;
 };

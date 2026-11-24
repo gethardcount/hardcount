@@ -21,7 +21,6 @@ import { downloadCSV } from '@/lib/csv'
 import { useNowFor } from '@/hooks/useNow'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { pickerDays } from '@/lib/datePickerDays'
-import { SimulatedBadge } from '@/components/TestClockBadge'
 import { useSortable, type SortDir } from '@/hooks/useSortable'
 import { useUrlState } from '@/hooks/useUrlState'
 import { cn } from '@/lib/utils'
@@ -34,7 +33,6 @@ import {
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
-import { TestClocksLoadError } from '@/components/TestClocksLoadError'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -326,12 +324,6 @@ export default function CreditsPage() {
             <CardTitle className="text-sm">
               <span className="inline-flex items-center gap-2">
                 Transaction history
-                {/* Ledger dates on a clock-pinned customer are simulated —
-                    one badge covers the card, same pattern as the detail
-                    pages (clock-design review 2026-07-21). */}
-                {selectedCustomer?.test_clock_id && (
-                  <SimulatedBadge testClockId={selectedCustomer.test_clock_id} link />
-                )}
               </span>
             </CardTitle>
             <div className="flex items-center gap-2">
@@ -652,10 +644,8 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
     defaultValues: { amount: '', description: '', expiresAt: '', promotional: false },
   })
 
-  // The expiry picker's first day is the selected customer's today, on its
-  // test clock when it is on one: a real-time floor would block valid
-  // simulated-future dates or admit simulated-past ones. Until a customer is
-  // picked and its now is known, the picker is disabled.
+  // The expiry picker's first day is the selected customer's today. Until a
+  // customer is picked and its now is known, the picker is disabled.
   // `customers` above holds only customers who already have a balance (the
   // page's table), and the dialog can grant to any customer, so a customer
   // not in it is read through the combobox's own by-id query, under its key,
@@ -902,10 +892,6 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Valid through</FormLabel>
-                      {/* The picker stays disabled while the customer's
-                          clock is not known; a failed clock list says why,
-                          with Retry. */}
-                      <TestClocksLoadError records={activeCustomer ? [activeCustomer] : []} className="mb-0" />
                       {/* Today is the first day: valid through today ends
                           at tonight's midnight, still ahead. */}
                       <DatePicker

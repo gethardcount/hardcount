@@ -65,7 +65,9 @@ func TestActivityEffectiveAt_FillAndRollback(t *testing.T) {
 		('ten_eat', 'inv_clk', 'pi_clk', 'auto_charge', 'failed', '2026-11-02T10:00:00Z', '2026-09-01T00:00:00Z'),
 		('ten_eat', 'inv_real', 'pi_real', 'auto_charge', 'failed', '2026-11-02T10:00:00Z', NULL)`)
 
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	// Up to before 00241, which deletes every row of a test clock.
+	beforeClockDelete := filesBefore(t, deleteTestClocksVersion)
+	if err := up(ctx, dsn, beforeClockDelete); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
 	if got, want := times("effective_at"), "em_clk=09-01 00:00 em_real=11-02 10:00 pi_clk=09-01 00:00 pi_real=11-02 10:00"; got != want {
@@ -95,7 +97,7 @@ func TestActivityEffectiveAt_FillAndRollback(t *testing.T) {
 	}
 	exec(`UPDATE email_outbox SET status = 'dispatched', dispatched_at = now() WHERE id = 'em_new'`)
 
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	if err := up(ctx, dsn, beforeClockDelete); err != nil {
 		t.Fatalf("Up again: %v", err)
 	}
 }

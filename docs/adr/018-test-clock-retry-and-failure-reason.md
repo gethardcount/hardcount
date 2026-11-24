@@ -2,6 +2,7 @@
 
 **Status:** Accepted (amended 2026-05-05)
 **Date:** 2026-05-04
+**Superseded:** test clocks were removed in v0.11.0.
 
 ## Summary
 

@@ -20,7 +20,6 @@ Stripe troubleshooting is out of scope.
 | `hardcount_stripe_breaker_state == 2`, or dunning retries skipped | [Stripe circuit breaker open](stripe-circuit-breaker-open.md) |
 | Invoices stuck with an unconfirmed payment for hours, or `reconciler error` in the logs with `get payment intent` on every billing run for the same invoice | [A charge's result is unclear](unclear-charge.md#unconfirmed-with-a-paymentintent) |
 | A payment `processing` for days, or a dunning retry that "is processing" | [A charge's result is unclear: processing](unclear-charge.md#processing-for-days) |
-| A test clock stuck on the Advancing badge | [Test-clock advance hung](test-clock-advance-hung.md) |
 | An account sees another account's data | [Data leak between accounts suspected](rls-leak-suspected.md) |
 | LiteLLM spend 503s, or Hardcount spend short of LiteLLM's | [LiteLLM spend gap after an outage](litellm-spend-gap.md) |
 | A replica will not boot and names Redis | [A replica will not start](replica-will-not-start.md) |

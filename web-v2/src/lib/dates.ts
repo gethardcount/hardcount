@@ -163,7 +163,7 @@ export function formatYMDInTZ(iso: string, timezone?: string): string {
 
 // isBeforeCivilToday reports whether a picked yyyy-mm-dd is an earlier civil
 // day than "today" in tenant TZ, where today is the civil date of `nowMs` (the
-// entity's effective now, so a test clock is honoured). A credit expiry picker
+// entity's effective now). A credit expiry picker
 // refuses only those: today is a valid "valid through" day, since
 // startOfNextDayInTZ resolves it to tonight's midnight. Taking today from
 // toISOString() (the UTC date) instead would make a New York evening count as
@@ -192,7 +192,7 @@ export function calendarDaysUntil(iso: string, now: EffectiveNow, timezone?: str
 
 // civilDateFrom returns the yyyy-mm-dd civil date `days` after the civil date
 // of `nowMs` in tenant TZ. Unlike civilDateAgo it takes the anchor as an
-// argument, so a clock-pinned entity passes its simulated now. Use it for a
+// argument, the entity's now. Use it for a
 // picker floor whose date is later resolved with startOfDayInTZ in the same
 // zone: the pause dialog's earliest resume date is civilDateFrom(now, 1),
 // because start of today is already past and the server refuses it.

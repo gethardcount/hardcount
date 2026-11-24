@@ -1214,7 +1214,7 @@ A subscription was canceled. `canceled_by` says who canceled it:
 `operator` (a dashboard user or an API key), `customer`, `schedule` (a
 cancel set for later, such as at trial end), `dunning` (Hardcount's
 automatic payment retries ran out) or `system` (Hardcount itself). A cancel
-by dunning says `dunning`, also when a test-clock advance ran it. A cancel at trial end carries
+by dunning says `dunning`. A cancel at trial end carries
 `reason: trial_end_cancel`; other cancels have no `reason`.
 
 **Also in `data`:** `canceled_by`, `reason`.

@@ -2,7 +2,7 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { allNavItems, isNavActive, isTestMode, NAV_SECTIONS, visibleNav } from '../src/lib/navigation.ts'
+import { allNavItems, isNavActive, NAV_SECTIONS } from '../src/lib/navigation.ts'
 
 // The paths with no :param inside main.tsx's signed-in layout route: the
 // pages an operator opens in the sidebar.
@@ -18,7 +18,7 @@ test('every signed-in page is in the navigation, and every menu item opens one',
   const routed = signedInPaths()
   // A parse that finds no routes would make the loop below check nothing.
   assert.ok(routed.length > 0, 'found no signed-in routes in main.tsx')
-  const nav = new Set(allNavItems(true).map(i => i.to))
+  const nav = new Set(allNavItems().map(i => i.to))
   // Sub-pages reached from their parent page, not the menu.
   const reachedFromParent = new Set(['/webhooks/events'])
   for (const r of routed) {
@@ -28,22 +28,6 @@ test('every signed-in page is in the navigation, and every menu item opens one',
   for (const to of nav) {
     assert.ok(routed.includes(to), `menu item ${to} has no signed-in route`)
   }
-})
-
-test('test clocks are listed in test mode only', () => {
-  assert.ok(allNavItems(true).some(i => i.to === '/test-clocks'))
-  assert.ok(!allNavItems(false).some(i => i.to === '/test-clocks'))
-  assert.ok(visibleNav(false).every(s => s.items.length > 0))
-})
-
-test('test clocks stay hidden while the user is still loading', () => {
-  // A live-mode operator must not see Test clocks flash in before /whoami answers.
-  const shown = (user: { livemode: boolean } | null | undefined) =>
-    allNavItems(isTestMode(user)).some(i => i.to === '/test-clocks')
-  assert.equal(shown(undefined), false)
-  assert.equal(shown(null), false)
-  assert.equal(shown({ livemode: true }), false)
-  assert.equal(shown({ livemode: false }), true)
 })
 
 test('labels are sentence case and icons are not shared', () => {
@@ -60,10 +44,10 @@ test('labels are sentence case and icons are not shared', () => {
 })
 
 test('detail pages keep their section highlighted', () => {
-  const pricing = allNavItems(true).find(i => i.to === '/pricing')!
+  const pricing = allNavItems().find(i => i.to === '/pricing')!
   assert.ok(isNavActive(pricing, '/plans/hc_pln_1'))
   assert.ok(isNavActive(pricing, '/meters/hc_mtr_1'))
-  const home = allNavItems(true).find(i => i.to === '/')!
+  const home = allNavItems().find(i => i.to === '/')!
   assert.ok(isNavActive(home, '/'))
   assert.ok(!isNavActive(home, '/customers'))
 })
@@ -73,11 +57,11 @@ test('the Ctrl+K palette builds its pages from the shared config', () => {
   assert.ok(palette.includes('allNavItems('), 'CommandPalette must list pages from lib/navigation')
   assert.ok(!/const NAV_ITEMS\s*:/.test(palette), 'CommandPalette must not keep its own page list')
   const layout = readFileSync(new URL('../src/components/Layout.tsx', import.meta.url), 'utf8')
-  assert.ok(layout.includes('visibleNav('), 'Layout must render the sidebar from lib/navigation')
+  assert.ok(layout.includes('NAV_SECTIONS.map('), 'Layout must render the sidebar from lib/navigation')
 })
 
 test('Dunning policies sit directly under Dunning', () => {
-  const items = allNavItems(true)
+  const items = allNavItems()
   const dunning = items.findIndex(i => i.to === '/dunning')
   assert.equal(items[dunning + 1]?.to, '/dunning-policies')
 })

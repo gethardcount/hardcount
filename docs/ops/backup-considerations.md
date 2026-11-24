@@ -128,7 +128,7 @@ SELECT leader_pause('webhook_outbox',   'your-name', 'copy');
 SELECT leader_pause('webhook_delivery', 'your-name', 'copy');
 ```
 
-A copy `restore.sh` made is also marked as restored, so Hardcount refuses to start on it: remove the marker with `DELETE FROM restore_catchup;`. Do not run `hardcount restore catch-up` on a copy: it writes to your live Stripe account. It closes your customers' open payment pages, and the events it applies set customers' default cards and reverse tax in Stripe Tax. Do not charge, refund or change anything through the copy's dashboard or API, and do not open its payment pages: they charge real cards. A test clock that was moving forward resumes at start, but it bills test customers only.
+A copy `restore.sh` made is also marked as restored, so Hardcount refuses to start on it: remove the marker with `DELETE FROM restore_catchup;`. Do not run `hardcount restore catch-up` on a copy: it writes to your live Stripe account. It closes your customers' open payment pages, and the events it applies set customers' default cards and reverse tax in Stripe Tax. Do not charge, refund or change anything through the copy's dashboard or API, and do not open its payment pages: they charge real cards.
 
 ## What is in the database
 

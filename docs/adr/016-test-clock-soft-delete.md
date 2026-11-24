@@ -2,6 +2,7 @@
 
 **Status:** SUPERSEDED by [ADR-086](086-simulated-data-lifecycle.md) (2026-07-09) — clock-delete becomes a hard `DELETE` with an FK cascade keyed on `sim_clock_id` (teardown of the whole simulated sandbox, customer included), replacing the soft-delete + cancel-subs + detach-customers design below. The soft-delete's residual leakage (a detached customer's stranded simulated rows swept against wall-clock) is exactly what ADR-086 dissolves.
 **Date:** 2026-05-04
+**Superseded:** test clocks were removed in v0.11.0.
 
 ## Summary
 

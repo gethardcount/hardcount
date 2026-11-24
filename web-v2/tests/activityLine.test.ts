@@ -113,7 +113,7 @@ test('the zone is named once, as the dashboard formatter names it', () => {
 })
 
 test('the zone header counts the Recorded times and time parts, not only the row times', () => {
-  // A New York account on a test clock in Feb 2027, recorded in Oct 2026:
+  // A New York account with a row in Feb 2027, recorded in Oct 2026:
   // the rows are in EST, the Recorded times in EDT. The header names both.
   const onClock: ActivityLine = { ...line('a', '2027-02-01T15:00:00Z'), recorded_at: '2026-10-18T14:44:00Z' }
   assert.equal(zoneHeader(lineTimes([onClock]), NEW_YORK), 'Times in EST / EDT')

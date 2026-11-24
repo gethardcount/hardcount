@@ -19,8 +19,8 @@ not; see [Late usage](../api-surface.md#late-usage).
 The next billing run starts one interval after the previous run ended, so
 the start time drifts by the length of each run.
 
-A test clock bills with no grace period: moving the clock forward builds the
-invoice at once. So does an immediate cancel, or `retry-billing`.
+An immediate cancel, or `retry-billing`, builds the invoice at once, with no
+grace period.
 
 ## When billing or a payment fails
 
@@ -62,7 +62,7 @@ at the first billing run after its time is up.
 | A usage event's `dimensions` | At most 16 labels, each value a string, number, boolean or `null` |
 | A price's `dimension_match` | At most 16 labels; each key and value 1 to 100 bytes |
 | A usage event's `quantity` | At most 12 decimal places, below 10^26, at most 100 characters as written |
-| A usage event's `timestamp` | At most 5 minutes after the customer's current time. A customer on a test clock uses the clock's time. |
+| A usage event's `timestamp` | At most 5 minutes after the current time. |
 | One credit grant | At most 100,000,000 in the currency's smallest unit ($1,000,000) |
 | Keeping an old API key working after a rotation | 0 to 604,800 seconds (7 days); 0 by default ([rotate a key](../api-keys.md#rotate-a-key)) |
 
@@ -93,11 +93,3 @@ More: [Retries](../webhooks.md#retries).
 
 Too many failed sign-ins make the dashboard wait before the next try. How
 long: [Sign-in throttled](../ops/runbook/sign-in-throttled.md).
-
-## Test clocks
-
-| What | Value |
-|---|---|
-| One advance | Later than the clock's time, and at most 1 year ahead |
-| The advance call | Answers at once with `status: "advancing"`. Poll `GET /v1/test-clocks/{id}` until `status` is `ready`. |
-| Time the clock may take to bill what falls due | 10 minutes, then `status` is `internal_failure`. `POST /v1/test-clocks/{id}/retry-advance` tries again. |

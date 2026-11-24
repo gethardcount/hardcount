@@ -11,8 +11,8 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// Races of the plan price writes (ADR-130 §4-§8, design §4.17 C3, C4, C9,
-// C10, C11 and the teardown races of round 2). Each test stops one side at a
+// Races of the plan price writes (ADR-130 §4-§8, design §4.17 C3, C4, C10,
+// C11 and the override races of round 2). Each test stops one side at a
 // lock the other side needs, with a row lock a test transaction holds, and
 // checks the outcome of both orders where there are two. The statement text
 // a side waits in is matched in pg_stat_activity (testutil.WaitForLockWaiter).
@@ -20,9 +20,6 @@ import (
 // The statements the sides wait in.
 const (
 	planLockSQL      = "FROM plans WHERE id = $1 FOR UPDATE"
-	clocksLockSQL    = "FROM test_clocks ORDER BY id FOR SHARE"
-	clockLockSQL     = "FROM test_clocks WHERE id = $1 FOR SHARE"
-	teardownCustSQL  = "DELETE FROM customers WHERE test_clock_id"
 	numberRowLockSQL = "tenant_settings"
 )
 
@@ -49,16 +46,6 @@ func hold(t *testing.T, admin *sql.DB, lock string, args ...any) *held {
 }
 
 func (h *held) release() { h.once.Do(func() { _ = h.tx.Rollback() }) }
-
-// commitAndRelease commits what the holder wrote.
-func (h *held) commit(t *testing.T) {
-	t.Helper()
-	h.once.Do(func() {
-		if err := h.tx.Commit(); err != nil {
-			t.Fatalf("commit the holder: %v", err)
-		}
-	})
-}
 
 type ppResp struct {
 	code int
@@ -100,7 +87,7 @@ func TestE2E_PlanPrices_ValidFromReadAfterThePlanLock(t *testing.T) {
 	admin := testutil.AdminPool(t)
 	calls := r.meter("calls", "sum")
 	plan, ids := r.plan("pro", perUnit(calls, "1", nil))
-	r.subscribe(time.Time{}, r.customer("pp-vf", ""), plan)
+	r.subscribe(time.Time{}, r.customer("pp-vf"), plan)
 
 	h := hold(t, admin, `SELECT 1 FROM plans WHERE id = $1 FOR UPDATE`, plan)
 	first := r.async(http.MethodPatch, "/v1/plans/"+plan+"/prices/"+ids[0], map[string]any{"mode": "per_unit", "unit_amount_cents": "2"})
@@ -198,7 +185,7 @@ func TestE2E_PlanPrices_PriceWriteAgainstFirstSubscription(t *testing.T) {
 		admin := testutil.AdminPool(t)
 		calls := r.meter("calls", "sum")
 		plan, ids := r.plan("pro", perUnit(calls, "1", nil))
-		cust := r.customer("pp-c3w", "")
+		cust := r.customer("pp-c3w")
 		// The price row held, so the write waits at its version insert (the
 		// foreign key's KEY SHARE) after its plan lock.
 		h := hold(t, admin, `SELECT 1 FROM plan_prices WHERE id = $1 FOR UPDATE`, ids[0])
@@ -234,7 +221,7 @@ func TestE2E_PlanPrices_PriceWriteAgainstFirstSubscription(t *testing.T) {
 			"base_amount_cents": 100, "base_bill_timing": "in_advance", "prices": []map[string]any{perUnit(calls, "1", nil)},
 		}, http.StatusCreated)
 		plan, priceID := flowStr(out, "id"), flowStr(flowList(out, "prices")[0], "id")
-		cust := r.customer("pp-c3s", "")
+		cust := r.customer("pp-c3s")
 		r.exec(`INSERT INTO tenant_settings (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING`, r.tenantID)
 		h := hold(t, admin, `SELECT 1 FROM tenant_settings WHERE tenant_id = $1 FOR UPDATE`, r.tenantID)
 		sub := r.async(http.MethodPost, "/v1/subscriptions", map[string]any{
@@ -268,40 +255,6 @@ func TestE2E_PlanPrices_PriceWriteAgainstFirstSubscription(t *testing.T) {
 	})
 }
 
-// TestE2E_PlanPrices_PriceWriteAgainstClockAdvance (C9): a price write reads
-// each test clock FOR SHARE, so it waits for an advance in progress and
-// stamps the clock's new time; no period the advance's catch-up closes is
-// repriced.
-//
-// Mutation: read the clocks without FOR SHARE, and the stamp is the old
-// time.
-func TestE2E_PlanPrices_PriceWriteAgainstClockAdvance(t *testing.T) {
-	r := newPPRig(t, "c9")
-	admin := testutil.AdminPool(t)
-	calls := r.meter("calls", "sum")
-	plan, ids := r.plan("pro", perUnit(calls, "1", nil))
-	frozen := time.Now().UTC().AddDate(0, 0, -50).Truncate(time.Second)
-	clk := r.clock("c9", frozen)
-	r.clockSub("pp-c9", clk, plan)
-	moved := frozen.Add(36 * time.Hour)
-	// The advance in progress: the clock row locked and its time moved,
-	// not committed yet.
-	h := hold(t, admin, `UPDATE test_clocks SET frozen_time = $2 WHERE id = $1`, clk, moved)
-	edit := r.async(http.MethodPatch, "/v1/plans/"+plan+"/prices/"+ids[0], map[string]any{"mode": "per_unit", "unit_amount_cents": "2"})
-	testutil.WaitForLockWaiter(t, context.Background(), admin, clocksLockSQL)
-	h.commit(t)
-	if e := wait(t, "edit", edit); e.code != http.StatusOK {
-		t.Fatalf("edit: %d %s", e.code, e.raw)
-	}
-	var stamp time.Time
-	if err := admin.QueryRow(`SELECT valid_from FROM plan_price_version_clocks WHERE test_clock_id = $1`, clk).Scan(&stamp); err != nil {
-		t.Fatal(err)
-	}
-	if want := moved.Add(time.Microsecond); !stamp.Equal(want) {
-		t.Errorf("stamp = %v, want the advanced time plus 1µs (%v)", stamp, want)
-	}
-}
-
 // TestE2E_PlanPrices_SwapAgainstPriceWrites (C10): an immediate swap from
 // plan A to plan B against a price write on each, many times. The swap takes
 // both plans FOR KEY SHARE in ascending id after its subscription row; a
@@ -313,7 +266,7 @@ func TestE2E_PlanPrices_SwapAgainstPriceWrites(t *testing.T) {
 	planA, aIDs := r.plan("plan_a", perUnit(calls, "1", nil))
 	planB, bIDs := r.plan("plan_b", perUnit(calls, "2", nil))
 	for i := 0; i < 20; i++ {
-		cust := r.customer("pp-c10-"+string(rune('a'+i)), "")
+		cust := r.customer("pp-c10-" + string(rune('a'+i)))
 		sub, _, _ := r.subscribe(time.Time{}, cust, planA)
 		item := flowStr(flowList(r.must(time.Time{}, http.MethodGet, "/v1/subscriptions/"+sub, nil, http.StatusOK), "items")[0], "id")
 		swap := r.async(http.MethodPatch, "/v1/subscriptions/"+sub+"/items/"+item, map[string]any{"new_plan_id": planB, "immediate": true})
@@ -325,176 +278,6 @@ func TestE2E_PlanPrices_SwapAgainstPriceWrites(t *testing.T) {
 			}
 		}
 	}
-}
-
-// TestE2E_PlanPrices_TeardownAgainstWrites (round 2): a test-clock teardown
-// deletes bottom-up, outside the lock order, so it takes its clock row FOR
-// UPDATE first. A price removal or an override write reads the clock FOR
-// SHARE before it touches a row teardown deletes (an override of the clock's
-// customer), so one waits for the other at the clock and both finish. The
-// teardown here stops after it deleted the customer's override, before it
-// deletes the customer and the clock.
-//
-// Mutation: drop the teardown's clock lock, and the removal and the teardown
-// deadlock (one answers 500 with 40P01).
-func TestE2E_PlanPrices_TeardownAgainstWrites(t *testing.T) {
-	for _, writer := range []string{"price removal", "override write"} {
-		t.Run(writer, func(t *testing.T) {
-			r := newPPRig(t, "teardown "+writer)
-			admin := testutil.AdminPool(t)
-			calls := r.meter("calls", "sum")
-			plan, ids := r.plan("pro", perUnit(calls, "10", nil))
-			frozen := time.Now().UTC().AddDate(0, 0, -20).Truncate(time.Second)
-			clk := r.clock("td", frozen)
-			cust := r.customer("pp-tdw", clk)
-			r.subscribe(time.Time{}, cust, plan)
-			r.must(time.Time{}, http.MethodPost, "/v1/price-overrides", map[string]any{
-				"customer_id": cust, "price_id": ids[0], "mode": "per_unit", "unit_amount_cents": "4",
-			}, http.StatusCreated)
-
-			h := hold(t, admin, `SELECT 1 FROM customers WHERE id = $1 FOR UPDATE`, cust)
-			teardown := r.async(http.MethodDelete, "/v1/test-clocks/"+clk, nil)
-			testutil.WaitForLockWaiter(t, context.Background(), admin, teardownCustSQL)
-			var write <-chan ppResp
-			if writer == "price removal" {
-				write = r.async(http.MethodDelete, "/v1/plans/"+plan+"/prices/"+ids[0], nil)
-			} else {
-				write = r.async(http.MethodPost, "/v1/price-overrides", map[string]any{
-					"customer_id": cust, "price_id": ids[0], "mode": "per_unit", "unit_amount_cents": "3",
-				})
-			}
-			// The write waits at the clock (with the fix), or at the
-			// override rows the teardown deleted (without it, and then the
-			// two deadlock once the teardown goes on).
-			waitForAnyLockWaiter(t, admin, "test_clocks", "customer_price_overrides")
-			h.release()
-			if got := wait(t, "teardown", teardown); got.code >= 300 {
-				t.Fatalf("teardown: %d %s", got.code, got.raw)
-			}
-			got := wait(t, writer, write)
-			switch {
-			case writer == "price removal" && got.code == http.StatusOK:
-			case writer == "override write" && got.code == http.StatusNotFound:
-				// The customer went with the clock.
-			default:
-				t.Fatalf("%s: %d %s (a 500 is the deadlock in the server log)", writer, got.code, got.raw)
-			}
-		})
-	}
-}
-
-// TestE2E_PlanPrices_TeardownSubscriptionWriterAndPriceWrite: three parties.
-// A teardown holds its clock FOR UPDATE and waits to delete a subscription a
-// subscription writer holds; that writer next takes its plans FOR KEY SHARE;
-// a price write on the plan reads the clocks FOR SHARE. The price write
-// reads the clocks before it locks the plan (ADR-130 §8), so it waits at the
-// clock holding no plan, the writer gets its plan, and all three finish.
-//
-// Mutation: read the clocks after the plan lock, and the price write holds
-// the plan the writer waits for while it waits for the teardown's clock:
-// Postgres aborts one of the three with 40P01.
-func TestE2E_PlanPrices_TeardownSubscriptionWriterAndPriceWrite(t *testing.T) {
-	r := newPPRig(t, "teardown three")
-	admin := testutil.AdminPool(t)
-	calls := r.meter("calls", "sum")
-	plan, ids := r.plan("pro", perUnit(calls, "10", nil))
-	clk := r.clock("td3", time.Now().UTC().AddDate(0, 0, -20).Truncate(time.Second))
-	sub, _, _ := r.clockSub("pp-td3", clk, plan)
-
-	// The subscription writer: its subscription row first, as every
-	// subscription writer does (ADR-115).
-	w := hold(t, admin, `SELECT 1 FROM subscriptions WHERE id = $1 FOR NO KEY UPDATE`, sub)
-	teardown := r.async(http.MethodDelete, "/v1/test-clocks/"+clk, nil)
-	testutil.WaitForLockWaiter(t, context.Background(), admin, "DELETE FROM subscriptions")
-	edit := r.async(http.MethodPatch, "/v1/plans/"+plan+"/prices/"+ids[0], map[string]any{"mode": "per_unit", "unit_amount_cents": "11"})
-	testutil.WaitForLockWaiter(t, context.Background(), admin, clocksLockSQL)
-
-	// The writer's next step: its plans, as lockPlansTx takes them.
-	locked := make(chan error, 1)
-	go func() {
-		_, err := w.tx.Exec(`SELECT id FROM plans WHERE id = ANY($1) ORDER BY id FOR KEY SHARE`, "{"+plan+"}")
-		locked <- err
-	}()
-	select {
-	case err := <-locked:
-		if err != nil {
-			t.Fatalf("the subscription writer's plan lock: %v (40P01 is the deadlock)", err)
-		}
-	case <-time.After(15 * time.Second):
-		t.Fatal("the subscription writer's plan lock never returned")
-	}
-	w.release()
-	if got := wait(t, "teardown", teardown); got.code >= 300 {
-		t.Fatalf("teardown: %d %s (a 500 is the deadlock in the server log)", got.code, got.raw)
-	}
-	if got := wait(t, "price write", edit); got.code != http.StatusOK {
-		t.Fatalf("price write: %d %s (a 500 is the deadlock in the server log)", got.code, got.raw)
-	}
-}
-
-// TestE2E_PlanPrices_TeardownAgainstSubscriptionCreate (review round 3): a
-// subscription create for a clock customer inserts a row with foreign keys
-// to the customer and to the clock. The insert locks the customer first. A
-// teardown holds its clock FOR UPDATE and later deletes that customer. So the
-// create reads its clock FOR KEY SHARE before the insert: it waits at the
-// clock holding nothing the teardown deletes, the teardown finishes, and the
-// create answers 404 because the customer went with the clock.
-//
-// Mutation: drop the create's clock read, and the create waits at the clock
-// while it holds the customer the teardown deletes: Postgres aborts one of
-// them with 40P01 (a 500).
-func TestE2E_PlanPrices_TeardownAgainstSubscriptionCreate(t *testing.T) {
-	r := newPPRig(t, "teardown create")
-	admin := testutil.AdminPool(t)
-	calls := r.meter("calls", "sum")
-	plan, _ := r.plan("pro", perUnit(calls, "10", nil))
-	clk := r.clock("tdc", time.Now().UTC().AddDate(0, 0, -20).Truncate(time.Second))
-	first, _, _ := r.clockSub("pp-tdc-1", clk, plan)
-	second := r.customer("pp-tdc-2", clk)
-
-	// Stop the teardown after its clock lock, before it deletes customers.
-	h := hold(t, admin, `SELECT 1 FROM subscriptions WHERE id = $1 FOR NO KEY UPDATE`, first)
-	teardown := r.async(http.MethodDelete, "/v1/test-clocks/"+clk, nil)
-	testutil.WaitForLockWaiter(t, context.Background(), admin, "DELETE FROM subscriptions")
-	create := r.async(http.MethodPost, "/v1/subscriptions", map[string]any{
-		"code": "pp-tdc-new", "display_name": "PP", "customer_id": second, "billing_time": "anniversary",
-		"items": []map[string]any{{"plan_id": plan, "quantity": 1}},
-	})
-	// The create waits at the clock: in its clock read (with the fix) or in
-	// its insert's foreign-key check (without it).
-	waitForAnyLockWaiter(t, admin, "INSERT INTO subscriptions", "FROM test_clocks")
-	h.release()
-	if got := wait(t, "teardown", teardown); got.code >= 300 {
-		t.Fatalf("teardown: %d %s (a 500 is the deadlock in the server log)", got.code, got.raw)
-	}
-	if got := wait(t, "create", create); got.code != http.StatusNotFound {
-		t.Fatalf("create: %d %s, want 404 (the customer went with the clock; a 500 is the deadlock in the server log)", got.code, got.raw)
-	}
-	if n := r.count(`SELECT count(*) FROM customers WHERE test_clock_id = $1`, clk); n != 0 {
-		t.Errorf("%d customers of the clock left after the teardown", n)
-	}
-}
-
-// waitForAnyLockWaiter returns once a backend waits on a lock in a statement
-// matching one of patterns.
-func waitForAnyLockWaiter(t *testing.T, admin *sql.DB, patterns ...string) {
-	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		for _, p := range patterns {
-			var n int
-			if err := admin.QueryRow(`SELECT count(*) FROM pg_stat_activity
-				WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE $1
-				  AND query NOT ILIKE '%DELETE FROM customers%'`, "%"+p+"%").Scan(&n); err != nil {
-				t.Fatalf("read pg_stat_activity: %v", err)
-			}
-			if n > 0 {
-				return
-			}
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("no backend waits on a lock in a statement matching %v", patterns)
 }
 
 // TestE2E_PlanPrices_OverrideStampAfterItsLocks (round 2): an override write
@@ -509,7 +292,7 @@ func TestE2E_PlanPrices_OverrideStampAfterItsLocks(t *testing.T) {
 	admin := testutil.AdminPool(t)
 	calls := r.meter("calls", "sum")
 	plan, ids := r.plan("pro", perUnit(calls, "10", nil))
-	cust := r.customer("pp-os", "")
+	cust := r.customer("pp-os")
 	h := hold(t, admin, `SELECT 1 FROM plans WHERE id = $1 FOR UPDATE`, plan)
 	o := r.async(http.MethodPost, "/v1/price-overrides", map[string]any{
 		"customer_id": cust, "price_id": ids[0], "mode": "per_unit", "unit_amount_cents": "4",
@@ -532,8 +315,7 @@ func TestE2E_PlanPrices_OverrideStampAfterItsLocks(t *testing.T) {
 
 // TestE2E_PlanPrices_RemovalEndsOverridesAtTheTombstone (round 2): a removal
 // ends each open override at the instant the removal takes effect for its
-// customer: the tombstone's valid_from for a customer without a clock, the
-// tombstone's stamp for a clock customer's clock.
+// customer: the tombstone's valid_from.
 //
 // Mutation: end them at the request's start, or 1µs before the tombstone,
 // and the deactivated_at values differ.
@@ -541,33 +323,22 @@ func TestE2E_PlanPrices_RemovalEndsOverridesAtTheTombstone(t *testing.T) {
 	r := newPPRig(t, "removal instants")
 	calls := r.meter("calls", "sum")
 	plan, ids := r.plan("pro", perUnit(calls, "10", nil))
-	wallCust := r.customer("pp-rw", "")
-	r.subscribe(time.Time{}, wallCust, plan)
-	frozen := time.Now().UTC().AddDate(0, 0, 30).Truncate(time.Second)
-	clk := r.clock("ri", frozen)
-	clockCust := r.customer("pp-rc", clk)
-	for _, c := range []string{wallCust, clockCust} {
-		r.must(time.Time{}, http.MethodPost, "/v1/price-overrides", map[string]any{
-			"customer_id": c, "price_id": ids[0], "mode": "per_unit", "unit_amount_cents": "4",
-		}, http.StatusCreated)
-	}
+	cust := r.customer("pp-rw")
+	r.subscribe(time.Time{}, cust, plan)
+	r.must(time.Time{}, http.MethodPost, "/v1/price-overrides", map[string]any{
+		"customer_id": cust, "price_id": ids[0], "mode": "per_unit", "unit_amount_cents": "4",
+	}, http.StatusCreated)
 	r.must(time.Time{}, http.MethodDelete, "/v1/plans/"+plan+"/prices/"+ids[0], nil, http.StatusOK)
 	ctx := context.Background()
 	admin := testutil.AdminPool(t)
-	var tombFrom, tombStamp time.Time
-	if err := admin.QueryRowContext(ctx, `
-		SELECT v.valid_from, c.valid_from FROM plan_price_versions v
-		JOIN plan_price_version_clocks c ON c.version_id = v.id AND c.test_clock_id = $2
-		WHERE v.price_id = $1 AND v.removed`, ids[0], clk).Scan(&tombFrom, &tombStamp); err != nil {
+	var tombFrom, ended time.Time
+	if err := admin.QueryRowContext(ctx, `SELECT valid_from FROM plan_price_versions WHERE price_id = $1 AND removed`, ids[0]).Scan(&tombFrom); err != nil {
 		t.Fatalf("read the tombstone: %v", err)
 	}
-	for cust, want := range map[string]time.Time{wallCust: tombFrom, clockCust: tombStamp} {
-		var ended time.Time
-		if err := admin.QueryRowContext(ctx, `SELECT deactivated_at FROM customer_price_overrides WHERE customer_id = $1`, cust).Scan(&ended); err != nil {
-			t.Fatal(err)
-		}
-		if !ended.Equal(want) {
-			t.Errorf("override of %s ended at %v, want %v", cust, ended, want)
-		}
+	if err := admin.QueryRowContext(ctx, `SELECT deactivated_at FROM customer_price_overrides WHERE customer_id = $1`, cust).Scan(&ended); err != nil {
+		t.Fatal(err)
+	}
+	if !ended.Equal(tombFrom) {
+		t.Errorf("override ended at %v, want the tombstone's valid_from %v", ended, tombFrom)
 	}
 }

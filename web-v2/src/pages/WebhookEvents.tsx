@@ -12,9 +12,9 @@ import {
   type WebhookEventStreamFrame,
   type WebhookDeliveryView,
 } from '@/lib/api'
-// Webhook deliveries are infrastructure egress — never clock-pinned — so their
-// timestamps are genuinely wall-clock (wallClockNow), same family as the audit
-// log and email outbox (ADR-030 forensic layer).
+// Webhook deliveries are infrastructure egress, so their timestamps are
+// genuinely wall-clock (wallClockNow), same family as the audit log and email
+// outbox (ADR-030 forensic layer).
 import { timeAgo, wallClockNow, timeUntil } from '@/lib/effectiveNow'
 import { showApiError } from '@/lib/formErrors'
 import { replayToast } from '@/lib/webhookNotices'

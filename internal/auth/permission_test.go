@@ -14,7 +14,6 @@ var allPermissions = []Permission{
 	PermInvoiceRead, PermInvoiceWrite,
 	PermDunningRead, PermDunningWrite,
 	PermAPIKeyRead, PermAPIKeyWrite,
-	PermTestClockWrite,
 }
 
 // A session holds every permission and a key its type's, even with a user

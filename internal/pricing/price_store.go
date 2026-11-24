@@ -560,8 +560,9 @@ func insertPriceTx(ctx context.Context, tx *sql.Tx, tenantID, planID, meterID st
 
 // settleNeverUsedTx puts every price of a never-used plan at its latest
 // version from the beginning of time, with no clock stamps (ADR-130 §5). A
-// plan is never-used again only after a test-clock teardown deleted its
-// subscriptions, and then it can hold versions written while it was used. A
+// plan is never-used again only when the upgrade that removed test clocks
+// deleted its subscriptions, and then it can hold versions written while it
+// was used. A
 // write to a never-used plan applies at once, so no older version may stay
 // in force at an earlier pin: a price removed while the plan was used would
 // otherwise still take events at those pins, beside a price added now that

@@ -9,7 +9,6 @@ const DETAIL_TO_LIST: [RegExp, string][] = [
   [/^\/invoices\/[^/]+\/?$/, '/invoices'],
   [/^\/plans\/[^/]+\/?$/, '/pricing'],
   [/^\/meters\/[^/]+\/?$/, '/pricing?tab=meters'],
-  [/^\/test-clocks\/[^/]+\/?$/, '/test-clocks'],
   [/^\/webhooks\/endpoints\/[^/]+\/?$/, '/webhooks'],
 ]
 

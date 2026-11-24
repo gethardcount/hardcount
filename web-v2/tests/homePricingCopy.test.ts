@@ -6,7 +6,7 @@ import {
   planLockedSentence, planPricesNotice, priceRemoveSentence, priceWriteToast,
 } from '../src/lib/pricingCopy.ts'
 import { formatQuantity, quantityWithUnit, unitFor } from '../src/lib/usageQuantity.ts'
-import { setupChecklistState, showSimulatedTotalsNote, usageNoneYet } from '../src/lib/homeNotices.ts'
+import { setupChecklistState, usageNoneYet } from '../src/lib/homeNotices.ts'
 
 test('plan lock names the server count, singular and plural, same words as the refusal', () => {
   assert.equal(
@@ -21,7 +21,7 @@ test('price changes say when they apply, before saving', () => {
   assert.match(planPricesNotice(true), /^Price changes apply from each subscriber's next billing period\./)
   // A plan is priced where the subscription first joined it in the period
   // (ADR-130 §4 step 3, amended 2026-10-26).
-  assert.match(planPricesNotice(true), /joins this plan after a change, by subscribing, moving to it or adding it, pays the new prices from then, unless the same subscription was on this plan earlier in that billing period\. On a test clock, advance the clock first\./)
+  assert.match(planPricesNotice(true), /joins this plan after a change, by subscribing, moving to it or adding it, pays the new prices from then, unless the same subscription was on this plan earlier in that billing period\.$/)
   assert.doesNotMatch(planPricesNotice(true), /midnight|later today|next period/)
   // The pin belongs to the subscription: a customer that cancels and
   // subscribes again is a new join.
@@ -44,7 +44,7 @@ test('removing a price names the overrides it ends', () => {
     "It is removed at once. Its events go to another price of the plan that matches them, or aren't billed if none does. Adding the price back later doesn't bring the overrides back.",
   )
   assert.match(priceRemoveSentence(true, 0), /^From each subscriber's next billing period/)
-  assert.match(priceRemoveSentence(true, 0), /joins this plan after the removal, by subscribing, moving to it or adding it, doesn't pay this price, unless the same subscription was on this plan earlier in that billing period\. On a test clock, advance the clock first\./)
+  assert.match(priceRemoveSentence(true, 0), /joins this plan after the removal, by subscribing, moving to it or adding it, doesn't pay this price, unless the same subscription was on this plan earlier in that billing period\./)
   assert.doesNotMatch(priceRemoveSentence(true, 0), /midnight|later today|still pays|unless they were/)
   assert.match(priceRemoveSentence(true, 1), /ends 1 customer override of it/)
   assert.match(priceRemoveSentence(true, 3), /ends 3 customer overrides of it/)
@@ -72,12 +72,6 @@ test('units read plural for any quantity but 1, and typed abbreviations stay as 
   assert.equal(unitFor('2', ''), '')
   assert.equal(quantityWithUnit('12500.000000000000', 'token'), '12,500 tokens')
   assert.equal(quantityWithUnit('1.000000000000', 'token'), '1 token')
-})
-
-test('Dashboard note shows only in test mode with test clocks', () => {
-  assert.equal(showSimulatedTotalsNote(false, 1), true)
-  assert.equal(showSimulatedTotalsNote(false, 0), false)
-  assert.equal(showSimulatedTotalsNote(true, 3), false)
 })
 
 test('Usage "Set up a meter" only when no meter exists', () => {

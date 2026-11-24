@@ -135,8 +135,6 @@ const WebhooksPage = lazy(() => import('@/pages/Webhooks'))
 const WebhookEventsPage = lazy(() => import('@/pages/WebhookEvents'))
 const WebhookEndpointDetailPage = lazy(() => import('@/pages/WebhookEndpointDetail'))
 const ApiKeysPage = lazy(() => import('@/pages/ApiKeys'))
-const TestClocksPage = lazy(() => import('@/pages/TestClocks'))
-const TestClockDetailPage = lazy(() => import('@/pages/TestClockDetail'))
 const SettingsPage = lazy(() => import('@/pages/Settings'))
 const InvoicesPage = lazy(() => import('@/pages/Invoices'))
 const SubscriptionsPage = lazy(() => import('@/pages/Subscriptions'))
@@ -196,8 +194,6 @@ const router = createBrowserRouter(createRoutesFromElements(
       <Route path="/webhooks/events" element={<WebhookEventsPage />} />
       <Route path="/webhooks/endpoints/:id" element={<WebhookEndpointDetailPage />} />
       <Route path="/api-keys" element={<ApiKeysPage />} />
-      <Route path="/test-clocks" element={<TestClocksPage />} />
-      <Route path="/test-clocks/:id" element={<TestClockDetailPage />} />
       <Route path="/invoices" element={<InvoicesPage />} />
       <Route path="/subscriptions" element={<SubscriptionsPage />} />
       <Route path="/usage" element={<UsageEventsPage />} />

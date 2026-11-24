@@ -1,15 +1,12 @@
 // The "now" every relative value on the dashboard is measured from: "2h ago",
 // "due in 3 days", "day 12 of 30", a rolling 30-day window.
 //
-// A record on a test clock lives at the clock's time, which can be months
-// away from real time, so measuring it against Date.now() draws wrong values.
-// EffectiveNow is a branded number that only the two constructors below make,
+// EffectiveNow is a branded number that only the constructor below makes,
 // and every helper in this file requires one. A page therefore cannot measure
 // from "now" without saying which now it means:
 //   - for a record, take it from useNowFor or useNowResolver (hooks/useNow),
-//     which answer with the record's clock time, real time, or undefined
-//     while it is not known; draw nothing counted from now while it is
-//     undefined;
+//     which answer with real time, or undefined while the record loads; draw
+//     nothing counted from now while it is undefined;
 //   - wallClockNow() marks a surface that is real time on purpose: the audit
 //     log, the email and webhook outbox, API keys.
 // The no-restricted-syntax rule in eslint.config.js bans a bare Date.now() or
@@ -21,12 +18,7 @@ declare const EFFECTIVE_NOW: unique symbol
 // number; a bare number does not assign to it.
 export type EffectiveNow = number & { readonly [EFFECTIVE_NOW]: true }
 
-// clockTime is a test clock's time: pass the clock's frozen_time.
-export function clockTime(frozenISO: string): EffectiveNow {
-  return new Date(frozenISO).getTime() as EffectiveNow
-}
-
-// wallClockNow is real time, for a surface that does not follow any clock.
+// wallClockNow is real time.
 export function wallClockNow(): EffectiveNow {
   // eslint-disable-next-line no-restricted-syntax -- this IS the wall-clock seam
   return Date.now() as EffectiveNow
@@ -107,7 +99,7 @@ export function isOlderThan(iso: string, thresholdMs: number, now: EffectiveNow)
 }
 
 // cycleProgress reports "Day N of M · P%" for a billing period, measured
-// against the anchor. Clamped so a mid-advance cycle can't exceed 100%.
+// against the anchor. Clamped so a now past the period's end can't exceed 100%.
 export function cycleProgress(
   start: string,
   end: string,
@@ -122,16 +114,11 @@ export function cycleProgress(
 }
 
 // rollingWindow returns the {from, to} ISO bounds of a trailing N-day window
-// that INCLUDES the anchor — a "last 7/30/90d" usage query. For a clock-pinned
-// customer this frames the simulated window, not a wall-clock one that
-// predates the simulated events.
+// that INCLUDES the anchor — a "last 7/30/90d" usage query.
 //
 // `to` is one millisecond past the anchor because the usage and margin queries
-// treat `to` as exclusive (`timestamp < to`), and an event sent without a
-// timestamp to a clock-pinned customer is stamped at exactly the clock's
-// frozen_time (usage.Service.Ingest). With `to` equal to the anchor, that
-// event, the newest usage the customer has, fell outside every rolling window
-// while the current-cycle view showed it.
+// treat `to` as exclusive (`timestamp < to`), so an event stamped at the
+// anchor itself stays in the window.
 export function rollingWindow(days: number, now: EffectiveNow): { from: string; to: string } {
   return {
     from: new Date(now - days * 86_400_000).toISOString(),

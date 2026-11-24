@@ -98,7 +98,7 @@ const diffHorizonDays = 60 // past every case's last retry
 // all its entities on, reading frozen_time from the database each time: the
 // answer billing.Engine's resolvers give for a pinned entity.
 type oneClockResolver struct {
-	clocks   *testclock.PostgresStore
+	clocks   *testclock.Reader
 	tenantID string
 	clockID  string
 }
@@ -124,9 +124,7 @@ func (r oneClockResolver) SimForInvoice(ctx context.Context, _, _ string) (clock
 // TestSchedule_Differential pins every retry instant, every reminder and
 // escalation email, and the final action, for each schedule in
 // scheduleCases, on two timelines: a test clock advanced a day at a time,
-// and the wall clock ticked a day at a time. One advance across many retries
-// stops at each of them, so it is the daily arm's case
-// (testclock.TestAdvance_StepsThroughEachDueTime holds the stops).
+// and the wall clock ticked a day at a time.
 //
 // The goldens were recorded with today's policy shape. Changing how the
 // schedule is written (#B8) must leave every one of them unchanged.
@@ -149,7 +147,7 @@ func runScheduleCase(t *testing.T, tc scheduleCase, arm string) {
 
 	var clockID string
 	var resolver clock.Resolver
-	clocks := testclock.NewPostgresStore(db)
+	clocks := testclock.NewReader(db)
 	if onClock {
 		clockID = postgres.NewID("hc_tclk")
 		if _, err := admin.Exec(`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)

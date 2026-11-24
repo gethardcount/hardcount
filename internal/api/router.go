@@ -40,7 +40,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/subscription"
 	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/tenantstripe"
-	"github.com/gethardcount/hardcount/internal/testclock"
 	"github.com/gethardcount/hardcount/internal/usage"
 	"github.com/gethardcount/hardcount/internal/user"
 	"github.com/gethardcount/hardcount/internal/webhook"
@@ -85,7 +84,6 @@ type Server struct {
 	hostedInvoiceH      *hostedinvoice.Handler
 	postmarkH           *email.PostmarkHandler
 	setupLinksEmailable bool
-	testClockH          *testclock.Handler
 	billingH            *billing.Handler
 	createPreviewH      *billing.CreatePreviewHandler
 	analyticsH          *analytics.Handler
@@ -121,9 +119,6 @@ type Server struct {
 	TokenSvc            *payment.TokenService
 	PaymentReconciler   *payment.Reconciler
 	LoginThrottle       *user.LoginThrottle
-	// TestClockSvc runs the test-clock catch-up off the request: what fell due
-	// in the time an advancing clock skipped (ADR-140).
-	TestClockSvc *testclock.Service
 	// RestoreCatchUp applies Stripe's events to a restored database through
 	// the webhook handlers (ADR-135); only `hardcount restore catch-up` runs
 	// it.
@@ -327,7 +322,6 @@ func (s *Server) routes() chi.Router {
 			r.Mount("/settings/stripe", s.tenantStripeH.Routes())
 			r.Mount("/settings/email", s.emailSettingsH.Routes())
 			r.Mount("/analytics", s.analyticsH.Routes())
-			r.Mount("/test-clocks", s.testClockH.Routes())
 			customerDetail := newCustomerDetailHandler(s.customerStore, s.subStore, s.invoiceStore)
 			r.Get("/customers/{customer_id}/overview", customerDetail.overview)
 		})

@@ -23,7 +23,7 @@ export interface Trend {
 
 // What each Home card counts, shown under the number on the card.
 export const CUSTOMERS_DEFINITION =
-  'Customers with an active or trialing subscription. Test-clock customers are not counted.'
+  'Customers with an active or trialing subscription.'
 
 // currentMRR (internal/analytics/overview.go): plan base fee × quantity of
 // each active subscription, a yearly plan divided by 12, in the default

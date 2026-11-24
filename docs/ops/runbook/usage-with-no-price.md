@@ -19,7 +19,7 @@ Back to the [runbook index](index.md).
   invoice-time WARN and counter leave it out, and so does the customer
   usage call. The Fix below applies to it too: find its events with the
   usage-events call in [Check](#check).
-- `mode` is `live` or `test`. Test-clock simulations are not counted.
+- `mode` is `live` or `test`.
 - The metric has no meter label. The WARN names the meter: it carries
   `meter_id`, `meter` (the meter's event name), `quantity` and
   `subscription_id`. Its prefix is

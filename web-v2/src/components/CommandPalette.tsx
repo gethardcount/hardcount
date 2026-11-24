@@ -5,8 +5,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import {
   FileText, User, Hash, Zap, type LucideIcon,
 } from 'lucide-react'
-import { useAuth } from '@/contexts/AuthContext'
-import { allNavItems, isTestMode } from '@/lib/navigation'
+import { allNavItems } from '@/lib/navigation'
 import { invoiceStatus } from '@/lib/statusLabels'
 import { invoiceRowAmount } from '@/lib/invoiceTerminal'
 import { wallClockNow, type EffectiveNow } from '@/lib/effectiveNow'
@@ -37,8 +36,8 @@ interface NavItem {
 
 // Pages come from the shared navigation config, so the palette lists exactly
 // what the sidebar does (it had drifted and missed four pages).
-function navItems(testMode: boolean): NavItem[] {
-  return allNavItems(testMode).map(i => ({
+function navItems(): NavItem[] {
+  return allNavItems().map(i => ({
     id: `nav-${i.to}`,
     title: i.label,
     subtitle: i.hint,
@@ -56,7 +55,6 @@ function paletteNow(inv: Invoice): EffectiveNow | undefined {
 
 export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const navigate = useNavigate()
-  const { user } = useAuth()
 
   // Controlled input → debounced server-side search. With no query the
   // palette shows the 50 most recent rows per entity (jump-to-recent);
@@ -126,7 +124,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         <CommandEmpty>No results found</CommandEmpty>
 
         <CommandGroup heading="Navigation">
-          {navItems(isTestMode(user)).map(item => {
+          {navItems().map(item => {
             const Icon = item.icon
             return (
               <CommandItem

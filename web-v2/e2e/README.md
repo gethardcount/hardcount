@@ -11,7 +11,7 @@ the screen, and that the main things an operator does work end to end.
   update payment, the Stripe return page, the hosted invoice) are opened
   signed out, and the emailed-link pages with no code.
 - `journeys.spec.ts` signs in, creates a customer, creates a subscription,
-  advances a test clock to the renewal and opens the new invoice, opens the
+  finds an open invoice in the invoices list and opens it, opens the
   public invoice page, and grants credits. In Grant credits, it picks the
   second of two customers with the same name with the keyboard, and checks
   that the grant goes to that customer. It picks a credit expiry day on a
@@ -42,9 +42,8 @@ the screen, and that the main things an operator does work end to end.
   labels with one name and a blank plan name, each under its box, and send
   nothing. It previews and installs a
   recipe, which creates only a meter, a plan and its prices, then installs it
-  again. It adds and ends a customer's price override on a test clock and
-  checks the upcoming invoice each time: each change applies from the next
-  period. It creates and edits a dunning policy, assigns it to a customer,
+  again. It adds and ends a customer's price override and checks the
+  upcoming invoice each time: each change applies from the next period. It creates and edits a dunning policy, assigns it to a customer,
   tries to delete it and makes it the default, then puts the old default
   back.
 - `invoices.spec.ts` takes invoices through their life on screen: a one-off
@@ -82,17 +81,9 @@ the screen, and that the main things an operator does work end to end.
   next try must make a new note. The browser gives these two answers.
 - `activity.spec.ts` takes screenshots of the activity cards for people to
   compare: the invoice and subscription Activity cards, a Dunning run and the
-  customer's Sent emails, at 1440px and 390px wide. It runs each story for a
-  customer on the real clock and for one on a test clock frozen at
-  2027-02-01 04:30 UTC. The steps that need days to pass, such as payment
-  retries and a trial running out, happen only on the test clock. A person
-  reads the shots. One test is a pass/fail check. The same operator steps on
-  an invoice must give the same Activity rows on both clocks once times are
-  taken out. Every test-clock row must have a Recorded part. No row may be
-  wider than the card at either width. That test runs with the browser in
-  `Pacific/Pago_Pago`, not the account's zone, and checks that the card's
-  zone header and day headers follow the account's zone. The files go to `activity-shots/`,
-  which CI uploads as the `activity-shots` artifact on every run (see
+  customer's Sent emails, at 1440px and 390px wide. A person reads the
+  shots. The files go to `activity-shots/`, which CI uploads as the
+  `activity-shots` artifact on every run (see
   [Activity screenshots](#activity-screenshots)).
 - `rate-limit.spec.ts` stubs a 429 (Too many requests) with `Retry-After`
   on a customer page's first load. The page must show "Too many requests.
@@ -117,20 +108,7 @@ the screen, and that the main things an operator does work end to end.
 - `time-zones.spec.ts` answers the settings read with a zone other than the
   account's. A signed-in page must wait for the settings, then send a credit
   expiry as a midnight in that zone. When the read fails, the page must say
-  so, with a Retry that loads it. With the browser in Los Angeles, on a test
-  clock, the expiry picker's first day and its Today must be the clock's day
-  in the account zone.
-- `test-clock-time.spec.ts` checks that pages count an invoice's due date
-  from its test clock's time, which they take from the cached clock list.
-  After an advance on the clock's page, the invoices list and the invoice
-  must read Past due when the operator clicks back to them, with no reload.
-  An invoice on a clock made through the API after the clock list was read
-  must show its clock's Simulated time line, not "Test clock deleted", and
-  count Due in from the clock's time. While the browser holds the clock list,
-  an invoice on a clock must read Open with no Due in or Past due, and count
-  Due in from its clock once the list arrives. When the list read fails, the
-  page must show that load error once, with a Retry that loads it. When the
-  clock page sees an advance finish, the clock list must read Ready.
+  so, with a Retry that loads it.
 - `global.setup.ts` runs first. It seeds data through the API (code in
   `fixtures/`) and signs in once through the login page. The other tests reuse
   that session.
@@ -188,9 +166,8 @@ gh run download <run-id> -n activity-shots -D before   # main's latest run
 gh run download <run-id> -n activity-shots -D after    # the PR's run
 ```
 
-Each file is `<surface>-<real|test>-<width>.png`. Real-clock times and the
-"Recorded" times on test-clock rows are the time of the run, so they change
-every run. The test-clock dates stay the same.
+Each file is `<surface>-<width>.png`. The times are the time of the run, so
+they change every run.
 
 ## Rules
 

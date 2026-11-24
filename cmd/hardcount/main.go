@@ -286,7 +286,7 @@ func serve() {
 	// entries without their invoice update, or webhook deliveries in flight.
 	var workers sync.WaitGroup
 
-	workers.Add(3)
+	workers.Add(2)
 	go func() {
 		defer workers.Done()
 		scheduler.Start(ctx)
@@ -294,14 +294,6 @@ func serve() {
 	go func() {
 		defer workers.Done()
 		server.WebhookOutSvc.StartRetryWorker(ctx, 30*time.Second, gate)
-	}()
-	// The test-clock catch-up (ADR-140): the work that fell due in the time an
-	// advancing test clock skipped. A leader-leased role like the others; it
-	// starts beside billing.Scheduler, not inside it. A shutdown mid-pass
-	// leaves the clock advancing, and the next leader runs the pass again.
-	go func() {
-		defer workers.Done()
-		server.TestClockSvc.RunCatchupLoop(ctx, gate)
 	}()
 
 	// The outbox dispatchers always run (ADR-040). The webhook dispatcher

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { StaleNotice } from '@/components/StaleNotice'
 import { usePageTitle } from '@/hooks/usePageTitle'
-import { useNowFor, useTestClocks } from '@/hooks/useNow'
+import { useNowFor } from '@/hooks/useNow'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { useSingleFlight } from '@/hooks/useSingleFlight'
 import { useNavigate, useParams, Link } from 'react-router-dom'
@@ -25,7 +25,6 @@ import { MarginCard } from '@/components/MarginCard'
 import { SendSetupLinkDialog } from '@/components/SendSetupLinkDialog'
 import { PriceOverridesCard } from '@/components/PriceOverridesCard'
 import { CostDashboard } from '@/components/CostDashboard'
-import { TestClockBanner } from '@/components/TestClockBanner'
 import { Callout } from '@/components/Callout'
 import { CreateSubscriptionDialog } from '@/components/CreateSubscriptionDialog'
 import { cn } from '@/lib/utils'
@@ -194,17 +193,8 @@ export default function CustomerDetailPage() {
     enabled: !!id,
   })
 
-  // The clock list, the shared read every page uses (refreshTestClocks
-  // refreshes it), for CreateSubscriptionDialog's ADR-027 inherit hint.
-  const { data: clocksData } = useTestClocks()
-  const clockNameMap = useMemo(() => {
-    const m: Record<string, string> = {}
-    ;(clocksData?.data ?? []).forEach(c => { m[c.id] = c.name || c.id })
-    return m
-  }, [clocksData])
-  // The customer's "now" (its test clock when pinned), for Past due on the
-  // recent-invoice badges and for when a timed collection pause ends on the
-  // subscription rows. Subscriptions inherit the customer's pin (ADR-027).
+  // The customer's "now", for Past due on the recent-invoice badges and for
+  // when a timed collection pause ends on the subscription rows.
   const invoiceNow = useNowFor(customer)
 
   const { data: overview } = useQuery({
@@ -406,9 +396,6 @@ export default function CustomerDetailPage() {
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-semibold text-foreground">{customer.display_name}</h1>
-            {/* Customer-level test-clock attach (ADR-027). Badge on
-                the header so the operator immediately sees that
-                everything for this customer is on simulated time. */}
           </div>
           <div className="flex items-center gap-1.5 mt-1">
             <span className="text-xs text-muted-foreground font-mono">{customer.id}</span>
@@ -477,13 +464,6 @@ export default function CustomerDetailPage() {
           <StatusBadge status={genericStatus(customer.status)} />
         </div>
       </div>
-
-      {/* Simulated-time line (ADR-099) for a customer pinned to a test clock
-          (ADR-027): the clock's current time and a View-clock link, the same
-          line SubscriptionDetail and InvoiceDetail show. */}
-      {customer.test_clock_id && (
-        <TestClockBanner testClockId={customer.test_clock_id} />
-      )}
 
       {/* Archived: the page's one notice. Archiving hides the customer and
           blocks edits and new subscriptions, but collection goes on: unpaid
@@ -816,9 +796,7 @@ export default function CustomerDetailPage() {
 
           </div>
           {/* Usage This Period — multi-dim cost dashboard backed by
-              GET /v1/customers/{id}/usage. Operator-facing surface.
-              The customer pins its relative-time/window surfaces to the
-              customer's simulated clock (ADR-027) instead of wall-clock. */}
+              GET /v1/customers/{id}/usage. Operator-facing surface. */}
           <div>
             <CostDashboard customer={customer} currency={customerCurrency?.currency} />
           </div>
@@ -1176,7 +1154,6 @@ export default function CustomerDetailPage() {
           onOpenChange={setShowCreateSub}
           lockedCustomer={customer}
           plans={plans}
-          clockNameMap={clockNameMap}
           onCreated={(sub) => {
             setShowCreateSub(false)
             toast.success(`Subscription "${sub.display_name}" created`)

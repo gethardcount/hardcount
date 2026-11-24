@@ -14,23 +14,19 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// TestActivityParity_InvoiceOperatorScenarios is the activity line
-// standard's parity test for the invoice page (ADR-128): one operator story,
-// told twice through the real router and database — for a customer on the
-// real clock and for one pinned to a test clock — must produce the same
-// lines, in the same order. A test-clock line is the real-clock line plus
-// one Recorded time; nothing else may differ.
+// TestActivityParity_InvoiceOperatorScenarios tells one operator story
+// through the real router and database and checks the invoice page's lines
+// (ADR-128): the standard's words, in the order they happened, with no
+// Recorded time.
 //
 // The story: a one-off invoice is finalized, emailed, reduced by a credit
 // note and paid offline; a second one is finalized and voided. No Stripe is
 // connected, so each finalize also emails the customer the invoice itself
-// (ADR-060 amendment 2026-10-30). Each step is
-// the operator's own act, so on the test clock every row is dated at the
-// clock's frozen instant and ordered by its real time.
+// (ADR-060 amendment 2026-10-30).
 func TestActivityParity_InvoiceOperatorScenarios(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	// A configured server queues the invoice email; no dispatcher runs in
-	// the test, so both arms read "queued".
+	// the test, so the lines read "queued".
 	t.Setenv("SMTP_HOST", "smtp.parity-e2e.invalid")
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
 	defer ts.Close()
@@ -43,85 +39,35 @@ func TestActivityParity_InvoiceOperatorScenarios(t *testing.T) {
 		return flowDo(t, ts, method, path, req)
 	}
 
-	const frozen = "2027-02-01T04:30:00Z"
-	clockID := flowStr(call("POST", "/v1/test-clocks", flowReq{body: map[string]any{
-		"name": "activity parity", "frozen_time": frozen,
-	}}).want(t, 201, "create test clock").body, "id")
-
-	type arm struct {
-		name    string
-		clockID string
+	customerID := flowStr(call("POST", "/v1/customers", flowReq{body: map[string]any{
+		"external_id": "parity-real", "display_name": "Parity real", "email": "billing@parity.test",
+	}}).want(t, 201, "create customer").body, "id")
+	newInvoice := func(what string) string {
+		id := flowStr(call("POST", "/v1/invoices", flowReq{body: map[string]any{
+			"customer_id": customerID,
+			"line_items":  []map[string]any{{"description": "Parity " + what, "quantity": 1, "unit_amount_cents": 4900}},
+		}}).want(t, 201, "create "+what).body, "id")
+		call("POST", "/v1/invoices/"+id+"/finalize", flowReq{}).want(t, 200, "finalize "+what)
+		return id
 	}
-	story := func(a arm) (paid, voided []map[string]any) {
-		t.Helper()
-		cust := map[string]any{
-			"external_id": "parity-" + a.name, "display_name": "Parity " + a.name, "email": "billing@parity.test",
+	timeline := func(id string) []map[string]any {
+		body := call("GET", "/v1/invoices/"+id+"/payment-timeline", flowReq{}).want(t, 200, "timeline").body
+		if d, _ := body["degraded"].([]any); len(d) != 0 {
+			t.Errorf("degraded lanes %v", d)
 		}
-		if a.clockID != "" {
-			cust["test_clock_id"] = a.clockID
-		}
-		customerID := flowStr(call("POST", "/v1/customers", flowReq{body: cust}).want(t, 201, a.name+": create customer").body, "id")
-		newInvoice := func(what string) string {
-			id := flowStr(call("POST", "/v1/invoices", flowReq{body: map[string]any{
-				"customer_id": customerID,
-				"line_items":  []map[string]any{{"description": "Parity " + what, "quantity": 1, "unit_amount_cents": 4900}},
-			}}).want(t, 201, a.name+": create "+what).body, "id")
-			call("POST", "/v1/invoices/"+id+"/finalize", flowReq{}).want(t, 200, a.name+": finalize "+what)
-			return id
-		}
-		timeline := func(id string) []map[string]any {
-			body := call("GET", "/v1/invoices/"+id+"/payment-timeline", flowReq{}).want(t, 200, a.name+": timeline").body
-			if d, _ := body["degraded"].([]any); len(d) != 0 {
-				t.Errorf("%s: degraded lanes %v", a.name, d)
-			}
-			return flowList(body, "events")
-		}
-
-		paidID := newInvoice("paid invoice")
-		call("POST", "/v1/invoices/"+paidID+"/send", flowReq{body: map[string]any{"email": "billing@parity.test"}}).want(t, 200, a.name+": email invoice")
-		call("POST", "/v1/credit-notes", flowReq{body: map[string]any{
-			"invoice_id": paidID, "reason": "Billing error", "auto_issue": true,
-			"lines": []map[string]any{{"description": "Billing error", "quantity": 1, "unit_amount_cents": 1000}},
-		}}).want(t, 201, a.name+": credit note")
-		call("POST", "/v1/invoices/"+paidID+"/record-payment", flowReq{body: map[string]any{"note": "Wire 1042"}}).want(t, 200, a.name+": record payment")
-
-		voidID := newInvoice("voided invoice")
-		call("POST", "/v1/invoices/"+voidID+"/void", flowReq{}).want(t, 200, a.name+": void")
-		return timeline(paidID), timeline(voidID)
+		return flowList(body, "events")
 	}
 
-	realPaid, realVoid := story(arm{name: "real"})
-	testPaid, testVoid := story(arm{name: "test", clockID: clockID})
+	paidID := newInvoice("paid invoice")
+	call("POST", "/v1/invoices/"+paidID+"/send", flowReq{body: map[string]any{"email": "billing@parity.test"}}).want(t, 200, "email invoice")
+	call("POST", "/v1/credit-notes", flowReq{body: map[string]any{
+		"invoice_id": paidID, "reason": "Billing error", "auto_issue": true,
+		"lines": []map[string]any{{"description": "Billing error", "quantity": 1, "unit_amount_cents": 1000}},
+	}}).want(t, 201, "credit note")
+	call("POST", "/v1/invoices/"+paidID+"/record-payment", flowReq{body: map[string]any{"note": "Wire 1042"}}).want(t, 200, "record payment")
 
-	for _, c := range []struct {
-		name       string
-		real, test []map[string]any
-	}{{"paid invoice", realPaid, testPaid}, {"voided invoice", realVoid, testVoid}} {
-		realLines, testLines := linesOf(t, c.real), linesOf(t, c.test)
-		if len(realLines) < 3 {
-			t.Fatalf("%s: %d rows on the real clock, want the whole story", c.name, len(realLines))
-		}
-		for i, l := range testLines {
-			if l["recorded_at"] == nil {
-				t.Errorf("%s: test-clock row %d (%v) has no recorded_at", c.name, i, l["title"])
-			}
-		}
-		for i, l := range realLines {
-			if l["recorded_at"] != nil {
-				t.Errorf("%s: real-clock row %d (%v) carries recorded_at %v", c.name, i, l["title"], l["recorded_at"])
-			}
-		}
-		// The test-clock arm is dated on the clock's frozen calendar.
-		for i, l := range testLines {
-			if at, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(l["occurred_at"])); at.UTC().Format(time.RFC3339) != frozen {
-				t.Errorf("%s: test-clock row %d (%v) occurred at %v, want the frozen %s", c.name, i, l["title"], l["occurred_at"], frozen)
-			}
-		}
-		rs, tst := normalizeLines(realLines), normalizeLines(testLines)
-		if !reflect.DeepEqual(rs, tst) {
-			t.Errorf("%s: the two clocks tell different stories\nreal: %s\ntest: %s", c.name, mustJSON(rs), mustJSON(tst))
-		}
-	}
+	voidID := newInvoice("voided invoice")
+	call("POST", "/v1/invoices/"+voidID+"/void", flowReq{}).want(t, 200, "void")
 
 	// The story reads as the standard words it, in the order it happened.
 	for _, c := range []struct {
@@ -129,7 +75,7 @@ func TestActivityParity_InvoiceOperatorScenarios(t *testing.T) {
 		events []map[string]any
 		want   []string
 	}{
-		{"paid invoice", realPaid, []string{
+		{"paid invoice", timeline(paidID), []string{
 			"Invoice created | by API key",
 			"Invoice finalized · 4900 | by API key",
 			// The finalize's own invoice email (no Stripe), then the operator's.
@@ -138,14 +84,20 @@ func TestActivityParity_InvoiceOperatorScenarios(t *testing.T) {
 			"Credit note issued · 1000 | <number> · Billing error · by API key",
 			"Offline payment received · 3900 | Wire 1042 · by API key",
 		}},
-		{"voided invoice", realVoid, []string{
+		{"voided invoice", timeline(voidID), []string{
 			"Invoice created | by API key",
 			"Invoice finalized · 4900 | by API key",
 			"Invoice email queued | To billing@parity.test",
 			"Invoice voided · 4900 | by API key",
 		}},
 	} {
-		if got := summaries(normalizeLines(linesOf(t, c.events))); !reflect.DeepEqual(got, c.want) {
+		lines := linesOf(t, c.events)
+		for i, l := range lines {
+			if l["recorded_at"] != nil {
+				t.Errorf("%s: row %d (%v) carries recorded_at %v", c.name, i, l["title"], l["recorded_at"])
+			}
+		}
+		if got := summaries(normalizeLines(lines)); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s lines\n got: %q\nwant: %q", c.name, got, c.want)
 		}
 	}
@@ -167,10 +119,9 @@ func linesOf(t *testing.T, events []map[string]any) []map[string]any {
 
 var docNumber = regexp.MustCompile(`\b[A-Z]{2,}-\d{4,}\b`)
 
-// normalizeLines strips what legitimately differs between the two arms: row
-// ids, document numbers and object ids, the times on the row, and the API
-// key's own name. Dates inside a part become their offset from the row's
-// own time.
+// normalizeLines strips what differs from run to run: row ids, document
+// numbers and object ids, the times on the row, and the API key's own name.
+// Dates inside a part become their offset from the row's own time.
 func normalizeLines(lines []map[string]any) []map[string]any {
 	out := make([]map[string]any, 0, len(lines))
 	for _, l := range lines {

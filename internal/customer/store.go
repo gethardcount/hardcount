@@ -20,12 +20,6 @@ type Store interface {
 	Get(ctx context.Context, tenantID, id string) (domain.Customer, error)
 	GetByExternalID(ctx context.Context, tenantID, externalID string) (domain.Customer, error)
 	List(ctx context.Context, filter ListFilter) ([]domain.Customer, int, error)
-	// ListByTestClockID returns one page of the customers pinned to the
-	// given test clock, with PII fields decrypted, and their total. Used
-	// by the testclock domain via a narrow CustomerReader interface so
-	// that domain never reads the customers table directly — keeps
-	// decryption centralised on the customer-package read path.
-	ListByTestClockID(ctx context.Context, tenantID, clockID string, limit, offset int) ([]domain.Customer, int, error)
 
 	// WithCustomerRulesLock opens a tenant transaction, takes the
 	// customer-rules lock (postgres.LockCustomerRulesTx), reads the customer

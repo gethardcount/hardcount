@@ -5,7 +5,6 @@
 // event fell through describeAction's default arm and rendered as a raw dotted
 // string ("member.joined sagar@example.com"), and member.removed — which strips
 // a person's access and revokes their sessions — carried no destructive styling.
-// test_clock rows offered no "View" link despite /test-clocks/:id existing.
 //
 // EMITTED_ACTIONS below is swept from the Go .Log / .LogInTx call sites. If a
 // writer adds an action and nobody updates auditVocabulary.ts, the first test
@@ -107,15 +106,13 @@ test('member.removed carries destructive styling; a plain invite does not', () =
     'inviting someone is not a destructive act')
 })
 
-test('test_clock rows deep-link to the clock detail page', () => {
-  assert.equal(resourceLink(entry({ resource_type: 'test_clock', resource_id: 'hc_tc_9' })), '/test-clocks/hc_tc_9')
-  // Every other mapped type still resolves.
+test('rows deep-link to their detail page', () => {
   assert.equal(resourceLink(entry({ resource_type: 'invoice', resource_id: 'hc_inv_1' })), '/invoices/hc_inv_1')
   assert.equal(resourceLink(entry({ resource_type: 'customer', resource_id: 'hc_cus_1' })), '/customers/hc_cus_1')
   // No detail route → no "View" link (rendering one lands on a blank page).
   assert.equal(resourceLink(entry({ resource_type: 'user', resource_id: 'hc_usr_1' })), null)
   // Empty resource_id is guarded even for a mapped type.
-  assert.equal(resourceLink(entry({ resource_type: 'test_clock', resource_id: '' })), null)
+  assert.equal(resourceLink(entry({ resource_type: 'invoice', resource_id: '' })), null)
 })
 
 test('a payment-setup-link row names the action, not a generic "Updated <customer>"', () => {
@@ -139,9 +136,8 @@ test('a payment-setup-link row names the action, not a generic "Updated <custome
 })
 
 test('a row whose subject was torn down offers no link', () => {
-  // Deleting a test clock hard-deletes its whole simulated graph (ADR-086) while
-  // the audit rows survive on purpose — so the row still names an invoice that no
-  // longer exists. We used to render "View" on it, straight into a 404. The backend
+  // The audit row survives its subject on purpose, so it still names an invoice
+  // that no longer exists, and "View" would go straight into a 404. The backend
   // resolves subject_deleted at read time; the only job here is to stop offering
   // the door.
   assert.equal(
@@ -149,12 +145,12 @@ test('a row whose subject was torn down offers no link', () => {
     null,
     'a torn-down subject must not render a View link — it 404s')
 
-  // The same row while its clock still lives: the subject is there, the link works.
+  // The same row while the subject is there: the link works.
   assert.equal(
     resourceLink(entry({ resource_type: 'invoice', resource_id: 'hc_inv_sim', subject_deleted: false })),
     '/invoices/hc_inv_sim')
 
-  // Absent (every wall-clock row): unchanged, still links.
+  // Absent: unchanged, still links.
   assert.equal(
     resourceLink(entry({ resource_type: 'invoice', resource_id: 'hc_inv_real' })),
     '/invoices/hc_inv_real')

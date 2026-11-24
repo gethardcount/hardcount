@@ -214,7 +214,7 @@ export const api = {
   listCustomersByIds: (ids: string[]) => listByIds<Customer>('/customers', ids),
   getCustomer: (id: string) =>
     apiRequest<Customer>('GET', `/customers/${id}`),
-  createCustomer: (data: { external_id: string; display_name: string; email?: string; additional_emails?: string[]; test_clock_id?: string }) =>
+  createCustomer: (data: { external_id: string; display_name: string; email?: string; additional_emails?: string[] }) =>
     apiRequest<Customer>('POST', '/customers', data),
   rotateCostDashboardToken: (customerId: string) =>
     apiRequest<{ token: string; public_url: string }>('POST', `/customers/${customerId}/rotate-cost-dashboard-token`),
@@ -615,19 +615,6 @@ export const api = {
   getUsageAnalytics: (period: string) =>
     apiRequest<UsageAnalyticsResponse>('GET', `/analytics/usage?period=${period}`),
 
-  // Test clocks (test mode only — server returns 403 in live mode)
-  listTestClocks: () => listAll<TestClock>('/test-clocks'),
-  getTestClock: (id: string) => apiRequest<TestClock>('GET', `/test-clocks/${id}`),
-  createTestClock: (data: { name: string; frozen_time: string }) =>
-    apiRequest<TestClock>('POST', '/test-clocks', data),
-  advanceTestClock: (id: string, frozen_time: string) =>
-    apiRequest<TestClock>('POST', `/test-clocks/${id}/advance`, { frozen_time }),
-  retryAdvanceTestClock: (id: string) =>
-    apiRequest<TestClock>('POST', `/test-clocks/${id}/retry-advance`),
-  deleteTestClock: (id: string) =>
-    apiRequest<{ status: string }>('DELETE', `/test-clocks/${id}`),
-  listAttachedCustomers: (id: string) => listAll<Customer>(`/test-clocks/${id}/customers`),
-
   // API Keys
   listApiKeys: () => listAll<APIKey>('/api-keys'),
   createApiKey: (data: { name: string; key_type: string; expires_at?: string }) => apiRequest<APIKeyCreated>('POST', '/api-keys', data),
@@ -770,40 +757,6 @@ export interface SubscriptionItemThreshold {
 export interface BillingThresholds {
   amount_gte?: number
   item_thresholds: SubscriptionItemThreshold[]
-}
-
-export interface TestClock {
-  id: string
-  tenant_id: string
-  name: string
-  frozen_time: string
-  status: 'ready' | 'advancing' | 'internal_failure'
-  created_at: string
-  updated_at: string
-  // last_failure_reason is set when status='internal_failure' to
-  // explain the prior catchup error. Cleared on retry success or
-  // a fresh advance. ADR-018.
-  last_failure_reason?: string | null
-  // last_advance_summary records what the most recent advance produced.
-  // Null until the clock has been advanced with billing wired; rendered as
-  // the "Last advance results" card once status is back to 'ready'.
-  last_advance_summary?: AdvanceSummary | null
-}
-
-// AdvanceSummary mirrors domain.AdvanceSummary: the per-phase counts a
-// test-clock advance produced, plus the simulated span it covered.
-export interface AdvanceSummary {
-  advanced_from: string
-  advanced_to: string
-  invoices_generated: number
-  trials_activated: number
-  pauses_resumed: number
-  thresholds_fired: number
-  tax_retried: number
-  charges_retried: number
-  clawbacks_issued: number
-  credits_expired: number
-  dunning_advanced: number
 }
 
 // Present while the subscription's billing is failing. The billing run
@@ -1022,8 +975,7 @@ export interface Invoice {
   public_token?: string
   created_at: string
   // is_simulated: this invoice's domain timestamps were stamped on a test
-  // clock's simulated time (authoritative, set at write time). Drives the
-  // "simulated" badge on header dates + the activity timeline. Live invoices
+  // clock's simulated time (authoritative, set at write time). Live invoices
   // are always false.
   is_simulated?: boolean
   // test_clock_id: the clock this invoice's dates follow (its customer's
@@ -1122,10 +1074,8 @@ export interface TimelineEvent {
   //   IS in simulated time (engine-driven on a clock-pinned sub).
   is_simulated?: boolean
   // RFC3339 simulated effect time. Populated alongside is_simulated
-  // on operator-action audit rows for clock-pinned entities. Used
-  // by the subscription activity timeline to render a subline
-  // "Effect on test clock <id> at <sim time>" under the wall-clock
-  // primary timestamp — mirrors the AuditLog page chip pattern.
+  // on operator-action audit rows for clock-pinned entities. The
+  // subscription activity timeline shows it in place of `timestamp`.
   sim_effective_at?: string
   test_clock_id?: string
   // Invoice timeline (ADR-104): the REAL-WORLD instant of a row whose
@@ -1594,8 +1544,7 @@ export interface DunningRun {
   invoice_amount_due_cents?: number
   invoice_currency?: string
   // The customer's test clock, on list responses when the customer is on
-  // one. The row's "now" (Next step, Started) is that clock's time from the
-  // clock list (useNowResolver); the response's effective_now is not read.
+  // one. The response's effective_now is not read.
   test_clock_id?: string
   // How many retries the run's policy makes, the length of its retry_days
   // (list responses).
@@ -1700,19 +1649,9 @@ export interface AuditEntry {
   subject_deleted?: boolean
 }
 
-export interface AuditSimClock {
-  id: string
-  name: string
-}
-
 export interface AuditFilterOptions {
   actions: string[]
   resource_types: string[]
-  // Clocks the LOG has seen — including ones already torn down (ADR-086
-  // hard-deletes the clock and its whole graph), which is exactly when the
-  // audit log becomes the simulation's only record. Sourced from audit rows,
-  // not from test_clocks, so the picker does not go empty at that moment.
-  test_clocks?: AuditSimClock[]
 }
 
 export interface WebhookEndpoint {
@@ -2058,5 +1997,5 @@ export function formatDateTime(iso: string, timezone?: string): string {
 }
 
 // Relative-time formatting moved to lib/effectiveNow (timeAgo) — it requires a
-// branded EffectiveNow anchor so a clock-pinned surface can't silently fall back
-// to wall-clock. See lib/effectiveNow.ts.
+// branded EffectiveNow anchor so a page says which now it measures from. See
+// lib/effectiveNow.ts.

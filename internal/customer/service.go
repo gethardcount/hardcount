@@ -41,22 +41,6 @@ type StripeSyncer interface {
 	SyncBillingProfile(ctx context.Context, stripeCustomerID, customerEmail string, bp domain.CustomerBillingProfile) error
 }
 
-// TestClockChecker validates a test_clock_id at customer-create time (Stripe
-// parity, ADR-027) and hands back that clock's simulated instant with it.
-// Implemented by *testclock.PostgresStore.
-//
-// ONE method, ONE read: existence and the instant come back together, so the
-// Sim the caller binds can never pair a real clock id with an instant fetched
-// separately — the half-truth clock.Sim exists to make unrepresentable
-// (ADR-090 §5). An "exists?" bool would force Create to go back for the
-// instant, which is precisely how the two halves drift apart.
-//
-// ok=false means "no such clock for this tenant" (a validation failure, not an
-// error).
-type TestClockChecker interface {
-	ResolveSim(ctx context.Context, tenantID, clockID string) (sim clock.Sim, ok bool, err error)
-}
-
 // TaxFlusher fans out a tax-retry across every draft invoice for one
 // customer that's stuck on `customer_data_invalid`. Fired from
 // UpsertBillingProfile after a successful save — the only operator
@@ -126,7 +110,6 @@ type AuditEmitter interface {
 type Service struct {
 	store         Store
 	stripeSyncer  StripeSyncer
-	clocks        TestClockChecker
 	taxFlusher    TaxFlusher
 	subChecker    SubscriptionChecker
 	auditLogger   AuditEmitter
@@ -187,14 +170,6 @@ func (s *Service) SetSubscriptionChecker(c SubscriptionChecker) {
 	s.subChecker = c
 }
 
-// SetTestClockChecker wires the test-clock existence check used at
-// customer-create time. Optional — if unwired, customer-create
-// rejects any test_clock_id (defensive default; production wires
-// the real store via api/wire.go).
-func (s *Service) SetTestClockChecker(checker TestClockChecker) {
-	s.clocks = checker
-}
-
 // SetTaxFlusher wires the per-customer tax-retry flush fired after a
 // successful billing-profile upsert. Optional — if unwired, the
 // flush is a no-op and operators fall back to per-invoice Retry.
@@ -230,19 +205,12 @@ type CreateInput struct {
 	// AdditionalEmails are CC'd on billing emails (ADR-082) —
 	// normalized, deduped, capped at 10, never equal to the primary.
 	AdditionalEmails []string `json:"additional_emails,omitempty"`
-	// TestClockID pins this customer to a test clock — Stripe parity,
-	// ADR-027. Test-mode only; rejected on live-mode customers via
-	// the livemode check below. Once attached at create time, every
-	// Subscription / Invoice for this customer uses the clock's
-	// frozen_time as "now". Cannot be changed post-creation.
-	TestClockID string `json:"test_clock_id,omitempty"`
 }
 
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.Customer, error) {
 	input.ExternalID = strings.TrimSpace(input.ExternalID)
 	input.DisplayName = strings.TrimSpace(input.DisplayName)
 	input.Email = strings.TrimSpace(input.Email)
-	input.TestClockID = strings.TrimSpace(input.TestClockID)
 
 	if input.ExternalID == "" {
 		return domain.Customer{}, errs.Required("external_id")
@@ -263,37 +231,8 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		}
 		input.Email = addr
 	}
-	// Test-clock attach: validate the clock exists (mode gating happens at
-	// the route layer — test_clock_id only reaches us when the caller is on a
-	// test-mode key). If the checker isn't wired (defensive default) any
-	// test_clock_id is rejected.
-	//
-	// The same read gives us the clock's instant, and we BIND it: this create
-	// is the moment the customer joins the simulation, so its audit row belongs
-	// on the sim axis. Nothing else can put it there. Every later change is
-	// decided from the customer by the API's door; a create cannot be, since
-	// the customer does not exist yet, so without this the origin row of every
-	// simulation is the one row missing from ?test_clock_id=. It matters more
-	// than the rest: ADR-086 teardown HARD-DELETES the customer, leaving this
-	// row as the only surviving evidence the customer was ever in the clock's
-	// world.
-	if input.TestClockID != "" {
-		if s.clocks == nil {
-			return domain.Customer{}, errs.Invalid("test_clock_id", "test clocks are not available in this environment")
-		}
-		sim, ok, err := s.clocks.ResolveSim(ctx, tenantID, input.TestClockID)
-		if err != nil {
-			return domain.Customer{}, err
-		}
-		if !ok {
-			return domain.Customer{}, errs.Invalid("test_clock_id", "test clock not found")
-		}
-		ctx = clock.WithSim(ctx, sim)
-	} else {
-		// No clock named: the create's one instant is one read of the
-		// server's clock.
-		ctx = clock.EnsureEffectiveNow(ctx, s.clock)
-	}
+	// The create's one instant is one read of the server's clock.
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 
 	cc, err := normalizeAdditionalEmails(input.AdditionalEmails, input.Email)
 	if err != nil {
@@ -305,7 +244,6 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		DisplayName:      input.DisplayName,
 		Email:            input.Email,
 		AdditionalEmails: cc,
-		TestClockID:      input.TestClockID,
 	}, s.createEmission(ctx))
 }
 
@@ -372,15 +310,6 @@ func (s *Service) GetByCostDashboardToken(ctx context.Context, token string) (do
 
 func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.Customer, int, error) {
 	return s.store.List(ctx, filter)
-}
-
-// ListByTestClockID returns one page of the customers pinned to the given
-// test clock, and their total. Exposed as a service method (not just a
-// store passthrough) so the testclock domain can depend on the customer
-// service's narrow CustomerReader interface — keeps the per-domain rule
-// intact and the decrypt step on the customer read path.
-func (s *Service) ListByTestClockID(ctx context.Context, tenantID, clockID string, limit, offset int) ([]domain.Customer, int, error) {
-	return s.store.ListByTestClockID(ctx, tenantID, clockID, limit, offset)
 }
 
 type UpdateInput struct {

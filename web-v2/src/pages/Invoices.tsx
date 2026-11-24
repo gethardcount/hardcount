@@ -21,11 +21,9 @@ import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { DueBadge } from '@/components/DueBadge'
 import { wallClockNow } from '@/lib/effectiveNow'
 import { useNowResolver } from '@/hooks/useNow'
-import { SimulatedBadge } from '@/components/TestClockBadge'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
-import { TestClocksLoadError } from '@/components/TestClocksLoadError'
 import { Input } from '@/components/ui/input'
 import { DatePicker } from '@/components/ui/date-picker'
 import { Badge } from '@/components/ui/badge'
@@ -178,8 +176,7 @@ export default function InvoicesPage() {
     enabled: customerIds.length > 0,
   })
 
-  // Each row's "now" (its clock's time when it is on one), for Due in N days.
-  // The server fills each invoice's test_clock_id from its customer.
+  // Each row's "now", for Due in N days.
   const resolveNow = useNowResolver()
 
   const invoices = invoicesData?.data ?? []
@@ -343,8 +340,6 @@ export default function InvoicesPage() {
         </div>
       )}
 
-      <TestClocksLoadError records={invoices} className="mt-4 mb-0" />
-
       {/* Table */}
       <Card className="mt-4">
         <CardContent className="p-0">
@@ -451,7 +446,6 @@ export default function InvoicesPage() {
                             <div className="flex flex-wrap items-center gap-1.5">
                               <StatusBadge status={badge} />
                               {chip && <StatusBadge status={chip} />}
-                              {inv.is_simulated && <SimulatedBadge />}
                             </div>
                             {due}
                           </div>
@@ -465,11 +459,6 @@ export default function InvoicesPage() {
                             {inv.invoice_number}
                           </Link>
                           <AttentionDot attention={inv.attention} />
-                          {/* Authoritative per-invoice flag — badges manual
-                              one-off invoices too (no subscription to look
-                              through) and survives a later clock unpin, unlike
-                              the old sub→clock-map lookup. */}
-                          {inv.is_simulated && <SimulatedBadge />}
                         </div>}
                       </TableCell>
                       <TableCell className="text-sm hidden sm:table-cell">

@@ -20,7 +20,6 @@ var leaderFunnels = map[string]struct{ fn, role string }{
 	"internal/webhook/postgres.go":      {"ListPendingDeliveries", "RoleWebhookDelivery"},
 	"internal/webhook/outbox.go":        {"ProcessBatch", "RoleWebhookOutbox"},
 	"internal/email/outbox.go":          {"claimBatch", "RoleEmailOutbox"},
-	"internal/testclock/postgres.go":    {"ListAdvancingForCatchup", "RoleTestClockCatchup"},
 }
 
 func TestLeaderFunnels_KeepTheirFence(t *testing.T) {
@@ -69,7 +68,7 @@ func TestSingletonLoops_AreExactlyTheLeaderRoles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"RoleBilling", "RoleDunning", "RoleWebhookOutbox", "RoleEmailOutbox", "RoleWebhookDelivery", "RoleTestClockCatchup"}
+	want := []string{"RoleBilling", "RoleDunning", "RoleWebhookOutbox", "RoleEmailOutbox", "RoleWebhookDelivery"}
 	for _, r := range want {
 		if seen[r] != 1 {
 			t.Errorf("leader.%s: %d scheduler.Run sites, want exactly 1", r, seen[r])

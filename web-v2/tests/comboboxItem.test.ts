@@ -32,7 +32,7 @@ test('a keyboard pick of the second of two same-named customers picks the second
 })
 
 test('every option gets its own cmdk value, which cmdk can highlight', () => {
-  const options = [...twins, { value: '', label: 'No test clock — bills in real time' }]
+  const options = [...twins, { value: '', label: 'Use account default' }]
   const values = options.map(o => comboboxItem(o).value)
   assert.equal(new Set(values).size, options.length, `values ${JSON.stringify(values)} repeat`)
   for (const v of values) {

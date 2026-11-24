@@ -171,7 +171,7 @@ export default function ApiKeysPage() {
   const expiredKeys = keys.filter(k => k.status === 'expired')
   const revokedKeys = keys.filter(k => k.status === 'revoked')
   const hasInactive = expiredKeys.length + revokedKeys.length > 0
-  // A key is never on a test clock, so its times are wall-clock.
+  // A key's times are wall-clock.
   const now = wallClockNow()
 
   const keyRow = (k: APIKey) => {

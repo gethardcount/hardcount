@@ -50,13 +50,7 @@ project is ahead, [How Hardcount compares](comparison.md) says so.
    **Hardcount instead:** one server program plus Postgres and Redis, with a web
    dashboard.
 
-6. **There is no way to fast-forward time to test a billing change.**
-   ([What other projects offer](comparison.md).)
-   **Hardcount instead:** test clocks for test customers. Pin a test customer to
-   a clock and move it forward up to a year at a time, so months of billing
-   run in minutes, in test mode on your normal install.
-
-7. **You can't see which customers lose you money.** AI costs move with
+6. **You can't see which customers lose you money.** AI costs move with
    usage, so a customer can cost you more than they pay.
    **Hardcount instead:** margin per customer. Hardcount records what each usage
    event cost you when it arrives, from your provider price table or
@@ -65,7 +59,7 @@ project is ahead, [How Hardcount compares](comparison.md) says so.
    too: OpenMeter keeps an LLM price table with cost per feature, and
    Flexprice's cost sheets report margin (checked 2026-10-23).
 
-8. **Every bill gets questioned, and the answer is the raw events.** One
+7. **Every bill gets questioned, and the answer is the raw events.** One
    engineer who has built usage billing put it this way
    ([Hacker News, 2022](https://news.ycombinator.com/item?id=32670188)):
 

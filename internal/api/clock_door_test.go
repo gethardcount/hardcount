@@ -153,7 +153,7 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 		{"a credit note's route, by its invoice", "GET", "/v1/credit-notes/cn_1", onClock, "invoice:inv_of_note", 0, false},
 		{"a dunning run's route, by its invoice", "GET", "/v1/dunning/runs/run_1", onClock, "invoice:inv_of_run", 0, false},
 		{"a route that names no record", "GET", "/v1/whoami", realInstant, "", 1, false},
-		{"a real-time route that changes data", "POST", "/v1/test-clocks/clk_1/advance", realInstant, "", 1, false},
+		{"a real-time route that changes data", "POST", "/v1/billing/run", realInstant, "", 1, false},
 		{"a route its function decides", "POST", "/v1/customers", clock.Sim{}, "", 0, true},
 		// Usage's entries decide and bind themselves; usage's build refuses a
 		// context with no instant, which the door must leave to fire.

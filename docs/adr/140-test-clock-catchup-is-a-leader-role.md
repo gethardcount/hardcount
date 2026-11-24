@@ -8,6 +8,7 @@ queue, worker, start-up recovery and `503 catchup_queue_full`.
 role), [ADR-028](028-billing-engine-period-loop-and-disjoint-flows.md) and
 [ADR-029](029-fully-disjoint-test-clock-flows.md) (what drives the catch-up,
 and its outer time bound).
+**Superseded:** test clocks were removed in v0.11.0.
 
 ## Summary
 

@@ -52,7 +52,7 @@ Everything below backs up a rule above.
 
 ### How we keep it simple
 
-- **Fail, don't guess.** If something a bill needs cannot be read, the bill stops with an error. A subscription that keeps failing is set aside for an operator, and the rest of the run goes on ([ADR-119](adr/119-billing-failure-record-keyed-to-the-due-instant.md)). Known gap: in test mode, when a test clock or its subscription cannot be read, billing still falls back to the current time.
+- **Fail, don't guess.** If something a bill needs cannot be read, the bill stops with an error. A subscription that keeps failing is set aside for an operator, and the rest of the run goes on ([ADR-119](adr/119-billing-failure-record-keyed-to-the-due-instant.md)).
 - **Fix it where it starts.** A fix covers every place that touches the state. An extra mechanism needs a reason, written in its decision record or pull request. [Decision records](adr/README.md)
 - **One of each.** All billing data lives in Postgres. Redis only counts requests for rate limiting, so several copies of the app share one count. No queue broker, warehouse or workflow engine is added until a measurement says Postgres is not enough. [How much traffic Hardcount handles](scale.md)
 - **Build only what is needed.** Work that is not needed yet is listed with what would bring it back. [Roadmap: not building](roadmap.md#not-building)
@@ -76,10 +76,10 @@ These run on every pull request and every push to main.
 | Tenant isolation | A broken row-level-security policy ([`rls_isolation_test.go`](../internal/platform/postgres/rls_isolation_test.go)); code that skips it without being listed ([`txbypass_allowlist_test.go`](../internal/arch/txbypass_allowlist_test.go)) |
 | One auto-charge per invoice | Two claimers racing and both winning ([`auto_charge_claim_integration_test.go`](../internal/invoice/auto_charge_claim_integration_test.go)) |
 | Package boundaries | A new import between domain packages that is not listed ([`boundaries_test.go`](../internal/arch/boundaries_test.go)) |
-| Test-clock time | A bare `time.Now()` in a clock-aware package, unless the line says why ([`.golangci.yml`](../.golangci.yml)) |
+| Time from the clock | A bare `time.Now()` in a clock-aware package, unless the line says why ([`.golangci.yml`](../.golangci.yml)) |
 | hardcount-doctor | Anything but a clean sweep after each of three period closes on a day-31 anchor ([`month_end_anchor_e2e_test.go`](../internal/api/month_end_anchor_e2e_test.go)) |
 | Money math | Generated cases for [billing dates](../internal/domain/billing_dates_property_test.go), [pricing](../internal/domain/pricing_property_test.go), [proration](../internal/subscription/proration_property_test.go), [tax apportionment](../internal/tax/apportionment_property_test.go) and the [credit waterfall](../internal/credit/waterfall_property_integration_test.go) |
-| Upgrades | Any invoice that differs after the previous release is upgraded to the new code |
+| Upgrades | Any invoice not on a test clock that differs after the previous release is upgraded to the new code |
 
 Two drills are run by hand. [`partition-drill.sh`](../scripts/partition-drill.sh) cuts the leader's link to Postgres and measures the takeover. [`restore-drill.sh`](../scripts/restore-drill.sh) runs backup, restore and a row-count check.
 

@@ -13,15 +13,11 @@ import (
 	"github.com/gethardcount/hardcount/internal/payment"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // Facts: dates (ADR-128 §5, PR 7). A line Hardcount writes at an instant the
-// contract names is dated at that instant, on both clocks. Each scenario uses
-// the playbook's "one advance, many due times" test: the test clock is
-// advanced to two days past the boundary, so a row dated at the advance
-// instead of its named instant shows up as two days late.
+// contract names is dated at that instant.
 
 // datesRig is the real router on a real database, one tenant and a monthly
 // in_advance plan.
@@ -62,36 +58,11 @@ func newDatesRigOn(t *testing.T, name string, clk clock.Clock) *datesRig {
 	return r
 }
 
-// newClock creates a test clock frozen at frozen.
-func (r *datesRig) newClock(name string, frozen time.Time) string {
-	r.t.Helper()
-	return flowStr(r.call("POST", "/v1/test-clocks", flowReq{body: map[string]any{
-		"name": name, "frozen_time": frozen.Format(time.RFC3339),
-	}}).want(r.t, 201, "create test clock "+name).body, "id")
-}
-
-// advance moves the clock to target and runs its catch-up, as the
-// testclock_catchup leader would; the clock is ready on return.
-func (r *datesRig) advance(clockID string, target time.Time) {
-	r.t.Helper()
-	r.call("POST", "/v1/test-clocks/"+clockID+"/advance", flowReq{body: map[string]any{
-		"frozen_time": target.Format(time.RFC3339),
-	}}).want(r.t, 200, "advance clock")
-	testclocktest.Drain(r.t, r.srv.TestClockSvc)
-	if status := flowStr(r.call("GET", "/v1/test-clocks/"+clockID, flowReq{}).want(r.t, 200, "read clock").body, "status"); status != "ready" {
-		r.t.Fatalf("clock status after the advance = %q, want ready", status)
-	}
-}
-
-// trialSub creates a customer (pinned to clockID when set) and a subscription
-// with a 14-day trial on the in_advance plan. It returns the subscription id
-// and its trial end.
-func (r *datesRig) trialSub(key, clockID string) (string, time.Time) {
+// trialSub creates a customer and a subscription with a 14-day trial on the
+// in_advance plan. It returns the subscription id and its trial end.
+func (r *datesRig) trialSub(key string) (string, time.Time) {
 	r.t.Helper()
 	cust := map[string]any{"external_id": "dates-" + key, "display_name": "Dates " + key, "email": "billing@dates.test"}
-	if clockID != "" {
-		cust["test_clock_id"] = clockID
-	}
 	customerID := flowStr(r.call("POST", "/v1/customers", flowReq{body: cust}).want(r.t, 201, key+": create customer").body, "id")
 	sub := r.call("POST", "/v1/subscriptions", flowReq{body: map[string]any{
 		"code": "dates-" + key, "display_name": "Dates " + key, "customer_id": customerID,
@@ -168,7 +139,7 @@ func TestActivityDates_TrialRunsOut(t *testing.T) {
 	r := newDatesRig(t, "Activity Dates Trial")
 
 	t.Run("real clock: one expiry tick", func(t *testing.T) {
-		subID, trialEnd := r.trialSub("wall", "")
+		subID, trialEnd := r.trialSub("wall")
 		// Move the trial, and the period that follows it, so it ended a
 		// minute ago.
 		shift := time.Now().UTC().Add(-time.Minute).Sub(trialEnd)
@@ -201,14 +172,11 @@ func TestActivityDates_TrialRunsOut(t *testing.T) {
 	})
 }
 
-// subWithItem creates a customer (pinned to clockID when set) and an active
-// subscription on planID, returning the subscription and its one item.
-func (r *datesRig) subWithItem(key, clockID, planID string) (string, string) {
+// subWithItem creates a customer and an active subscription on planID,
+// returning the subscription and its one item.
+func (r *datesRig) subWithItem(key, planID string) (string, string) {
 	r.t.Helper()
 	cust := map[string]any{"external_id": "dates-" + key, "display_name": "Dates " + key, "email": "billing@dates.test"}
-	if clockID != "" {
-		cust["test_clock_id"] = clockID
-	}
 	customerID := flowStr(r.call("POST", "/v1/customers", flowReq{body: cust}).want(r.t, 201, key+": create customer").body, "id")
 	sub := r.call("POST", "/v1/subscriptions", flowReq{body: map[string]any{
 		"code": "dates-" + key, "display_name": "Dates " + key, "customer_id": customerID,
@@ -257,7 +225,7 @@ func TestActivityDates_BornFinalized(t *testing.T) {
 	arrears := plan("dates-arrears", 3000, "in_arrears")
 
 	// Day-1 and proration.
-	upSub, upItem := r.subWithItem("upgrade", "", r.planID)
+	upSub, upItem := r.subWithItem("upgrade", r.planID)
 	// An unpaid period invoice blocks a plan change: pay the day-1 invoice
 	// offline first.
 	r.call("POST", "/v1/invoices/"+flowStr(r.dayOne(upSub), "id")+"/record-payment", flowReq{body: map[string]any{"note": "Wire"}}).want(t, 200, "pay day-1 offline")
@@ -265,8 +233,8 @@ func TestActivityDates_BornFinalized(t *testing.T) {
 
 	// The final invoice of an immediate cancel, ten days into an arrears
 	// period, then the cycle close.
-	cycleSub, _ := r.subWithItem("cycle", "", r.planID)
-	cancelSub, _ := r.subWithItem("cancel", "", arrears)
+	cycleSub, _ := r.subWithItem("cycle", r.planID)
+	cancelSub, _ := r.subWithItem("cancel", arrears)
 	wall.Set(frozen.AddDate(0, 0, 10))
 	r.call("POST", "/v1/subscriptions/"+cancelSub+"/cancel", flowReq{}).want(t, 200, "cancel now")
 	tickAt(t, r.srv, wall, r.tenantID, frozen.AddDate(0, 1, 2))
@@ -292,17 +260,16 @@ func TestActivityDates_BornFinalized(t *testing.T) {
 	}
 }
 
-// TestActivityDates_HostedPageAttempts is P-2 (ADR-128 decision 7, reversing
-// ADR-102's wall-clock rule): a charge attempt the settle path records for a
-// PaymentIntent Hardcount did not make (the hosted payment page) is dated on the
-// invoice's test clock, like any other act on a pinned invoice. Writes go
-// through the production payment adapter's settle (the webhook's entry
-// point, on a ctx with no clock) and the real invoice store; reads through
-// the real router.
+// TestActivityDates_HostedPageAttempts is P-2 (ADR-128 decision 7): a charge
+// attempt the settle path records for a PaymentIntent Hardcount did not make
+// (the hosted payment page) is dated at the invoice's time, like any other act
+// on the invoice. Writes go through the production payment adapter's settle
+// (the webhook's entry point, on a ctx with no clock) and the real invoice
+// store.
 //
 // Collision: a Hardcount-made dunning retry whose failure webhook commits before
-// the charge call records its attempt. The early report stamps the invoice's
-// clock (frozen_time); the retry's own write carries its slot and must win,
+// the charge call records its attempt. The early report stamps the time it was
+// settled at; the retry's own write carries its slot and must win,
 // because the writer that made the attempt owns its facts (the trigger_source
 // rule). Mutation check: keep the existing effective_at in RecordChargeAttempt
 // and the collision arm fails.
@@ -324,17 +291,9 @@ func TestActivityDates_HostedPageAttempts(t *testing.T) {
 		return testutil.DecidedFor(t, srv.BillingEngine, clock.Pin{TenantID: hr.tenantID, InvoiceID: invoiceID})
 	}
 
-	frozen := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
-	clockID := flowStr(call("POST", "/v1/test-clocks", flowReq{body: map[string]any{
-		"name": "hosted attempts", "frozen_time": frozen.Format(time.RFC3339),
-	}}).want(t, 201, "create test clock").body, "id")
-
-	newInvoice := func(key, clockID string) string {
+	newInvoice := func(key string) string {
 		t.Helper()
 		cust := map[string]any{"external_id": "hosted-" + key, "display_name": "Hosted " + key, "email": "billing@hosted.test"}
-		if clockID != "" {
-			cust["test_clock_id"] = clockID
-		}
 		customerID := flowStr(call("POST", "/v1/customers", flowReq{body: cust}).want(t, 201, key+": create customer").body, "id")
 		id := flowStr(call("POST", "/v1/invoices", flowReq{body: map[string]any{
 			"customer_id": customerID,
@@ -366,37 +325,8 @@ func TestActivityDates_HostedPageAttempts(t *testing.T) {
 		}
 	}
 
-	t.Run("test clock: a hosted-page payment fails", func(t *testing.T) {
-		id := newInvoice("fail", clockID)
-		before := time.Now().UTC()
-		hostedFailure(id, "pi_hosted_fail", payment.PurposeHostedInvoicePay)
-		after := time.Now().UTC()
-
-		a := attempt(id, "pi_hosted_fail")
-		if !a.EffectiveAt.Equal(frozen) {
-			t.Errorf("attempt effective_at = %v, want the invoice's clock %v", a.EffectiveAt, frozen)
-		}
-		events := flowList(call("GET", "/v1/invoices/"+id+"/payment-timeline", flowReq{}).want(t, 200, "timeline").body, "events")
-		lines := linesOf(t, events)
-		var titles []string
-		for _, l := range lines {
-			titles = append(titles, fmt.Sprint(l["title"]))
-		}
-		if len(lines) == 0 || lines[len(lines)-1]["title"] != "Payment failed" {
-			t.Fatalf("timeline %q, want the failed payment last, after the invoice's own rows", titles)
-		}
-		failed := lines[len(lines)-1]
-		wantAt(t, `"Payment failed" line`, failed, "occurred_at", frozen)
-		if failed["recorded_at"] == nil {
-			t.Fatalf(`"Payment failed" line has no recorded_at`)
-		}
-		if rec := at(t, failed, "recorded_at"); rec.Before(before.Add(-time.Second)) || rec.After(after.Add(time.Second)) {
-			t.Errorf(`"Payment failed" recorded_at %v, want the real time of the settle (%v – %v)`, rec, before, after)
-		}
-	})
-
 	t.Run("a hosted-page payment succeeds", func(t *testing.T) {
-		id := newInvoice("pay", "")
+		id := newInvoice("pay")
 		if err := hr.charger.SettleSucceeded(webhook(t, id), hr.tenantID, hr.invoice(id), "pi_hosted_ok", 4900, payment.SourceWebhook); err != nil {
 			t.Fatalf("settle succeeded: %v", err)
 		}
@@ -411,7 +341,7 @@ func TestActivityDates_HostedPageAttempts(t *testing.T) {
 	})
 
 	t.Run("a dunning retry's failure webhook beats its attempt write", func(t *testing.T) {
-		id := newInvoice("collide", "")
+		id := newInvoice("collide")
 		slot := time.Now().UTC().Add(-36 * time.Hour).Truncate(time.Microsecond) // the retry's contracted instant
 		hostedFailure(id, "pi_retry_collide", "dunning_retry")
 		if err := hr.invoices.RecordChargeAttempt(clock.WithEffectiveNow(hr.ctx, slot), hr.tenantID, domain.InvoiceChargeAttempt{

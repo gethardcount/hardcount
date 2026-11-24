@@ -323,7 +323,7 @@ func TestStartDunning_ClockPinnedInvoiceCountsFromIssue_RealStore(t *testing.T) 
 	svc := dunning.NewService(dstore, nil, nil)
 	resolver := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, nil)
 	resolver.SetCustomerReader(customer.NewPostgresStore(h.db)) // as api/router.go wires it
-	resolver.SetTestClockReader(testclock.NewPostgresStore(h.db))
+	resolver.SetTestClockReader(testclock.NewReader(h.db))
 
 	frozen := time.Date(2027, 3, 20, 0, 0, 0, 0, time.UTC)
 	clockID := postgres.NewID("hc_tclk")
@@ -426,7 +426,7 @@ func TestStartDunning_ClockPinnedChargedLater_OneRetryNotTheCampaign_RealStore(t
 	svc := dunning.NewService(dstore, decliningRetrier{}, nil)
 	resolver := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, nil)
 	resolver.SetCustomerReader(customer.NewPostgresStore(h.db))
-	resolver.SetTestClockReader(testclock.NewPostgresStore(h.db))
+	resolver.SetTestClockReader(testclock.NewReader(h.db))
 
 	issued := time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC)  // cycle close; paused → draft
 	charged := time.Date(2027, 6, 1, 0, 0, 0, 0, time.UTC) // finalized and declined on a later Advance
@@ -458,7 +458,7 @@ func TestStartDunning_ClockPinnedChargedLater_OneRetryNotTheCampaign_RealStore(t
 		t.Fatalf("first retry = %v, want %v (charge + 3d)", run.NextActionAt, want)
 	}
 
-	// The clock's catch-up decides the clock before it runs dunning.
+	// The clock's dunning job runs at the clock's time.
 	if _, errs := svc.ProcessDueRunsForClock(clock.WithSim(h.ctx, clock.Sim{At: frozen, TestClockID: clockID}), h.tenantID, clockID, frozen, 50); len(errs) > 0 {
 		t.Fatalf("process due runs for clock: %v", errs)
 	}
@@ -488,7 +488,7 @@ func TestCollector_CardlessDraftCollectedLater_CountsFromCollection_RealStore(t 
 	svc := dunning.NewService(dstore, nil, nil)
 	e := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, dunningServiceStarter{svc: svc})
 	e.SetCustomerReader(customer.NewPostgresStore(h.db))
-	e.SetTestClockReader(testclock.NewPostgresStore(h.db))
+	e.SetTestClockReader(testclock.NewReader(h.db))
 
 	issued := time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC)
 	frozen := time.Date(2027, 6, 5, 0, 0, 0, 0, time.UTC) // the Advance that collects it
@@ -510,7 +510,7 @@ func TestCollector_CardlessDraftCollectedLater_CountsFromCollection_RealStore(t 
 		t.Fatalf("create invoice: %v", err)
 	}
 
-	advCtx := clock.WithSim(h.ctx, clock.Sim{At: frozen, TestClockID: clockID}) // as catchup binds Phase 3
+	advCtx := clock.WithSim(h.ctx, clock.Sim{At: frozen, TestClockID: clockID})
 	if _, errs := e.RetryPendingChargesForClock(advCtx, h.tenantID, clockID, 50); len(errs) > 0 {
 		t.Fatalf("retry pending charges for clock: %v", errs)
 	}

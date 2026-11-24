@@ -18,9 +18,9 @@ import type { EffectiveNow } from '@/lib/effectiveNow'
 // picker reads no zone itself: `timeZone` and `now` go to DatePicker,
 // for its today and the first day it allows.
 //
-// Hour granularity is 1h, minute granularity is 1min. Test-clock and
-// billing-period flows need minute precision so the input doesn't
-// snap to 15-minute increments.
+// Hour granularity is 1h, minute granularity is 1min. Billing-period
+// flows need minute precision so the input doesn't snap to 15-minute
+// increments.
 
 interface DateTimePickerProps {
   date: string                       // yyyy-MM-dd

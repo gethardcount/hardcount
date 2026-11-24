@@ -163,7 +163,7 @@ func TestPricingShapes_1_OpenAIStyleTokens(t *testing.T) {
 		perUnit(tokens, "0.00025", map[string]string{"model": "gpt-4o", "token_type": "input"}),
 		perUnit(tokens, "0.000125", map[string]string{"model": "gpt-4o", "token_type": "cache_read"}),
 		perUnit(tokens, "0.001", map[string]string{"model": "gpt-4o", "token_type": "output"}))
-	cust := r.customer("shape-1", "")
+	cust := r.customer("shape-1")
 	sub, p0, p1 := r.subscribe(time.Time{}, cust, plan)
 	at := recent(p0)
 
@@ -217,7 +217,7 @@ func TestPricingShapes_2_AnthropicStyleMostSpecificWins(t *testing.T) {
 		perUnit(tokens, "3", map[string]string{"model": "claude-sonnet-4.5", "token_type": "input"}),
 		perUnit(tokens, "15", map[string]string{"model": "claude-sonnet-4.5", "token_type": "output"}),
 		perUnit(tokens, "2", nil))
-	cust := r.customer("shape-2", "")
+	cust := r.customer("shape-2")
 	sub, p0, p1 := r.subscribe(time.Time{}, cust, plan)
 	at := recent(p0)
 	r.ingest(time.Time{}, "shape-2", "tokens", 1000, at, map[string]string{"model": "claude-haiku-5.5", "context_tier": "prompt_up_to_100k", "token_type": "input"})
@@ -250,7 +250,7 @@ func TestPricingShapes_4_BasePlusOverage(t *testing.T) {
 		"meter_id": calls, "dimension_match": map[string]any{}, "mode": "graduated",
 		"tiers": []map[string]any{{"up_to": 1000, "unit_amount_cents": "0"}, {"up_to": nil, "unit_amount_cents": "2"}},
 	})
-	cust := r.customer("shape-4", "")
+	cust := r.customer("shape-4")
 	sub, p0, p1 := r.subscribe(time.Time{}, cust, plan)
 	r.ingest(time.Time{}, "shape-4", "calls", 1500, recent(p0), nil)
 	r.run(p1.Add(time.Hour))
@@ -291,7 +291,7 @@ func TestPricingShapes_5_YearlyBasePlusUsage(t *testing.T) {
 
 	// One yearly subscription: a 120,000c base in arrears and 1c a call.
 	yearly, yIDs := r.shapePlan("yearly", "yearly", 120000, "in_arrears", perUnit(calls, "1", nil))
-	cust := r.customer("shape-5", "")
+	cust := r.customer("shape-5")
 	sub, p0, p1 := r.subscribe(time.Time{}, cust, yearly)
 	if !p1.Equal(yearAfter(p0, p0.Day())) {
 		t.Fatalf("yearly period = [%v, %v), want a year", p0, p1)
@@ -301,7 +301,7 @@ func TestPricingShapes_5_YearlyBasePlusUsage(t *testing.T) {
 	// The max meter's yearly subscription: 100c a seat, the same threshold.
 	seats := r.meter("seats", "max")
 	seatPlan, sIDs := r.shapePlan("yearly-seats", "yearly", 0, "", perUnit(seats, "100", nil))
-	custSeats := r.customer("shape-5s", "")
+	custSeats := r.customer("shape-5s")
 	seatSub, s0, s1 := r.subscribe(time.Time{}, custSeats, seatPlan)
 	if !s0.Equal(p0) || !s1.Equal(p1) {
 		t.Fatalf("seat period = [%v, %v), want [%v, %v)", s0, s1, p0, p1)
@@ -347,7 +347,7 @@ usage "seats (units)" qty=10 amount=1000 price=seats`)
 	// Two subscriptions: a yearly fee and monthly usage.
 	fee, _ := r.shapePlan("yearly-fee", "yearly", 120000, "in_advance")
 	monthly, mIDs := r.shapePlan("monthly-usage", "monthly", 0, "", perUnit(calls, "1", nil))
-	cust2 := r.customer("shape-5b", "")
+	cust2 := r.customer("shape-5b")
 	feeSub, f0, f1 := r.subscribe(time.Time{}, cust2, fee)
 	useSub, u0, u1 := r.subscribe(time.Time{}, cust2, monthly)
 	if !f1.Equal(yearAfter(f0, f0.Day())) || !u1.Equal(monthAfter(u0, u0.Day())) {
@@ -373,7 +373,7 @@ func TestPricingShapes_6_PrepaidCommit(t *testing.T) {
 	r := newPPRig(t, "shape 6")
 	calls := r.meter("calls", "sum")
 	plan, ids := r.plan("pro", perUnit(calls, "1", nil))
-	cust := r.customer("shape-6", "")
+	cust := r.customer("shape-6")
 	sub, p0, p1 := r.subscribe(time.Time{}, cust, plan)
 
 	commit := r.must(time.Time{}, http.MethodPost, "/v1/invoices", map[string]any{
@@ -406,7 +406,7 @@ func TestPricingShapes_7_SeatsPlusUsage(t *testing.T) {
 	r := newPPRig(t, "shape 7")
 	calls := r.meter("calls", "sum")
 	plan, ids := r.shapePlan("team", "monthly", 1000, "in_arrears", perUnit(calls, "2", nil))
-	cust := r.customer("shape-7", "")
+	cust := r.customer("shape-7")
 	sub, p0, p1 := r.subscribeQty(time.Time{}, cust, plan, 5)
 	r.ingest(time.Time{}, "shape-7", "calls", 30, recent(p0), nil)
 	r.run(p1.Add(time.Hour))
@@ -424,7 +424,7 @@ func TestPricingShapes_8_GrandfatheredRateIsANewPlan(t *testing.T) {
 	r := newPPRig(t, "shape 8")
 	calls := r.meter("calls", "sum")
 	early, eIDs := r.plan("early", perUnit(calls, "1", nil))
-	custA, custB := r.customer("shape-8a", ""), r.customer("shape-8b", "")
+	custA, custB := r.customer("shape-8a"), r.customer("shape-8b")
 	subA, a0, a1 := r.subscribe(time.Now().UTC().AddDate(0, 0, -10), custA, early)
 	subB, b0, b1 := r.subscribe(time.Time{}, custB, early)
 	if !a1.Before(b1) {
@@ -433,7 +433,7 @@ func TestPricingShapes_8_GrandfatheredRateIsANewPlan(t *testing.T) {
 
 	// New customers get the new rate on a new plan.
 	current, cIDs := r.plan("current", perUnit(calls, "3", nil))
-	custC := r.customer("shape-8c", "")
+	custC := r.customer("shape-8c")
 	subC, c0, c1 := r.subscribe(time.Time{}, custC, current)
 
 	r.editTo(early, eIDs[0], "2", "next_period")

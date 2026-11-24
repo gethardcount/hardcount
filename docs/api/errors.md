@@ -72,7 +72,7 @@ the API has one.
 
 | `code` | When | What to do |
 |---|---|---|
-| `forbidden` | The key's type may not call this route. A route that takes only a dashboard session. A browser request from another site. A test clock used with a live key. The other mode's Stripe connection. | Use the right key; see [Authentication](authentication.md) |
+| `forbidden` | The key's type may not call this route. A route that takes only a dashboard session. A browser request from another site. The other mode's Stripe connection. | Use the right key; see [Authentication](authentication.md) |
 
 ### 404 Not Found
 
@@ -99,8 +99,7 @@ decide.
 | `code` | When | What to do |
 |---|---|---|
 | `already_exists` | A value that must be unique is taken, such as a customer's `external_id`. `param` names it. | Use another value, or read the one that exists |
-| `invalid_state` | The resource is in the wrong state for this action, such as advancing a test clock that is still advancing | Read it, wait or change it, then try again |
-| `clock_advancing` | The request changes a customer whose test clock is advancing (the customer, its subscriptions, invoices, credit notes or credits, or usage you backfill or release), or creates a customer on it. Usage your app or proxy sends is accepted. | Wait until the clock is `ready`, then send the request again |
+| `invalid_state` | The resource is in the wrong state for this action | Read it, wait or change it, then try again |
 | `concurrent_change` | Another change to the same records stopped the request: Postgres broke a deadlock or ended the request's wait for a lock, or, for a cancel, the subscription changed twice while the cancel priced it. Only the routes listed below answer it. | Send the same request again. With an `Idempotency-Key`, the same key works. Some steps stay done (below). |
 | `already_bootstrapped` | `POST /v1/bootstrap` after the first account exists | Do not retry |
 | `member_elsewhere` | `GET /v1/auth/invite/{token}` or `POST /v1/auth/accept-invite`, which the invited person's browser calls: the invited email already belongs to another account on this server, and an email can belong to only one. | Do not retry. The person who sent the invitation invites a different address. |
@@ -162,7 +161,7 @@ first:
 | `unpaid_invoice_blocks_change` | A change that charges more (an upgrade, an added item, more seats) while the current period's invoice is unpaid. A written-off invoice counts as unpaid. | Collect or void that invoice first; writing it off does not lift this |
 | `funding_invoice_tax_pending` | A change that credits unused time (a cancel, a downgrade, a removed item), while the invoice that billed that time is a draft whose tax is not worked out yet | Try again later |
 | `item_changed` | The subscription's items changed while the request ran | Read it again, then retry |
-| `subscription_period_moved` | The subscription moved to a new billing period while the request ran, or (an immediate change to a plan with another billing interval) a spend-threshold invoice has billed this subscription past the current time, or, billed in arrears, up to it | Read it again, then retry, or schedule the change for the next period. On a test clock, advance the clock first |
+| `subscription_period_moved` | The subscription moved to a new billing period while the request ran, or (an immediate change to a plan with another billing interval) a spend-threshold invoice has billed this subscription past the current time, or, billed in arrears, up to it | Read it again, then retry, or schedule the change for the next period |
 | `billing_not_failing` | `retry-billing` on a subscription whose billing is not failing | Nothing to do |
 
 **Invoices and payments**

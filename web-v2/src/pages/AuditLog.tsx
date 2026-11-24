@@ -118,32 +118,6 @@ function prettyLabel(value: string): string {
     .replace(/\b\w/g, c => c.toUpperCase()))
 }
 
-// Test-clock sim-context keys. Since ADR-090 §5 these are real COLUMNS
-// (sim_effective_at / test_clock_id, migration 0148) stamped by the audit
-// writer from the ctx's clock binding. The writer also mirrors them into metadata
-// (which is where rows written before 0148 carry them), but this page reads the
-// COLUMNS ONLY and deliberately does not fall back — see simContext() below for
-// why: the clock FILTER reads the columns, so lighting the chip off metadata
-// would show a chip on a row the filter then cannot find.
-//
-// Excluded from generic metadata rendering — surfaced as a dedicated subline +
-// chip so the operator reads "wall-clock click + simulated effect-time"
-// coherently instead of seeing the keys mixed in with business metadata.
-const SIM_CONTEXT_KEYS = new Set(['sim_effective_at', 'test_clock_id'])
-
-// COLUMNS ONLY — deliberately no metadata fallback.
-//
-// The audit writer mirrors the pair into metadata as well, and reading that
-// mirror would light the "test clock" chip on rows written before migration
-// 0148. But those rows have NULL sim COLUMNS, and the clock filter reads the
-// columns — so the operator would see a chip, pick that clock, and watch the row
-// vanish. append-only forbids backfilling the columns, so the chip could never
-// be made true. What is on screen must be exactly what the filter can find; a
-// chip that lies about where a row lives is worse than no chip.
-//
-// The cost is confined to dev databases (Hardcount is pre-launch; no production log
-// predates 0148). The subscription Activity timeline still reads the metadata
-// mirror — it offers no clock filter, so it has no promise to break.
 // The backend bounds its COUNT at COUNT_CAP: audit_log can never be pruned, so an
 // exact total is an O(history) scan that grows forever, paid on every page-1 load
 // to print a number nobody acts on. At or above the cap it reports the cap, and we
@@ -152,16 +126,11 @@ const COUNT_CAP = 10000
 const formatTotal = (n: number) =>
   n >= COUNT_CAP ? `${COUNT_CAP.toLocaleString()}+` : n.toLocaleString()
 
-function simContext(entry: AuditEntry): { simEffectiveAt?: string; testClockID?: string } {
-  return { simEffectiveAt: entry.sim_effective_at, testClockID: entry.test_clock_id }
-}
-
 function formatMetadata(meta: Record<string, unknown> | undefined): { label: string; value: string }[] {
   if (!meta) return []
   const items: { label: string; value: string }[] = []
   for (const [key, val] of Object.entries(meta)) {
     if (key === 'resource_label') continue
-    if (SIM_CONTEXT_KEYS.has(key)) continue
     const label = fixAcronyms(key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))
     if (typeof val === 'number' && key.includes('cents')) {
       items.push({ label: label.replace(' Cents', ''), value: auditAmount(val, meta.currency) })
@@ -225,12 +194,6 @@ export default function AuditLogPage() {
     resource_id: '',
     date_from: '',
     date_to: '',
-    // Sim axis (ADR-090 §5): scope to one simulation. It lives in the URL so a
-    // forensic view of a torn-down clock is a shareable link. There is
-    // deliberately no "order by simulated time" control — within one clock it is
-    // the same order as wall-clock, and across clocks it interleaves unrelated
-    // simulations into a timeline that never happened.
-    test_clock: '',
   })
   const {
     resource_type: resourceType,
@@ -239,7 +202,6 @@ export default function AuditLogPage() {
     resource_id: resourceIdFilter,
     date_from: dateFrom,
     date_to: dateTo,
-    test_clock: testClockFilter,
   } = urlState
 
   // Offset pagination — Previous/Next, like every list. The server's count
@@ -247,7 +209,7 @@ export default function AuditLogPage() {
   // 10,000 rows "Next" follows full pages instead of the total. The page
   // resets whenever a filter changes.
   const [page, setPage] = useState(1)
-  const filterKey = [resourceType, action, actorFilter, resourceIdFilter, dateFrom, dateTo, testClockFilter].join('|')
+  const filterKey = [resourceType, action, actorFilter, resourceIdFilter, dateFrom, dateTo].join('|')
   useEffect(() => { setPage(1) }, [filterKey])
 
   // Audit log entries query — keyed by every filter dimension so the
@@ -265,7 +227,6 @@ export default function AuditLogPage() {
     if (actorFilter) params.set('actor_id', actorFilter)
     if (dateFrom) params.set('date_from', startOfDayInTZ(dateFrom, tz))
     if (dateTo) params.set('date_to', endOfDayInTZ(dateTo, tz))
-    if (testClockFilter) params.set('test_clock_id', testClockFilter)
     return params.toString()
   })()
   const entriesQuery = useQuery({
@@ -288,10 +249,6 @@ export default function AuditLogPage() {
   const filterOptions = {
     actions: filterOptionsQuery.data?.actions?.length ? filterOptionsQuery.data.actions : DEFAULT_ACTIONS,
     resourceTypes: filterOptionsQuery.data?.resource_types?.length ? filterOptionsQuery.data.resource_types : DEFAULT_RESOURCE_TYPES,
-    // No fallback list: a clock the log has never seen cannot be filtered on,
-    // and inventing entries would offer the operator a filter that returns
-    // nothing. Empty => the control is hidden entirely.
-    testClocks: filterOptionsQuery.data?.test_clocks ?? [],
   }
 
   // Below the count's cap the total decides; at the cap (more than 10,000
@@ -318,10 +275,6 @@ export default function AuditLogPage() {
       if (action) params.set('action', action)
       if (resourceIdFilter) params.set('resource_id', resourceIdFilter)
       if (actorFilter) params.set('actor_id', actorFilter)
-      // The export must be the SAME slice that is on screen — a CSV that
-      // silently ignored the clock filter would hand an auditor a file that
-      // looks like one simulation and is actually the whole log.
-      if (testClockFilter) params.set('test_clock_id', testClockFilter)
       // Wrap to tenant-TZ start/end-of-day instants, identical to the list query
       // above — otherwise the export anchors bare YYYY-MM-DD at UTC and a
       // non-UTC tenant's CSV silently drops (or adds) rows near day edges vs.
@@ -342,7 +295,7 @@ export default function AuditLogPage() {
 
   const selectClass = "flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 
-  const hasFilters = resourceType || action || actorFilter || resourceIdFilter || dateFrom || dateTo || testClockFilter
+  const hasFilters = resourceType || action || actorFilter || resourceIdFilter || dateFrom || dateTo
 
   return (
     <>
@@ -410,33 +363,13 @@ export default function AuditLogPage() {
           now={wallClockNow()}
           min={dateFrom || undefined}
         />
-        {/* Test-clock scope. Only rendered once the log has actually recorded a
-            simulation — for the many tenants that never touch test clocks this
-            control never appears. The list comes from the audit rows themselves,
-            so a clock that has already been torn down (ADR-086 deletes its whole
-            graph) is still selectable: that is the case where the audit log is
-            the only surviving record of it. */}
-        {filterOptions.testClocks.length > 0 && (
-          <>
-            <select
-              value={testClockFilter}
-              onChange={e => setUrlState({ test_clock: e.target.value })}
-              className={cn(selectClass, 'w-52')}
-            >
-              <option value="">All test clocks</option>
-              {filterOptions.testClocks.map(c => (
-                <option key={c.id} value={c.id}>{c.name || c.id}</option>
-              ))}
-            </select>
-          </>
-        )}
         {hasFilters && (
           <Button
             variant="outline"
             size="sm"
             onClick={() => setUrlState({
               resource_type: '', action: '', actor: '', resource_id: '',
-              date_from: '', date_to: '', test_clock: '',
+              date_from: '', date_to: '',
             })}
           >
             Clear all
@@ -476,7 +409,6 @@ export default function AuditLogPage() {
                         const isExpanded = expandedId === entry.id
                         const link = resourceLink(entry)
                         const meta = formatMetadata(entry.metadata)
-                        const sim = simContext(entry)
 
                         return (
                           <div key={entry.id}>
@@ -493,20 +425,6 @@ export default function AuditLogPage() {
                               <span className="text-sm text-foreground ml-2.5 flex-1 truncate" title={describeAction(entry)}>
                                 {describeAction(entry)}
                               </span>
-              {/* The chip carries the simulated instant itself, not just the fact
-                  that there is one. The whole reason this axis exists is that the
-                  row's visible timestamp (wall-clock, today) says nothing about
-                  when the action happened IN the simulation — so making the
-                  operator expand the row to find that out defeats the point. */}
-                              {sim.simEffectiveAt && (
-                                <span
-                                  title={`Operator clicked at ${formatDateTime(entry.created_at)} (real time); the clock stood at simulated ${formatDateTime(sim.simEffectiveAt)}${sim.testClockID ? ` on test clock ${sim.testClockID}` : ''}`}
-                                  className="inline-flex shrink-0 items-center gap-1 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-amber-800 dark:text-amber-300 ml-2"
-                                >
-                                  Simulated
-                                  <span className="font-mono opacity-80">{formatDateTime(sim.simEffectiveAt)}</span>
-                                </span>
-                              )}
                               {link && (
                                 <Link
                                   to={link}
@@ -544,11 +462,6 @@ export default function AuditLogPage() {
                                   <div>
                                     <p className="text-xs text-muted-foreground">Timestamp</p>
                                     <p className="text-foreground mt-0.5">{formatDateTime(entry.created_at)}</p>
-                                    {sim.simEffectiveAt && (
-                                      <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
-                                        Effect on test clock {sim.testClockID ? <span className="font-mono">{sim.testClockID}</span> : ''} at {formatDateTime(sim.simEffectiveAt)}
-                                      </p>
-                                    )}
                                   </div>
                                   <div>
                                     <p className="text-xs text-muted-foreground">IP address</p>

@@ -97,11 +97,12 @@ flowchart TB
 
 ## See it without waiting a month
 
-Move a customer's [test clock](glossary.md#testing-with-simulated-time)
-forward, and steps 4 to 6 happen in seconds. A month brings the invoice and
-its charge; two more weeks bring the retries (day 3, 7 and 14 by default). The quick start does
-this for a demo customer, up to the invoice: it connects no Stripe account,
-so nothing is charged.
+The invoice preview shows a customer's invoice so far, priced from the
+usage to date. For a test customer you need not wait for the month to end:
+canceling its subscription issues its final invoice at once. The quick
+start does both for a demo customer. It connects no Stripe account, so
+nothing is charged. Step by step:
+[Send usage and get your first invoice](first-invoice.md).
 
 **Next:** see these six steps run on your computer: [quick start](quick-start.md).
 Each step in detail: [Concepts](concepts/data-model.md).

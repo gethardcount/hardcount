@@ -19,7 +19,6 @@ import { CREDIT_NOTE_CSV_HEADERS, creditNoteCsvRow } from '@/lib/creditNoteCsv'
 import { creditNoteStatFigures, creditNotesListView } from '@/lib/creditNoteStats'
 import { canIssueCreditNote } from '@/lib/creditNoteCeilings'
 import { ScrollPane } from '@/components/ui/scroll-pane'
-import { SimulatedBadge } from '@/components/TestClockBadge'
 import { CustomerCombobox } from '@/components/CustomerCombobox'
 import { IssueCreditDialog } from '@/components/IssueCreditDialog'
 import { newRetryKeys, type RetryKeys } from '@/lib/retryKeys'
@@ -468,7 +467,6 @@ export default function CreditNotesPage() {
                         <TableCell>
                           <span className="inline-flex items-center gap-2">
                             <p className="text-sm font-medium text-foreground">{note.credit_note_number}</p>
-                            {note.is_simulated && <SimulatedBadge title="Dates on this credit note follow its test clock's calendar, not today's date" />}
                           </span>
                           <p className="text-xs text-muted-foreground mt-0.5">{channelLabel}</p>
                         </TableCell>
@@ -785,7 +783,7 @@ function ChooseInvoiceDialog({ onClose, onChoose }: {
   const [customerId, setCustomerId] = useState('')
   const [numberSearch, setNumberSearch] = useState('')
   const search = useDebouncedValue(numberSearch.trim(), 300)
-  // Each invoice's now, for Past due: its clock's time when it is on one.
+  // Each invoice's now, for Past due.
   const resolveNow = useNowResolver()
 
   const { data, isLoading, error, refetch } = useQuery({

@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -55,7 +54,6 @@ var notListRoutes = map[string]string{
 	"/v1/credit-notes/{id}/pdf":              "a PDF",
 	"/v1/dunning/policies/{id}":              "one resource",
 	"/v1/dunning/runs/{id}":                  "one resource",
-	"/v1/test-clocks/{id}":                   "one resource",
 	"/v1/webhook-endpoints/endpoints/{id}":   "one resource",
 	"/v1/recipes/{key}":                      "one resource",
 	"/v1/credit-notes/stats":                 "counts",
@@ -167,14 +165,8 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 	planA := call("POST", "/v1/plans", planBody("paging-a", meterA)).want(t, 201, "plan A").body
 	planB := id(call("POST", "/v1/plans", planBody("paging-b", meterA, meterB)).want(t, 201, "plan B"))
 	priceA := flowStr(flowList(planA, "prices")[0], "id")
-	frozen := time.Now().UTC().Format(time.RFC3339)
-	clk := id(call("POST", "/v1/test-clocks", map[string]any{"name": "paging 1", "frozen_time": frozen}).want(t, 201, "clock 1"))
-	call("POST", "/v1/test-clocks", map[string]any{"name": "paging 2", "frozen_time": frozen}).want(t, 201, "clock 2")
-	customer := func(ext, clockID string) string {
+	customer := func(ext string) string {
 		body := map[string]any{"external_id": ext, "display_name": ext, "email": ext + "@paging.test"}
-		if clockID != "" {
-			body["test_clock_id"] = clockID
-		}
 		return id(call("POST", "/v1/customers", body).want(t, 201, "customer "+ext))
 	}
 	subscribe := func(code, customerID string) string {
@@ -183,11 +175,9 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 			"items": []map[string]any{{"plan_id": flowStr(planA, "id")}}, "billing_time": "anniversary",
 		}).want(t, 201, "subscription "+code))
 	}
-	cusA, cusB := customer("paging-a", ""), customer("paging-b", "")
+	cusA, cusB := customer("paging-a"), customer("paging-b")
 	subA := subscribe("paging-sub-a", cusA)
 	subscribe("paging-sub-b", cusB)
-	subscribe("paging-sub-c1", customer("paging-c1", clk))
-	subscribe("paging-sub-c2", customer("paging-c2", clk))
 	for i := range 2 {
 		call("POST", "/v1/usage-events", map[string]any{
 			"external_customer_id": "paging-a", "event_name": "paging_a", "quantity": 1,
@@ -270,8 +260,6 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 		"/v1/recipes":                                     "/v1/recipes",
 		"/v1/recipes/instances":                           "/v1/recipes/instances",
 		"/v1/subscriptions":                               "/v1/subscriptions",
-		"/v1/test-clocks":                                 "/v1/test-clocks",
-		"/v1/test-clocks/{id}/customers":                  "/v1/test-clocks/" + clk + "/customers",
 		"/v1/usage-events":                                "/v1/usage-events",
 		"/v1/webhook-endpoints/endpoints":                 "/v1/webhook-endpoints/endpoints",
 		"/v1/webhook-endpoints/endpoints/stats":           "/v1/webhook-endpoints/endpoints/stats",
@@ -520,13 +508,12 @@ func TestPlans_ListPagesPastFiveHundred(t *testing.T) {
 	}
 }
 
-// TestLists_ReachRowsPastOldReadCaps covers the lists whose store read stopped
+// TestLists_ReachRowsPastOldReadCaps covers a list whose store read stopped
 // at a fixed row count while total counted only what was read: a customer's
-// payment methods (100) and a test clock's customers and subscriptions
-// (1000). Paging at 100 must find every row, total must count them all, and
-// the rows past the old cap must be on the last page. The rows are inserted
-// in one statement, so they share created_at and only the id keeps the order
-// stable from page to page.
+// payment methods (100). Paging at 100 must find every row, total must count
+// them all, and the rows past the old cap must be on the last page. The rows
+// are inserted in one statement, so they share created_at and only the id
+// keeps the order stable from page to page.
 func TestLists_ReachRowsPastOldReadCaps(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
@@ -541,54 +528,33 @@ func TestLists_ReachRowsPastOldReadCaps(t *testing.T) {
 	owner := flowStr(call("POST", "/v1/customers", map[string]any{
 		"external_id": "cards-owner", "display_name": "Cards Owner",
 	}).want(t, 201, "customer").body, "id")
-	clk := flowStr(call("POST", "/v1/test-clocks", map[string]any{
-		"name": "past the caps", "frozen_time": time.Now().UTC().Format(time.RFC3339),
-	}).want(t, 201, "clock").body, "id")
 
-	const cards, onClock = 105, 1005
+	const cards = 105
 	seedBypass(t, db, `INSERT INTO payment_methods (id, tenant_id, customer_id, stripe_payment_method_id, card_brand, card_last4)
 		SELECT 'hc_pm_cap' || g, $1, $2, 'pm_cap' || g, 'visa', '4242' FROM generate_series(1, $3) g`,
 		tenantID, owner, cards)
-	seedBypass(t, db, `INSERT INTO customers (id, tenant_id, external_id, display_name, status, test_clock_id)
-		SELECT 'hc_cus_cap' || g, $1, 'clock-cap-' || g, 'Clock cap ' || g, 'active', $2 FROM generate_series(1, $3) g`,
-		tenantID, clk, onClock)
-	seedBypass(t, db, `INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status, billing_time,
-			current_billing_period_start, current_billing_period_end, next_billing_at, test_clock_id)
-		SELECT 'hc_sub_cap' || g, $1, 'clock-cap-' || g, 'Clock cap ' || g, 'hc_cus_cap' || g, 'active', 'calendar',
-			now(), now() + interval '1 month', now() + interval '1 month', $2
-		FROM generate_series(1, $3) g`,
-		tenantID, clk, onClock)
 
-	for _, c := range []struct {
-		path string
-		want int
-	}{
-		{"/v1/customers/" + owner + "/payment-methods", cards},
-		{"/v1/test-clocks/" + clk + "/customers", onClock},
-	} {
-		t.Run(c.path, func(t *testing.T) {
-			seen := map[string]bool{}
-			for offset := 0; offset < c.want+100; offset += 100 {
-				got := call("GET", fmt.Sprintf("%s?limit=100&offset=%d", c.path, offset), nil).want(t, 200, "list")
-				if total := int(flowInt(got.body, "total")); total != c.want {
-					t.Fatalf("offset %d: total = %d, want %d", offset, total, c.want)
-				}
-				for _, row := range flowList(got.body, "data") {
-					id := flowStr(row, "id")
-					if seen[id] {
-						t.Errorf("offset %d: row %s was already on an earlier page", offset, id)
-					}
-					seen[id] = true
-				}
+	path := "/v1/customers/" + owner + "/payment-methods"
+	seen := map[string]bool{}
+	for offset := 0; offset < cards+100; offset += 100 {
+		got := call("GET", fmt.Sprintf("%s?limit=100&offset=%d", path, offset), nil).want(t, 200, "list")
+		if total := int(flowInt(got.body, "total")); total != cards {
+			t.Fatalf("offset %d: total = %d, want %d", offset, total, cards)
+		}
+		for _, row := range flowList(got.body, "data") {
+			id := flowStr(row, "id")
+			if seen[id] {
+				t.Errorf("offset %d: row %s was already on an earlier page", offset, id)
 			}
-			if len(seen) != c.want {
-				t.Errorf("paging found %d rows, want %d", len(seen), c.want)
-			}
-			last := call("GET", fmt.Sprintf("%s?limit=100&offset=%d", c.path, c.want-1), nil).want(t, 200, "last row")
-			if rows := flowList(last.body, "data"); len(rows) != 1 {
-				t.Errorf("offset %d holds %d rows, want the last one", c.want-1, len(rows))
-			}
-		})
+			seen[id] = true
+		}
+	}
+	if len(seen) != cards {
+		t.Errorf("paging found %d rows, want %d", len(seen), cards)
+	}
+	last := call("GET", fmt.Sprintf("%s?limit=100&offset=%d", path, cards-1), nil).want(t, 200, "last row")
+	if rows := flowList(last.body, "data"); len(rows) != 1 {
+		t.Errorf("offset %d holds %d rows, want the last one", cards-1, len(rows))
 	}
 }
 

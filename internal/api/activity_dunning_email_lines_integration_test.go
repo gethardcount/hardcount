@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -21,17 +20,15 @@ import (
 // test for the Dunning page's recovery timeline and the customer's Sent
 // emails card (ADR-128, PR 5 of its plan). Both APIs carry a `line` on every
 // row, in the same words the invoice's Activity card uses for the same
-// event, and a test-clock line is the real-clock line plus one Recorded
-// time.
+// event, with no Recorded time.
 //
-// The story, for a real-clock customer and for one pinned to a test clock:
-// a one-off invoice is finalized with no card on file, so payment recovery
-// starts; the operator emails the invoice and records an offline payment,
-// which ends recovery.
+// The story: a one-off invoice is finalized with no card on file, so payment
+// recovery starts; the operator emails the invoice and records an offline
+// payment, which ends recovery.
 func TestActivityLines_DunningRunAndSentEmails(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	// A configured server queues the invoice email; no dispatcher runs in
-	// the test, so both arms read "queued".
+	// the test, so the lines read "queued".
 	t.Setenv("SMTP_HOST", "smtp.activity-lines.invalid")
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
 	defer ts.Close()
@@ -50,153 +47,105 @@ func TestActivityLines_DunningRunAndSentEmails(t *testing.T) {
 		"name": "Activity lines policy", "enabled": true, "retry_days": []int{3, 3},
 	}}).want(t, 201, "create dunning policy")
 
-	const frozen = "2027-02-01T04:30:00Z"
-	clockID := flowStr(call("POST", "/v1/test-clocks", flowReq{body: map[string]any{
-		"name": "activity lines", "frozen_time": frozen,
-	}}).want(t, 201, "create test clock").body, "id")
+	customerID := flowStr(call("POST", "/v1/customers", flowReq{body: map[string]any{
+		"external_id": "activity-lines-real", "display_name": "Activity lines real", "email": "billing@activity-lines.test",
+	}}).want(t, 201, "create customer").body, "id")
+	invoiceID := flowStr(call("POST", "/v1/invoices", flowReq{body: map[string]any{
+		"customer_id": customerID,
+		"line_items":  []map[string]any{{"description": "Activity lines real", "quantity": 1, "unit_amount_cents": 4900}},
+	}}).want(t, 201, "create invoice").body, "id")
+	call("POST", "/v1/invoices/"+invoiceID+"/finalize", flowReq{}).want(t, 200, "finalize")
+	call("POST", "/v1/invoices/"+invoiceID+"/send", flowReq{body: map[string]any{"email": "billing@activity-lines.test"}}).want(t, 200, "email invoice")
+	call("POST", "/v1/invoices/"+invoiceID+"/record-payment", flowReq{body: map[string]any{"note": "Wire 1042"}}).want(t, 200, "record payment")
 
-	type told struct {
-		invoiceID string
-		invoice   []map[string]any // the invoice's payment timeline rows
-		dunning   []map[string]any // the run's events on the Dunning page
-		emails    []map[string]any // the customer's Sent emails rows
+	invoiceRows := flowList(call("GET", "/v1/invoices/"+invoiceID+"/payment-timeline", flowReq{}).want(t, 200, "invoice timeline").body, "events")
+	runs := flowList(call("GET", "/v1/dunning/runs?invoice_id="+invoiceID, flowReq{}).want(t, 200, "list runs").body, "data")
+	if len(runs) != 1 {
+		t.Fatalf("invoice has %d payment-recovery runs, want 1", len(runs))
 	}
-	story := func(name, clockID string) told {
-		t.Helper()
-		cust := map[string]any{
-			"external_id": "activity-lines-" + name, "display_name": "Activity lines " + name, "email": "billing@activity-lines.test",
-		}
-		if clockID != "" {
-			cust["test_clock_id"] = clockID
-		}
-		customerID := flowStr(call("POST", "/v1/customers", flowReq{body: cust}).want(t, 201, name+": create customer").body, "id")
-		invoiceID := flowStr(call("POST", "/v1/invoices", flowReq{body: map[string]any{
-			"customer_id": customerID,
-			"line_items":  []map[string]any{{"description": "Activity lines " + name, "quantity": 1, "unit_amount_cents": 4900}},
-		}}).want(t, 201, name+": create invoice").body, "id")
-		call("POST", "/v1/invoices/"+invoiceID+"/finalize", flowReq{}).want(t, 200, name+": finalize")
-		call("POST", "/v1/invoices/"+invoiceID+"/send", flowReq{body: map[string]any{"email": "billing@activity-lines.test"}}).want(t, 200, name+": email invoice")
-		call("POST", "/v1/invoices/"+invoiceID+"/record-payment", flowReq{body: map[string]any{"note": "Wire 1042"}}).want(t, 200, name+": record payment")
-
-		timeline := call("GET", "/v1/invoices/"+invoiceID+"/payment-timeline", flowReq{}).want(t, 200, name+": invoice timeline").body
-		runs := flowList(call("GET", "/v1/dunning/runs?invoice_id="+invoiceID, flowReq{}).want(t, 200, name+": list runs").body, "data")
-		if len(runs) != 1 {
-			t.Fatalf("%s: invoice has %d payment-recovery runs, want 1", name, len(runs))
-		}
-		detail := call("GET", "/v1/dunning/runs/"+flowStr(runs[0], "id"), flowReq{}).want(t, 200, name+": get run").body
-		if d, _ := detail["degraded"].([]any); len(d) != 0 {
-			t.Errorf("%s: Dunning page degraded lanes %v", name, d)
-		}
-		sent := call("GET", "/v1/customers/"+customerID+"/sent-emails", flowReq{}).want(t, 200, name+": sent emails").body
-		return told{
-			invoiceID: invoiceID,
-			invoice:   flowList(timeline, "events"),
-			dunning:   flowList(detail, "events"),
-			emails:    flowList(sent, "data"),
-		}
+	detail := call("GET", "/v1/dunning/runs/"+flowStr(runs[0], "id"), flowReq{}).want(t, 200, "get run").body
+	if d, _ := detail["degraded"].([]any); len(d) != 0 {
+		t.Errorf("Dunning page degraded lanes %v", d)
 	}
-
-	real := story("real", "")
-	test := story("test", clockID)
+	dunningRows := flowList(detail, "events")
+	emailRows := flowList(call("GET", "/v1/customers/"+customerID+"/sent-emails", flowReq{}).want(t, 200, "sent emails").body, "data")
 
 	// The Dunning page reads as the standard words it, in the order it
 	// happened. Nothing is folded there: the run's end shows.
-	realDunning := linesOf(t, real.dunning)
-	if got, want := summaries(normalizeLines(realDunning)), []string{
+	dunningLines := linesOf(t, dunningRows)
+	if got, want := summaries(normalizeLines(dunningLines)), []string{
 		"Payment recovery started | Automatic",
 		"Payment recovery ended | Invoice paid · Automatic",
 	}; !reflect.DeepEqual(got, want) {
 		t.Errorf("Dunning page lines\n got: %q\nwant: %q", got, want)
 	}
-	if len(realDunning) == 2 {
-		if p := realDunning[0]["problem"]; p != "No payment method on file. Reminders ask the customer to pay the invoice." {
+	if len(dunningLines) == 2 {
+		if p := dunningLines[0]["problem"]; p != "No payment method on file. Reminders ask the customer to pay the invoice." {
 			t.Errorf("payment recovery started: problem %q", p)
 		}
-		if realDunning[0]["tone"] != "warning" || realDunning[1]["tone"] != "success" {
-			t.Errorf("tones: started %v, ended %v; want warning, success", realDunning[0]["tone"], realDunning[1]["tone"])
+		if dunningLines[0]["tone"] != "warning" || dunningLines[1]["tone"] != "success" {
+			t.Errorf("tones: started %v, ended %v; want warning, success", dunningLines[0]["tone"], dunningLines[1]["tone"])
 		}
 	}
 
 	// The Sent emails card names the invoice, linked, and who it went to.
-	realEmails := linesOf(t, real.emails)
+	emailLines := linesOf(t, emailRows)
 	// No Stripe is connected, so finalizing emailed the customer the invoice
 	// itself (ADR-060 amendment 2026-10-30); the second is the operator's.
-	if got, want := summaries(normalizeLines(realEmails)), []string{
+	if got, want := summaries(normalizeLines(emailLines)), []string{
 		"Invoice email queued | <number> · To billing@activity-lines.test",
 		"Invoice email queued | <number> · To billing@activity-lines.test",
 	}; !reflect.DeepEqual(got, want) {
 		t.Errorf("Sent emails lines\n got: %q\nwant: %q", got, want)
 	}
-	for _, l := range realEmails {
-		if link := firstLink(l); link == nil || link["kind"] != "invoice" || link["id"] != real.invoiceID {
-			t.Errorf("Sent emails line %v: link %v, want the invoice %s", l["title"], link, real.invoiceID)
+	for _, l := range emailLines {
+		if link := firstLink(l); link == nil || link["kind"] != "invoice" || link["id"] != invoiceID {
+			t.Errorf("Sent emails line %v: link %v, want the invoice %s", l["title"], link, invoiceID)
+		}
+	}
+	for name, lines := range map[string][]map[string]any{"Dunning page": dunningLines, "Sent emails": emailLines} {
+		for i, l := range lines {
+			if l["recorded_at"] != nil {
+				t.Errorf("%s: row %d (%v) carries recorded_at %v", name, i, l["title"], l["recorded_at"])
+			}
 		}
 	}
 
 	// One event, one wording: a row on the Dunning page or the Sent emails
 	// card says what the invoice's Activity card says for the same event.
-	for _, arm := range []told{real, test} {
-		onInvoice := map[string]map[string]any{}
-		for _, e := range arm.invoice {
-			if l, ok := e["line"].(map[string]any); ok {
-				onInvoice[fmt.Sprint(e["id"])] = l
-			}
-		}
-		compared := 0
-		for _, e := range arm.dunning {
-			il, ok := onInvoice["dunning:"+fmt.Sprint(e["id"])]
-			if !ok {
-				continue // folded on the invoice page
-			}
-			compared++
-			dl, _ := e["line"].(map[string]any)
-			if got, want := normalizeLines([]map[string]any{dl}), normalizeLines([]map[string]any{il}); !reflect.DeepEqual(got, want) {
-				t.Errorf("event %v: the Dunning page and the invoice page word it differently\nDunning: %s\ninvoice: %s", e["id"], mustJSON(got), mustJSON(want))
-			}
-		}
-		for _, e := range arm.emails {
-			il, ok := onInvoice["email:"+fmt.Sprint(e["id"])]
-			if !ok {
-				continue
-			}
-			compared++
-			el, _ := e["line"].(map[string]any)
-			for _, k := range []string{"kind", "title", "tone", "problem"} {
-				if fmt.Sprint(el[k]) != fmt.Sprint(il[k]) {
-					t.Errorf("email %v: %s is %v on Sent emails and %v on the invoice page", e["id"], k, el[k], il[k])
-				}
-			}
-		}
-		if compared < 2 {
-			t.Errorf("only %d rows could be matched with the invoice page; want the recovery start and the invoice email", compared)
+	onInvoice := map[string]map[string]any{}
+	for _, e := range invoiceRows {
+		if l, ok := e["line"].(map[string]any); ok {
+			onInvoice[fmt.Sprint(e["id"])] = l
 		}
 	}
-
-	// Same story on both clocks: equal lines, and the test-clock lines are
-	// dated on the clock's frozen calendar with a Recorded time. Same-instant
-	// events on the Dunning page keep the store's order until the page
-	// adopts the shared ordering, so the lines compare as sets.
-	for _, c := range []struct {
-		name       string
-		real, test []map[string]any
-	}{{"Dunning page", real.dunning, test.dunning}, {"Sent emails", real.emails, test.emails}} {
-		realLines, testLines := linesOf(t, c.real), linesOf(t, c.test)
-		for i, l := range testLines {
-			if l["recorded_at"] == nil {
-				t.Errorf("%s: test-clock row %d (%v) has no recorded_at", c.name, i, l["title"])
-			}
-			if at, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(l["occurred_at"])); at.UTC().Format(time.RFC3339) != frozen {
-				t.Errorf("%s: test-clock row %d (%v) occurred at %v, want the frozen %s", c.name, i, l["title"], l["occurred_at"], frozen)
+	compared := 0
+	for _, e := range dunningRows {
+		il, ok := onInvoice["dunning:"+fmt.Sprint(e["id"])]
+		if !ok {
+			continue // folded on the invoice page
+		}
+		compared++
+		dl, _ := e["line"].(map[string]any)
+		if got, want := normalizeLines([]map[string]any{dl}), normalizeLines([]map[string]any{il}); !reflect.DeepEqual(got, want) {
+			t.Errorf("event %v: the Dunning page and the invoice page word it differently\nDunning: %s\ninvoice: %s", e["id"], mustJSON(got), mustJSON(want))
+		}
+	}
+	for _, e := range emailRows {
+		il, ok := onInvoice["email:"+fmt.Sprint(e["id"])]
+		if !ok {
+			continue
+		}
+		compared++
+		el, _ := e["line"].(map[string]any)
+		for _, k := range []string{"kind", "title", "tone", "problem"} {
+			if fmt.Sprint(el[k]) != fmt.Sprint(il[k]) {
+				t.Errorf("email %v: %s is %v on Sent emails and %v on the invoice page", e["id"], k, el[k], il[k])
 			}
 		}
-		for i, l := range realLines {
-			if l["recorded_at"] != nil {
-				t.Errorf("%s: real-clock row %d (%v) carries recorded_at %v", c.name, i, l["title"], l["recorded_at"])
-			}
-		}
-		if rs, tst := sortedJSON(normalizeLines(realLines)), sortedJSON(normalizeLines(testLines)); !reflect.DeepEqual(rs, tst) {
-			t.Errorf("%s: the two clocks tell different stories\nreal: %q\ntest: %q", c.name, rs, tst)
-		}
+	}
+	if compared < 2 {
+		t.Errorf("only %d rows could be matched with the invoice page; want the recovery start and the invoice email", compared)
 	}
 }
 
@@ -300,15 +249,4 @@ func firstLink(l map[string]any) map[string]any {
 		}
 	}
 	return nil
-}
-
-// sortedJSON renders each normalized line as JSON and sorts them, to compare
-// two lists as sets.
-func sortedJSON(lines []map[string]any) []string {
-	out := make([]string, 0, len(lines))
-	for _, l := range lines {
-		out = append(out, mustJSON(l))
-	}
-	sort.Strings(out)
-	return out
 }
