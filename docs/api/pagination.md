@@ -81,7 +81,8 @@ with `param` naming the parameter:
 ## Lists that answer in one piece
 
 These routes answer a set of rows in one response. They have no `total`, and
-`limit`, `offset` and `after` change nothing:
+they take no `limit`, `offset` or `after`: a request that sends one is refused
+with `422`, `param` naming it:
 
 - `GET /v1/usage-events/held` lists the 200 external customers whose held
   usage arrived last. `total_customers` and `total_rows` count all of it.

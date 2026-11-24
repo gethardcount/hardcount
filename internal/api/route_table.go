@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/gethardcount/hardcount/internal/auth"
@@ -9,8 +10,8 @@ import (
 )
 
 // The route table has one entry per route the router serves: who may call it,
-// where its audit row comes from, and whether its answer shows a secret once
-// (docs/architecture.md#the-route-table).
+// where its audit row comes from, whether its answer shows a secret once, and
+// which query parameters it takes (docs/architecture.md#the-route-table).
 // TestRouteTable_MatchesLiveRoutes fails on a route with no entry, an entry
 // with no route, and a missing or stray audit.
 
@@ -21,8 +22,9 @@ type routeKey struct {
 }
 
 // routeDecl is one route's entry, built in steps. needs or outsideAuth says
-// who may call it, which makes the entry. Then withAudit adds its audit, and
-// withShowOnce marks its answer.
+// who may call it, which makes the entry. Then withAudit adds its audit,
+// withShowOnce marks its answer, and withPaging, withQuery or withAnyQuery
+// says which query parameters it takes.
 type routeDecl struct {
 	// access is who may call the route, which auth.RequirePermission checks;
 	// it is zero on a route outside authentication.
@@ -31,6 +33,10 @@ type routeDecl struct {
 	// audit is zero on a route that neither changes state nor exports.
 	audit    auditDecl
 	showOnce bool
+	// query is the query parameters the route takes; refuseUnknownQuery
+	// refuses a request with any other, unless anyQuery is set.
+	query    []string
+	anyQuery bool
 }
 
 // withAudit is d with its audit declaration.
@@ -48,6 +54,29 @@ func (d routeDecl) withAudit(a auditDecl) routeDecl {
 // without the mark.
 func (d routeDecl) withShowOnce() routeDecl {
 	d.showOnce = true
+	return d
+}
+
+// withQuery is d taking the query parameters names, beside any it takes
+// already. TestOpenAPISpec_QueryParametersMatchTheTable keeps them in step
+// with api/openapi.yaml.
+func (d routeDecl) withQuery(names ...string) routeDecl {
+	d.query = slices.Concat(d.query, names)
+	return d
+}
+
+// withPaging is d taking a list's paging parameters, which respond.ParsePage
+// reads: limit and offset, and after, which ParsePage refuses with its own
+// message so a caller still holding a cursor learns to page with offset.
+func (d routeDecl) withPaging() routeDecl {
+	return d.withQuery("limit", "offset", "after")
+}
+
+// withAnyQuery is d taking any query parameter. It is for a route whose URL
+// another party writes, so Hardcount does not choose its query string; the
+// entry's comment names that party.
+func (d routeDecl) withAnyQuery() routeDecl {
+	d.anyQuery = true
 	return d
 }
 
@@ -240,7 +269,7 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/auth/login"}:                  outsideAuth().withAudit(explicit("user.Service.Login (LogInTx)")),
 	{"POST", "/v1/auth/logout"}:                 outsideAuth().withAudit(explicit("user.Service.Logout (LogInTx)")),
 	{"POST", "/v1/auth/mode"}:                   outsideAuth().withAudit(explicit("user.Service.SetMode (LogInTx)")),
-	{"GET", "/v1/auth/password-reset/check"}:    outsideAuth(),
+	{"GET", "/v1/auth/password-reset/check"}:    outsideAuth().withQuery("token"),
 	{"POST", "/v1/auth/password-reset/confirm"}: outsideAuth().withAudit(explicit("user.Service.ConfirmReset (LogInTx)")),
 	{"POST", "/v1/auth/password-reset/request"}: outsideAuth().withAudit(explicit("user.Handler.requestPasswordReset (Log)")),
 	{"GET", "/v1/auth/invite/{token}"}:          outsideAuth(),
@@ -250,7 +279,7 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/members/invite"}:              needs(membersSession).withAudit(explicit("dashmembers.Service.Invite (LogInTx)")),
 	{"DELETE", "/v1/members/invitations/{id}"}:  needs(membersSession).withAudit(explicit("dashmembers.Service.Revoke (LogInTx)")),
 	{"DELETE", "/v1/members/{userID}"}:          needs(membersSession).withAudit(explicit("dashmembers.Service.RemoveMember (LogInTx)")),
-	{"GET", "/v1/api-keys"}:                     needs(apikeyWrite),
+	{"GET", "/v1/api-keys"}:                     needs(apikeyWrite).withPaging(),
 	{"POST", "/v1/api-keys"}:                    needs(apikeyWrite).withAudit(explicit("auth.Service.CreateKey (LogInTx)")).withShowOnce(),
 	{"DELETE", "/v1/api-keys/{id}"}:             needs(apikeyWrite).withAudit(explicit("auth.Service.RevokeKey (LogInTx)")),
 	{"POST", "/v1/api-keys/{id}/rotate"}:        needs(apikeyWrite).withAudit(explicit("auth.Service.RotateKey (LogInTx)")).withShowOnce(),
@@ -261,11 +290,14 @@ var routeTable = map[routeKey]routeDecl{
 	// outbox events and stripe_webhook_events record it. Close it with a row
 	// on the settle transaction when an auditor asks audit_log for settlement
 	// evidence.
-	{"POST", "/v1/webhooks/stripe/{endpoint_id}"}: outsideAuth().withAudit(exempt(reasonWebhookOwned, "Its handlers audit a card saved at checkout, a refund's status and a refund made in Stripe, each in its own transaction.")),
+	// Stripe posts to the URL the operator typed into Stripe, with any query
+	// string it holds.
+	{"POST", "/v1/webhooks/stripe/{endpoint_id}"}: outsideAuth().withAnyQuery().withAudit(exempt(reasonWebhookOwned, "Its handlers audit a card saved at checkout, a refund's status and a refund made in Stripe, each in its own transaction.")),
 	// Accepted loss: the effects of email reports are not audit_log rows; the
 	// outbox row's delivery state, the customer's email status and the outbox
-	// events record them.
-	{"POST", "/v1/webhooks/postmark"}: outsideAuth().withAudit(exempt(reasonWebhookOwned, "Postmark's delivery reports, behind Basic Auth; the tenant comes from the stored outbox row (ADR-098).")),
+	// events record them. Postmark posts to the URL the operator typed into
+	// Postmark, with any query string it holds.
+	{"POST", "/v1/webhooks/postmark"}: outsideAuth().withAnyQuery().withAudit(exempt(reasonWebhookOwned, "Postmark's delivery reports, behind Basic Auth; the tenant comes from the stored outbox row (ADR-098).")),
 
 	// --- public pages ---------------------------------------------------
 	{"GET", "/v1/public/invoices/{token}"}:                  outsideAuth(),
@@ -279,41 +311,41 @@ var routeTable = map[routeKey]routeDecl{
 	{"GET", "/v1/webhook_events/stream"}: needs(apikeyRead),
 	// The audit log's export needs what reading it does: the file is the
 	// same data.
-	{"GET", "/v1/exports/audit-log.csv"}:     needs(apikeyRead).withAudit(explicit("api.exportsHandler.exportAuditLog (auditExport, before the first byte)")),
-	{"GET", "/v1/exports/customers.csv"}:     needs(customerRead).withAudit(explicit("api.exportsHandler.exportCustomers (auditExport, before the first byte)")),
-	{"GET", "/v1/exports/invoices.csv"}:      needs(invoiceRead).withAudit(explicit("api.exportsHandler.exportInvoices (auditExport, before the first byte)")),
-	{"GET", "/v1/exports/subscriptions.csv"}: needs(subscriptionRead).withAudit(explicit("api.exportsHandler.exportSubscriptions (auditExport, before the first byte)")),
-	{"GET", "/v1/exports/usage-events.csv"}:  needs(usageRead).withAudit(explicit("api.exportsHandler.exportUsageEvents (auditExport, before the first byte)")),
-	{"GET", "/v1/analytics/overview"}:        needs(invoiceRead),
-	{"GET", "/v1/analytics/revenue-chart"}:   needs(invoiceRead),
-	{"GET", "/v1/analytics/usage"}:           needs(invoiceRead),
-	{"GET", "/v1/audit-log"}:                 needs(apikeyRead),
+	{"GET", "/v1/exports/audit-log.csv"}:     needs(apikeyRead).withQuery("action", "actor_id", "date_from", "date_to", "resource_id", "resource_type").withAudit(explicit("api.exportsHandler.exportAuditLog (auditExport, before the first byte)")),
+	{"GET", "/v1/exports/customers.csv"}:     needs(customerRead).withQuery("from", "to").withAudit(explicit("api.exportsHandler.exportCustomers (auditExport, before the first byte)")),
+	{"GET", "/v1/exports/invoices.csv"}:      needs(invoiceRead).withQuery("from", "to").withAudit(explicit("api.exportsHandler.exportInvoices (auditExport, before the first byte)")),
+	{"GET", "/v1/exports/subscriptions.csv"}: needs(subscriptionRead).withQuery("from", "to").withAudit(explicit("api.exportsHandler.exportSubscriptions (auditExport, before the first byte)")),
+	{"GET", "/v1/exports/usage-events.csv"}:  needs(usageRead).withQuery("customer_id", "dimensions", "from", "meter_id", "to").withAudit(explicit("api.exportsHandler.exportUsageEvents (auditExport, before the first byte)")),
+	{"GET", "/v1/analytics/overview"}:        needs(invoiceRead).withQuery("period"),
+	{"GET", "/v1/analytics/revenue-chart"}:   needs(invoiceRead).withQuery("period"),
+	{"GET", "/v1/analytics/usage"}:           needs(invoiceRead).withQuery("period"),
+	{"GET", "/v1/audit-log"}:                 needs(apikeyRead).withPaging().withQuery("action", "actor_id", "date_from", "date_to", "order", "resource_id", "resource_type"),
 	{"GET", "/v1/audit-log/filters"}:         needs(apikeyRead),
 
 	// --- pricing, settings and tooling -----------------------------------
 	// Meters, plans and prices.
-	{"GET", "/v1/meters"}:                          needs(pricingRead),
+	{"GET", "/v1/meters"}:                          needs(pricingRead).withPaging(),
 	{"POST", "/v1/meters"}:                         needs(pricingWrite).withAudit(explicit("pricing.Handler.createMeter (Log)")),
 	{"GET", "/v1/meters/{id}"}:                     needs(pricingRead),
 	{"PATCH", "/v1/meters/{id}"}:                   needs(pricingWrite).withAudit(explicit("pricing.Service.UpdateMeter (LogInTx)")),
-	{"GET", "/v1/plans"}:                           needs(pricingRead),
+	{"GET", "/v1/plans"}:                           needs(pricingRead).withPaging(),
 	{"POST", "/v1/plans"}:                          needs(pricingWrite).withAudit(explicit("pricing.Handler.createPlan (Log)")),
 	{"GET", "/v1/plans/{id}"}:                      needs(pricingRead),
 	{"PATCH", "/v1/plans/{id}"}:                    needs(pricingWrite).withAudit(explicit("pricing.Handler.updatePlan (Log)")),
-	{"GET", "/v1/plans/{id}/prices"}:               needs(pricingRead),
+	{"GET", "/v1/plans/{id}/prices"}:               needs(pricingRead).withPaging(),
 	{"POST", "/v1/plans/{id}/prices"}:              needs(pricingWrite).withAudit(explicit("pricing.Service.AddPrice (LogInTx)")),
 	{"PATCH", "/v1/plans/{id}/prices/{price_id}"}:  needs(pricingWrite).withAudit(explicit("pricing.Service.EditPrice (LogInTx)")),
 	{"DELETE", "/v1/plans/{id}/prices/{price_id}"}: needs(pricingWrite).withAudit(explicit("pricing.Service.RemovePrice (LogInTx)")),
 	// Price overrides and provider costs.
-	{"GET", "/v1/price-overrides"}:         needs(pricingWrite),
+	{"GET", "/v1/price-overrides"}:         needs(pricingWrite).withPaging().withQuery("customer_id", "price_id"),
 	{"POST", "/v1/price-overrides"}:        needs(pricingWrite).withAudit(explicit("pricing.Handler.createOverride (Log)")),
 	{"DELETE", "/v1/price-overrides/{id}"}: needs(pricingWrite).withAudit(explicit("pricing.Handler.deleteOverride (Log)")),
-	{"GET", "/v1/provider-costs"}:          needs(usageRead),
+	{"GET", "/v1/provider-costs"}:          needs(usageRead).withPaging(),
 	{"PUT", "/v1/provider-costs"}:          needs(usageWrite).withAudit(explicit("usage.ProviderCostHandler.upsert (LogInTx)")),
 	{"DELETE", "/v1/provider-costs/{id}"}:  needs(usageWrite).withAudit(explicit("usage.ProviderCostHandler.delete (LogInTx)")),
 	// Recipes.
-	{"GET", "/v1/recipes"}:                    needs(pricingWrite),
-	{"GET", "/v1/recipes/instances"}:          needs(pricingWrite),
+	{"GET", "/v1/recipes"}:                    needs(pricingWrite).withPaging(),
+	{"GET", "/v1/recipes/instances"}:          needs(pricingWrite).withPaging(),
 	{"GET", "/v1/recipes/{key}"}:              needs(pricingWrite),
 	{"POST", "/v1/recipes/{key}/instantiate"}: needs(pricingWrite).withAudit(explicit("recipe.Service.Instantiate (LogInTx)")),
 	{"POST", "/v1/recipes/{key}/preview"}:     needs(pricingWrite).withAudit(exempt(reasonNonMutatingPreview, "Renders what instantiate would create and writes nothing (recipe.Handler calls audit.MarkSkip).")),
@@ -327,7 +359,7 @@ var routeTable = map[routeKey]routeDecl{
 	{"DELETE", "/v1/settings/stripe/{mode}"}:        needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.delete (Log)")),
 	{"PATCH", "/v1/settings/stripe/{mode}/webhook"}: needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.setWebhook (Log)")),
 	// Dunning policies.
-	{"GET", "/v1/dunning/policies"}:                   needs(dunningRead),
+	{"GET", "/v1/dunning/policies"}:                   needs(dunningRead).withPaging(),
 	{"POST", "/v1/dunning/policies"}:                  needs(dunningWrite).withAudit(explicit("dunning.Handler.createPolicy (Log)")),
 	{"GET", "/v1/dunning/policies/{id}"}:              needs(dunningRead),
 	{"PATCH", "/v1/dunning/policies/{id}"}:            needs(dunningWrite).withAudit(explicit("dunning.Handler.updatePolicy (Log)")),
@@ -335,16 +367,16 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/dunning/policies/{id}/set-default"}: needs(dunningWrite).withAudit(explicit("dunning.Handler.setDefaultPolicy (Log)")),
 	{"GET", "/v1/dunning/stats"}:                      needs(dunningRead),
 	// Outbound webhooks.
-	{"GET", "/v1/webhook-endpoints/endpoints"}:                                      needs(apikeyWrite),
+	{"GET", "/v1/webhook-endpoints/endpoints"}:                                      needs(apikeyWrite).withPaging(),
 	{"POST", "/v1/webhook-endpoints/endpoints"}:                                     needs(apikeyWrite).withAudit(explicit("webhook.Handler.createEndpoint (Log)")).withShowOnce(),
-	{"GET", "/v1/webhook-endpoints/endpoints/stats"}:                                needs(apikeyWrite),
+	{"GET", "/v1/webhook-endpoints/endpoints/stats"}:                                needs(apikeyWrite).withPaging(),
 	{"GET", "/v1/webhook-endpoints/endpoints/{id}"}:                                 needs(apikeyWrite),
 	{"PATCH", "/v1/webhook-endpoints/endpoints/{id}"}:                               needs(apikeyWrite).withAudit(explicit("webhook.Handler.updateEndpoint (Log)")),
 	{"DELETE", "/v1/webhook-endpoints/endpoints/{id}"}:                              needs(apikeyWrite).withAudit(explicit("webhook.Handler.deleteEndpoint (Log)")),
-	{"GET", "/v1/webhook-endpoints/endpoints/{id}/deliveries"}:                      needs(apikeyWrite),
+	{"GET", "/v1/webhook-endpoints/endpoints/{id}/deliveries"}:                      needs(apikeyWrite).withPaging(),
 	{"POST", "/v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay"}: needs(apikeyWrite).withAudit(explicit("webhook.Handler.replayDelivery (Log)")),
 	{"POST", "/v1/webhook-endpoints/endpoints/{id}/rotate-secret"}:                  needs(apikeyWrite).withAudit(explicit("webhook.Handler.rotateSecret (Log)")).withShowOnce(),
-	{"GET", "/v1/webhook-endpoints/events"}:                                         needs(apikeyWrite),
+	{"GET", "/v1/webhook-endpoints/events"}:                                         needs(apikeyWrite).withPaging(),
 	{"GET", "/v1/webhook_events/{id}/deliveries"}:                                   needs(apikeyRead),
 	// A replay needs only apikey:read: it sends again an event already
 	// emitted.
@@ -353,7 +385,7 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/billing/run"}: needs(invoiceWrite).withAudit(explicit("billing.Handler.triggerCycle (Log)")),
 
 	// --- customers --------------------------------------------------------
-	{"GET", "/v1/customers"}:                      needs(customerRead),
+	{"GET", "/v1/customers"}:                      needs(customerRead).withPaging().withQuery("dir", "external_id", "ids", "search", "sort", "status"),
 	{"POST", "/v1/customers"}:                     needs(customerWrite).withAudit(explicit("customer.Service.Create (LogInTx)")),
 	{"GET", "/v1/customers/{id}"}:                 needs(customerRead),
 	{"PATCH", "/v1/customers/{id}"}:               needs(customerWrite).withAudit(explicit("customer.Handler.update (Log)")),
@@ -361,19 +393,19 @@ var routeTable = map[routeKey]routeDecl{
 	{"PUT", "/v1/customers/{id}/billing-profile"}: needs(customerWrite).withAudit(explicit("customer.Handler.upsertBillingProfile (Log)")),
 	// A customer's usage and margin need usage:read, not the customer
 	// permissions.
-	{"GET", "/v1/customers/{id}/margin"}:                                     needs(usageRead),
+	{"GET", "/v1/customers/{id}/margin"}:                                     needs(usageRead).withQuery("from", "to"),
 	{"POST", "/v1/customers/{id}/rotate-cost-dashboard-token"}:               needs(customerWrite).withAudit(explicit("customer.Handler.rotateCostDashboardToken (Log)")).withShowOnce(),
-	{"GET", "/v1/customers/{id}/sent-emails"}:                                needs(customerRead),
-	{"GET", "/v1/customers/{id}/usage"}:                                      needs(usageRead),
+	{"GET", "/v1/customers/{id}/sent-emails"}:                                needs(customerRead).withPaging(),
+	{"GET", "/v1/customers/{id}/usage"}:                                      needs(usageRead).withQuery("from", "to"),
 	{"GET", "/v1/customers/{customer_id}/overview"}:                          needs(customerRead),
-	{"GET", "/v1/customers/{customer_id}/payment-methods"}:                   needs(customerRead),
+	{"GET", "/v1/customers/{customer_id}/payment-methods"}:                   needs(customerRead).withPaging(),
 	{"POST", "/v1/customers/{customer_id}/payment-methods/send-setup-email"}: needs(customerWrite).withAudit(explicit("paymentmethods.Handler.operatorSendSetupEmail (Log)")),
 	{"POST", "/v1/customers/{customer_id}/payment-methods/setup-session"}:    needs(customerWrite).withAudit(explicit("paymentmethods.Service.CreateSetupSession (Log)")).withShowOnce(),
 	{"DELETE", "/v1/customers/{customer_id}/payment-methods/{pmID}"}:         needs(customerWrite).withAudit(explicit("paymentmethods.Service.Detach (Log)")),
 	{"POST", "/v1/customers/{customer_id}/payment-methods/{pmID}/default"}:   needs(customerWrite).withAudit(explicit("paymentmethods.Service.SetDefault (Log)")),
 
 	// --- subscriptions ----------------------------------------------------
-	{"GET", "/v1/subscriptions"}:                                       needs(subscriptionRead),
+	{"GET", "/v1/subscriptions"}:                                       needs(subscriptionRead).withPaging().withQuery("billing", "collection", "customer_id", "dir", "plan_id", "search", "sort", "status"),
 	{"POST", "/v1/subscriptions"}:                                      needs(subscriptionWrite).withAudit(explicit("subscription.Handler.create (Log)")),
 	{"GET", "/v1/subscriptions/{id}"}:                                  needs(subscriptionRead),
 	{"PUT", "/v1/subscriptions/{id}/billing-thresholds"}:               needs(subscriptionWrite).withAudit(explicit("subscription.Handler.setBillingThresholds (Log)")),
@@ -409,17 +441,17 @@ var routeTable = map[routeKey]routeDecl{
 	// never bills.
 	{"POST", "/v1/usage-events/held/release"}: needs(usageWrite).withAudit(explicit("usage.Service.Release (LogInTx)")),
 	{"POST", "/v1/usage-events/held/discard"}: needs(usageWrite).withAudit(explicit("usage.Service.Discard (LogInTx)")),
-	{"GET", "/v1/usage-events"}:               needs(usageRead),
-	{"GET", "/v1/usage-events/aggregate"}:     needs(usageRead),
+	{"GET", "/v1/usage-events"}:               needs(usageRead).withPaging().withQuery("customer_id", "dimensions", "from", "meter_id", "to"),
+	{"GET", "/v1/usage-events/aggregate"}:     needs(usageRead).withQuery("customer_id", "dimensions", "from", "meter_id", "to", "tz"),
 	{"GET", "/v1/usage-events/held"}:          needs(usageRead),
 
 	// --- invoices -----------------------------------------------------------
-	{"GET", "/v1/invoices"}:                                                 needs(invoiceRead),
+	{"GET", "/v1/invoices"}:                                                 needs(invoiceRead).withPaging().withQuery("customer_id", "dir", "from", "ids", "overdue", "payment_status", "search", "sort", "status", "subscription_id", "to"),
 	{"POST", "/v1/invoices"}:                                                needs(invoiceWrite).withAudit(explicit("invoice.Service.Create (LogInTx)")),
 	{"POST", "/v1/invoices/create_preview"}:                                 needs(invoiceRead).withAudit(exempt(reasonNonMutatingPreview, "Computes an estimate and writes nothing (billing.CreatePreviewHandler calls audit.MarkSkip).")),
 	{"GET", "/v1/invoices/{id}"}:                                            needs(invoiceRead),
 	{"POST", "/v1/invoices/{id}/collect"}:                                   needs(invoiceWrite).withAudit(explicit("invoice.Handler.collectPayment (Log)")),
-	{"GET", "/v1/invoices/{id}/disputes"}:                                   needs(invoiceRead),
+	{"GET", "/v1/invoices/{id}/disputes"}:                                   needs(invoiceRead).withPaging(),
 	{"POST", "/v1/invoices/{id}/finalize"}:                                  needs(invoiceWrite).withAudit(explicit("invoice.Service.Finalize (LogInTx)")),
 	{"POST", "/v1/invoices/{id}/line-items"}:                                needs(invoiceWrite).withAudit(explicit("invoice.Service.AddLineItem (LogInTx)")),
 	{"POST", "/v1/invoices/{id}/mark-uncollectible"}:                        needs(invoiceWrite).withAudit(explicit("invoice.Service.MarkUncollectible (Log)")),
@@ -431,12 +463,12 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/invoices/{id}/retry-tax"}:                                 needs(invoiceWrite).withAudit(explicit("invoice.Handler.retryTax (Log)")),
 	{"POST", "/v1/invoices/{id}/rotate-public-token"}:                       needs(invoiceWrite).withAudit(explicit("invoice.Handler.rotatePublicToken (Log)")),
 	{"POST", "/v1/invoices/{id}/send"}:                                      needs(invoiceWrite).withAudit(explicit("invoice.Handler.sendEmail (Log)")),
-	{"GET", "/v1/invoices/{id}/stripe-refunds"}:                             needs(invoiceRead),
+	{"GET", "/v1/invoices/{id}/stripe-refunds"}:                             needs(invoiceRead).withPaging(),
 	{"POST", "/v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss"}: needs(invoiceWrite).withAudit(explicit("creditnote.Service.DismissStripeRefund (LogInTx)")),
 	{"POST", "/v1/invoices/{id}/void"}:                                      needs(invoiceWrite).withAudit(explicit("invoice.Service.Void (LogInTx)")),
 
 	// --- credit notes -------------------------------------------------------
-	{"GET", "/v1/credit-notes"}:                            needs(invoiceWrite),
+	{"GET", "/v1/credit-notes"}:                            needs(invoiceWrite).withPaging().withQuery("customer_id", "dir", "invoice_id", "refund_status", "sort", "status"),
 	{"GET", "/v1/credit-notes/stats"}:                      needs(invoiceWrite),
 	{"POST", "/v1/credit-notes"}:                           needs(invoiceWrite).withAudit(explicit("creditnote.Service.Create (LogInTx)")),
 	{"GET", "/v1/credit-notes/{id}"}:                       needs(invoiceWrite),
@@ -448,15 +480,15 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/credit-notes/{id}/void"}:                 needs(invoiceWrite).withAudit(explicit("creditnote.Service.Void (LogInTx)")),
 
 	// --- credits ------------------------------------------------------------
-	{"GET", "/v1/credits/balances"}:                   needs(customerWrite),
+	{"GET", "/v1/credits/balances"}:                   needs(customerWrite).withPaging().withQuery("balance"),
 	{"POST", "/v1/credits/grant"}:                     needs(customerWrite).withAudit(explicit("credit.Service.Grant (LogInTx)")),
 	{"POST", "/v1/credits/adjust"}:                    needs(customerWrite).withAudit(explicit("credit.Service.Adjust (LogInTx)")),
 	{"GET", "/v1/credits/balance/{customer_id}"}:      needs(customerWrite),
 	{"GET", "/v1/credits/balance/{customer_id}/live"}: needs(customerWrite),
-	{"GET", "/v1/credits/grants/{customer_id}"}:       needs(customerWrite),
-	{"GET", "/v1/credits/ledger/{customer_id}"}:       needs(customerWrite),
+	{"GET", "/v1/credits/grants/{customer_id}"}:       needs(customerWrite).withQuery("include_exhausted"),
+	{"GET", "/v1/credits/ledger/{customer_id}"}:       needs(customerWrite).withPaging().withQuery("dir", "entry_type", "sort"),
 
 	// --- dunning runs -------------------------------------------------------
-	{"GET", "/v1/dunning/runs"}:      needs(dunningRead),
+	{"GET", "/v1/dunning/runs"}:      needs(dunningRead).withPaging().withQuery("invoice_id", "state"),
 	{"GET", "/v1/dunning/runs/{id}"}: needs(dunningRead),
 }

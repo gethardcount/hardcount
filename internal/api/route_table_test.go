@@ -102,10 +102,11 @@ routes and the GET routes under /v1/exports carry one; remove it.`)
 }
 
 // TestRouteTable_DeclarationsAreWhole: each entry says what its parts need,
-// and nothing else. A key is canonical. An explicit audit's note starts with
-// a function that exists; an exempt one has a reason from the closed list,
-// and only a state-changing route is exempt: there is no honest reason for
-// handing out a whole table with no record.
+// and nothing else. A key is canonical. A route that takes any query
+// parameter lists none. An explicit audit's note starts with a function that
+// exists; an exempt one has a reason from the closed list, and only a
+// state-changing route is exempt: there is no honest reason for handing out a
+// whole table with no record.
 func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 	validReasons := map[exemptReason]bool{
 		reasonNonMutatingPreview: true,
@@ -117,6 +118,9 @@ func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 		name := k.Method + " " + k.Pattern
 		if got := canonicalRoute(k.Pattern); got != k.Pattern {
 			t.Errorf("%s: key is not canonical (canonicalRoute gives %q); the root would never find it", name, got)
+		}
+		if entry.anyQuery && len(entry.query) > 0 {
+			t.Errorf("%s: takes any query parameter and also lists %v; withAnyQuery and withQuery do not go together", name, entry.query)
 		}
 		a := entry.audit
 		if a.Coverage == 0 {

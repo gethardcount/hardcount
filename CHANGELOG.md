@@ -29,6 +29,7 @@ original text.
 
 ### Changed
 
+- **API callers: a query parameter the route does not take is refused.** It answers `422` `validation_error`, `param` naming it, message `unknown query parameter "staus"`; it was ignored, so `GET /v1/invoices?staus=paid` listed every invoice. The Stripe and Postmark webhooks take any. The API reference now lists `after` on each list, which is refused as before ([Errors](docs/api/errors.md#query-parameters)).
 - **Home shows what a credit seller watches.** Its cards are Credit held, Credit sold, Paid and Usage billed, each with what it counts; the MRR, Customers and Failed payments cards are gone (failed payments stay under "Needs attention"). "Needs attention" first counts the credit balances that ran out and the low ones, each line opening the Credit page filtered to them. The chart is titled Paid, like its card.
 - **A top-up has no PDF until it is paid, and shows its history before.** The PDF routes answer `409` `invalid_state` for an unpaid or withdrawn top-up. `GET /v1/invoices/{id}/payment-timeline` and the customer's Sent emails now include an unpaid top-up's charges and emails, such as its link.
 - **A paid top-up's history shows the credit it added.** Its payment timeline has a `credit.added` row with the credit and its expiry, and lists `credit` in `degraded` when that read fails; its `invoice.finalized` row is titled "Invoice issued". The ledger entry its payment writes reads "Top-up — invoice HC-…", not "Prepaid commit — invoice HC-…".
