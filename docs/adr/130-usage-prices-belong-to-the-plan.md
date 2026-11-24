@@ -316,7 +316,8 @@ names it.
   `"next_period"`.
 - "Used" is conservative on purpose. A plan whose subscribers all canceled
   still waits a period per edit. A test-clock teardown deletes that
-  clock's subscriptions, so their plan can become never-used again.
+  clock's subscriptions, so their plan can become never-used again
+  (amended 2026-11-24, section 7).
 - A price added to a used plan takes part from the next period. Until
   then the plan's other prices bill its usage as before. A less specific
   price that matches, such as `{}`, bills it this period. With no matching
@@ -378,6 +379,18 @@ before any code, so the base-fee row above is ADR-034's lock, as before.
 
 ### 7. Test clocks: every price resolves in the subscription's own time (PR-4)
 
+**Amendment (2026-11-24, test clocks removed in v0.11.0):** price and
+override writes no longer read, lock or stamp test clocks, and nothing
+writes or reads `plan_price_version_clocks`. A version is in force from its
+`valid_from`, still `clock_timestamp()` read after the plan lock. An
+override is stamped with `clock_timestamp()` after its locks, and a removal
+ends it at the tombstone's `valid_from` (section 6). Step 5 of section 8 is
+gone: the order is plans, prices, meters, then override rows and the rest,
+with no lock added or moved. A plan whose only references were scheduled
+plan changes onto it is never-used again once they are cleared or replaced
+before they apply, so a never-used write still settles the plan's versions
+(section 5).
+
 - On a used plan, a version's `valid_from` is wall time read with
   `clock_timestamp()` after the plan lock, and at least 1 microsecond after
   the plan's latest `valid_from`. So versions on a plan take effect in the
@@ -434,7 +447,7 @@ price write and of a subscription create are the others (below).
 3. price rows, `FOR KEY SHARE` only; no path locks a price row
    exclusively;
 4. meter rows, ascending;
-5. test clocks, ascending, `FOR SHARE`;
+5. test clocks, ascending, `FOR SHARE` (removed 2026-11-24, section 7);
 6. the rest a money path writes: override rows, the tenant's number row
    (`tenant_settings`, which numbers invoices and credit notes) and
    invoice rows.

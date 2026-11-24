@@ -183,7 +183,7 @@ func TestLiteLLM_WedgeE2E(t *testing.T) {
 	}
 
 	// 3b. Verify the events landed with the canonical family + token roles.
-	prices, err := pricing.NewPostgresStore(db).PlanPricesAt(ctx, tenantID, plan.ID, periodStart, "")
+	prices, err := pricing.NewPostgresStore(db).PlanPricesAt(ctx, tenantID, plan.ID, periodStart)
 	if err != nil || len(prices) == 0 {
 		t.Fatalf("plan prices: %v (%d)", err, len(prices))
 	}

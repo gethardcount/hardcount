@@ -1916,8 +1916,8 @@ type usageThresholdReader interface {
 //     the period.
 //
 // Then, in one more transaction, it reads each plan's prices at the plan's
-// pin of the period, in the subscription's own time domain (ADR-130 §4).
-// Each set of prices records whether its pin had passed. From the meters the
+// pin of the period (ADR-130 §4). Each set of prices records whether its pin
+// had passed. From the meters the
 // plans price at their pins, it builds the period's usage windows, the same
 // ones the close uses (billing.PeriodPlan.UsageWindows).
 //
@@ -1962,7 +1962,7 @@ func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID 
 		}
 		for _, planID := range slices.Sorted(maps.Keys(sp.period.Pins)) {
 			sp.atPin[planID] = len(pins)
-			pins = append(pins, pricing.PlanPin{PlanID: planID, At: sp.period.Pins[planID], ClockID: sub.TestClockID})
+			pins = append(pins, pricing.PlanPin{PlanID: planID, At: sp.period.Pins[planID]})
 		}
 		read = append(read, sp)
 	}

@@ -94,8 +94,8 @@ func (a *pricingStoreAdapter) GetMeter(ctx context.Context, tenantID, id string)
 	return a.store.GetMeter(ctx, tenantID, id)
 }
 
-func (a *pricingStoreAdapter) PlanPricesAt(ctx context.Context, tenantID, planID string, at time.Time, clockID string) ([]domain.PlanPrice, error) {
-	return a.store.PlanPricesAt(ctx, tenantID, planID, at, clockID)
+func (a *pricingStoreAdapter) PlanPricesAt(ctx context.Context, tenantID, planID string, at time.Time) ([]domain.PlanPrice, error) {
+	return a.store.PlanPricesAt(ctx, tenantID, planID, at)
 }
 
 func (a *pricingStoreAdapter) GetOverrideAt(ctx context.Context, tenantID, customerID, priceID string, at time.Time) (domain.CustomerPriceOverride, error) {

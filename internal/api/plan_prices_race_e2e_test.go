@@ -258,8 +258,8 @@ func TestE2E_PlanPrices_PriceWriteAgainstFirstSubscription(t *testing.T) {
 // TestE2E_PlanPrices_SwapAgainstPriceWrites (C10): an immediate swap from
 // plan A to plan B against a price write on each, many times. The swap takes
 // both plans FOR KEY SHARE in ascending id after its subscription row; a
-// price write takes the test clocks, then one plan FOR UPDATE. No cycle: no
-// request fails with a deadlock (40P01 answers 500).
+// price write takes one plan FOR UPDATE. No cycle: no request fails with a
+// deadlock (40P01 answers 500).
 func TestE2E_PlanPrices_SwapAgainstPriceWrites(t *testing.T) {
 	r := newPPRig(t, "c10")
 	calls := r.meter("calls", "sum")

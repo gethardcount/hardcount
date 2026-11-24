@@ -64,13 +64,12 @@ type Store interface {
 	OverrideStore
 }
 
-// PriceStore holds plan prices, their versions and the test-clock stamps of
-// those versions (ADR-130 §1, §7).
+// PriceStore holds plan prices and their versions (ADR-130 §1, §7).
 type PriceStore interface {
 	// WritePrice applies one change to a plan's prices: the chokepoint every
 	// price writer goes through. It locks the plan, decides "used", checks
-	// the change, writes the version (and clock stamps), ends the overrides
-	// of a removed price and runs emit, all in one transaction.
+	// the change, writes the version, ends the overrides of a removed price
+	// and runs emit, all in one transaction.
 	WritePrice(ctx context.Context, tenantID, planID string, ch PriceChange, emit func(tx *sql.Tx, r PriceWrite) error) (PriceWrite, error)
 	// WritePricesTx adds prices to a plan created on tx (POST /v1/plans, the
 	// recipe install). The plan is new, so it is never used: every price
@@ -79,10 +78,10 @@ type PriceStore interface {
 	// ListPrices returns the prices of the plans that take part from now on,
 	// each with its latest content, by plan id.
 	ListPrices(ctx context.Context, tenantID string, planIDs []string) (map[string][]domain.PlanPrice, error)
-	// PlanPricesAt returns the plan's prices that take part at `at` in the
-	// time domain of clockID ("" is wall time), each with its version in
-	// force then, in claim order (domain.ClaimOrder) per meter.
-	PlanPricesAt(ctx context.Context, tenantID, planID string, at time.Time, clockID string) ([]domain.PlanPrice, error)
+	// PlanPricesAt returns the plan's prices that take part at `at`, each
+	// with its version in force then, in claim order (domain.ClaimOrder) per
+	// meter.
+	PlanPricesAt(ctx context.Context, tenantID, planID string, at time.Time) ([]domain.PlanPrice, error)
 	// PlanMeterIDs returns every meter the plan has ever had a price for,
 	// removed prices included (ADR-130 §16 of the design: the overlap guard
 	// reads the conservative set).
@@ -92,8 +91,8 @@ type PriceStore interface {
 // OverrideStore holds customer price overrides (ADR-130 §6).
 type OverrideStore interface {
 	// WriteOverride closes the customer's active override of the price, if
-	// any, and inserts o, after the locks of ADR-130 §8, stamped in the
-	// customer's own time.
+	// any, and inserts o, after the locks of ADR-130 §8, stamped with the
+	// database's wall clock.
 	WriteOverride(ctx context.Context, tenantID string, o domain.CustomerPriceOverride) (domain.CustomerPriceOverride, error)
 	// DeactivateOverride ends the override, stamped like WriteOverride.
 	DeactivateOverride(ctx context.Context, tenantID, id string) (domain.CustomerPriceOverride, error)

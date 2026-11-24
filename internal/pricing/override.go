@@ -19,13 +19,13 @@ import (
 // Customer price overrides (ADR-130 §6). An override is keyed by (customer,
 // price) and replaces the price's shape for that customer over
 // [created_at, deactivated_at). A create, replace or delete stamps that
-// window after the write's locks, in the customer's own time: wall time read
-// with clock_timestamp(), or the customer's clock time plus 1 microsecond.
-// Not now(): that is the transaction's start, so a write that waited for a
-// lock across a period start would change the period already open. A plan
-// is priced at its pin of the period (ADR-130 §4 step 3), so an override
-// write applies from the customer's next period. A subscription whose first
-// join of the plan in a period comes after the write gets it in that period.
+// window after the write's locks, with the database's wall clock read by
+// clock_timestamp(). Not now(): that is the transaction's start, so a write
+// that waited for a lock across a period start would change the period
+// already open. A plan is priced at its pin of the period (ADR-130 §4 step
+// 3), so an override write applies from the customer's next period. A
+// subscription whose first join of the plan in a period comes after the
+// write gets it in that period.
 
 const overrideColumns = `o.id, o.tenant_id, o.customer_id, o.price_id, o.mode, o.unit_amount_cents, o.tiers,
 	o.package_size, o.package_amount_cents, COALESCE(o.reason, ''), o.active, o.created_at, o.deactivated_at, o.updated_at`
@@ -56,11 +56,11 @@ func scanOverride(row rowScanner) (domain.CustomerPriceOverride, error) {
 	return o, nil
 }
 
-// overrideLocksTx takes the locks an override write holds before it reads
-// the customer's clock (ADR-130 §8): the price's plan FOR KEY SHARE, then the
-// price FOR KEY SHARE. So it waits for a price write in progress on the
-// plan, a removal included, and reads the price as that write left it. It
-// returns whether the price takes part from now on.
+// overrideLocksTx takes the locks an override write holds before it stamps
+// (ADR-130 §8): the price's plan FOR KEY SHARE, then the price FOR KEY
+// SHARE. So it waits for a price write in progress on the plan, a removal
+// included, and reads the price as that write left it. It returns whether
+// the price takes part from now on.
 func overrideLocksTx(ctx context.Context, tx *sql.Tx, priceID string) (taking bool, err error) {
 	var planID string
 	if err := tx.QueryRowContext(ctx, `SELECT plan_id FROM plan_prices WHERE id = $1`, priceID).Scan(&planID); err != nil {
@@ -88,34 +88,10 @@ func overrideLocksTx(ctx context.Context, tx *sql.Tx, priceID string) (taking bo
 	return !removed, nil
 }
 
-// customerStampTx is the instant an override write for the customer stamps:
-// the customer's clock time plus 1 microsecond (while the clock advances, its
-// advance's target, so the advance keeps the price it began with), its clock
-// read FOR SHARE
-// (ADR-130 §8 step 5) so a clock advance or teardown is ordered with the
-// write; or wall time, clock_timestamp(), for a customer without a clock.
-func customerStampTx(ctx context.Context, tx *sql.Tx, customerID string) (time.Time, error) {
-	var clockID sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT test_clock_id FROM customers WHERE id = $1`, customerID).Scan(&clockID); err != nil {
-		if err == sql.ErrNoRows {
-			return time.Time{}, errs.NotFound("customer")
-		}
-		return time.Time{}, fmt.Errorf("read customer %s: %w", customerID, err)
-	}
+// overrideStampTx is the instant an override write stamps: the database's
+// wall clock, read after the write's locks (overrideLocksTx).
+func overrideStampTx(ctx context.Context, tx *sql.Tx) (time.Time, error) {
 	var at time.Time
-	if clockID.Valid && clockID.String != "" {
-		err := tx.QueryRowContext(ctx, `
-			SELECT COALESCE(advance_target, frozen_time) + interval '1 microsecond' FROM test_clocks WHERE id = $1 FOR SHARE`, clockID.String).Scan(&at)
-		if err == sql.ErrNoRows {
-			// A teardown of the clock committed while this waited for it,
-			// and deleted the customer with it.
-			return time.Time{}, errs.NotFound("customer")
-		}
-		if err != nil {
-			return time.Time{}, fmt.Errorf("lock test clock %s: %w", clockID.String, err)
-		}
-		return at, nil
-	}
 	if err := tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&at); err != nil {
 		return time.Time{}, err
 	}
@@ -123,7 +99,7 @@ func customerStampTx(ctx context.Context, tx *sql.Tx, customerID string) (time.T
 }
 
 // WriteOverride closes the customer's active override of the price, if any,
-// and inserts o, both at the customer's stamp.
+// and inserts o, both at one stamp read after its locks.
 func (s *PostgresStore) WriteOverride(ctx context.Context, tenantID string, o domain.CustomerPriceOverride) (domain.CustomerPriceOverride, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -142,7 +118,7 @@ func (s *PostgresStore) WriteOverride(ctx context.Context, tenantID string, o do
 		return domain.CustomerPriceOverride{}, errs.InvalidState(fmt.Sprintf(
 			"Price %s was removed from its plan, so it takes no part from now on. Override a price the plan has.", o.PriceID))
 	}
-	at, err := customerStampTx(ctx, tx, o.CustomerID)
+	at, err := overrideStampTx(ctx, tx)
 	if err != nil {
 		return domain.CustomerPriceOverride{}, err
 	}
@@ -184,8 +160,8 @@ func (s *PostgresStore) WriteOverride(ctx context.Context, tenantID string, o do
 	return created, nil
 }
 
-// DeactivateOverride ends a negotiated price at the customer's stamp: the
-// period in flight keeps it, the next period is at list price. The row is
+// DeactivateOverride ends a negotiated price at a stamp read after its
+// locks: the period in flight keeps it, the next period is at list price. The row is
 // kept. A second delete is a clean 404.
 func (s *PostgresStore) DeactivateOverride(ctx context.Context, tenantID, id string) (domain.CustomerPriceOverride, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -201,7 +177,7 @@ func (s *PostgresStore) DeactivateOverride(ctx context.Context, tenantID, id str
 	if _, err := overrideLocksTx(ctx, tx, cur.PriceID); err != nil {
 		return domain.CustomerPriceOverride{}, err
 	}
-	at, err := customerStampTx(ctx, tx, cur.CustomerID)
+	at, err := overrideStampTx(ctx, tx)
 	if err != nil {
 		return domain.CustomerPriceOverride{}, err
 	}

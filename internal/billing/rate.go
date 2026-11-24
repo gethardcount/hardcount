@@ -48,13 +48,9 @@ type PriceSource interface {
 // ratePin is the instant a plan's prices are read at for one billing period
 // of a subscription: the plan's pin in that period (periodPins). Every window
 // of the plan in the period, and every reader of the period, reads the plan
-// there (ADR-130 §4 step 3, amended 2026-10-26). testClockID names the
-// subscription's time domain ("" is wall time): a test-clock subscription
-// compares its simulated pin with each version's stamp for its clock
-// (ADR-130 §7).
+// there (ADR-130 §4 step 3, amended 2026-10-26).
 type ratePin struct {
-	at          time.Time
-	testClockID string
+	at time.Time
 }
 
 // periodPins is the pin of each plan of one billing period of a
@@ -162,12 +158,12 @@ func pinsOf(sub domain.Subscription, stretches []planStretch, periodStart time.T
 	for _, it := range sub.Items {
 		join(it.PlanID, itemJoined(sub, it))
 	}
-	out := periodPins{start: ratePin{at: periodStart.UTC(), testClockID: sub.TestClockID}, byPlan: make(map[string]ratePin, len(first))}
+	out := periodPins{start: ratePin{at: periodStart.UTC()}, byPlan: make(map[string]ratePin, len(first))}
 	for planID, at := range first {
 		if at.Before(periodStart) {
 			at = periodStart
 		}
-		out.byPlan[planID] = ratePin{at: at.UTC(), testClockID: sub.TestClockID}
+		out.byPlan[planID] = ratePin{at: at.UTC()}
 	}
 	return out
 }
@@ -292,7 +288,7 @@ func (p *planPrices) PlanPrices(ctx context.Context, tenantID, planID string, pi
 	if got, ok := p.cache[k]; ok {
 		return got, nil
 	}
-	got, err := p.pricing.PlanPricesAt(ctx, tenantID, planID, pin.at, pin.testClockID)
+	got, err := p.pricing.PlanPricesAt(ctx, tenantID, planID, pin.at)
 	if err != nil {
 		return nil, fmt.Errorf("prices of plan %s at %s: %w", planID, pin.at.Format(time.RFC3339), err)
 	}

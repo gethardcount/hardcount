@@ -153,7 +153,7 @@ func TestPostgresStore_PlanPrices(t *testing.T) {
 		t.Errorf("package price = %+v", got[2])
 	}
 
-	at, err := store.PlanPricesAt(ctx, tenantID, plan.ID, time.Now().UTC(), "")
+	at, err := store.PlanPricesAt(ctx, tenantID, plan.ID, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("prices at: %v", err)
 	}
@@ -164,14 +164,14 @@ func TestPostgresStore_PlanPrices(t *testing.T) {
 		t.Errorf("plan meters = %v, %v; want [%s]", meters, err, meter.ID)
 	}
 
-	// Row-level security: the other tenant reads no row of any of the
-	// three tables, with no tenant filter in the query.
+	// Row-level security: the other tenant reads no row of either table,
+	// with no tenant filter in the query.
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, other)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer postgres.Rollback(tx)
-	for _, table := range []string{"plan_prices", "plan_price_versions", "plan_price_version_clocks"} {
+	for _, table := range []string{"plan_prices", "plan_price_versions"} {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM `+table).Scan(&n); err != nil {
 			t.Fatalf("count %s: %v", table, err)
