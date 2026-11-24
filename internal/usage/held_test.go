@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/platform/clock"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 
@@ -221,6 +223,34 @@ func TestHoldCall_Validation(t *testing.T) {
 	}
 	if got := store.held[0].EventAt; got.Before(at) || got.After(time.Now().UTC()) {
 		t.Fatalf("event_at = %v, want the receive time", got)
+	}
+}
+
+// A held call with no times holds each row at the instant ctx carries, the
+// request's: one time for the call, and no read of the server's clock.
+func TestHoldCall_HoldsRowsWithNoTimeAtTheBoundInstant(t *testing.T) {
+	at := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+	store := &heldMemStore{memStore: newMemStore()}
+	svc := NewService(store)
+	server := &usageSteppingClock{at: at.Add(time.Hour)}
+	svc.SetClock(server)
+	in := HoldCallInput{
+		ExternalCustomerID: "cus_x", EventName: "tokens", Reason: domain.HeldReasonCustomerNotFound,
+		Events: []CallEvent{
+			{Quantity: decimal.NewFromInt(1), IdempotencyKey: "k:input"},
+			{Quantity: decimal.NewFromInt(1), IdempotencyKey: "k:output"},
+		},
+	}
+	if _, err := svc.HoldCall(clock.WithEffectiveNow(context.Background(), at), "t", in); err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if len(store.held) != 2 || server.reads != 0 {
+		t.Fatalf("%d rows held after %d server reads; want 2 and none", len(store.held), server.reads)
+	}
+	for _, h := range store.held {
+		if !h.EventAt.Equal(at) {
+			t.Errorf("%s held at %v; want the request's %v", h.IdempotencyKey, h.EventAt, at)
+		}
 	}
 }
 
