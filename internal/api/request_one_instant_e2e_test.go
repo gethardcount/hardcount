@@ -72,7 +72,7 @@ func newInstantRig(t *testing.T, live bool) *instantRig {
 	db := testutil.SetupTestDB(t)
 	clk := &runClock{at: lagP0}
 	r := &instantRig{t: t, db: db, clk: clk, srv: NewServer(db, clk, nil, WithInvoiceGrace(0)), live: live}
-	r.tenantID = testutil.CreateTestTenant(t, db, "door one instant")
+	r.tenantID = testutil.CreateTestTenant(t, db, "request one instant")
 	r.auth = "Bearer " + createAPIKeyWithMode(t, db, r.tenantID, live)
 	plan := r.must(http.MethodPost, "/v1/plans", lagP0, map[string]any{
 		"code": "one-instant", "name": "One instant", "currency": "USD", "billing_interval": "monthly",
@@ -96,7 +96,8 @@ func (r *instantRig) subscribe(name string) string {
 }
 
 // do serves one request. A non-zero at binds that instant on the request, as
-// the fixtures do; the zero time leaves the time to the door.
+// the fixtures do; the zero time leaves it to the server to bind the
+// request's time.
 func (r *instantRig) do(method, path string, at time.Time, body any) (int, []byte) {
 	r.t.Helper()
 	ctx := context.Background()
@@ -164,11 +165,11 @@ func (r *instantRig) cycleInvoices() [][2]*time.Time {
 }
 
 // The manual billing run is a job that a request starts, so it runs as the
-// scheduled run does: its handler drops the door's instant, and each
-// subscription is billed on its own instant, none of them the door's. Four
-// reads of the server's clock: the door's, the run's due cutoff, then one per
-// subscription. The invoices are dated at their period's boundary. In both
-// modes.
+// scheduled run does: its handler drops the request's instant, and each
+// subscription is billed on its own instant, none of them the request's.
+// Four reads of the server's clock: the request's, the run's due cutoff,
+// then one per subscription. The invoices are dated at their period's
+// boundary. In both modes.
 func TestBillingRun_EachSubscriptionIsBilledOnItsOwnTime(t *testing.T) {
 	for _, live := range []bool{false, true} {
 		t.Run(map[bool]string{false: "test mode", true: "live"}[live], func(t *testing.T) {
@@ -182,7 +183,7 @@ func TestBillingRun_EachSubscriptionIsBilledOnItsOwnTime(t *testing.T) {
 			up := r.subsUpdated(a, b)
 			rows := map[time.Time]bool{start.Add(3 * time.Second): true, start.Add(4 * time.Second): true}
 			if reads != 4 || up[0].Equal(up[1]) || !rows[up[0]] || !rows[up[1]] {
-				t.Errorf("%d server reads; closed periods updated %v and %v; want 4 reads (door, cutoff, one per row), each row at its own read (%v)",
+				t.Errorf("%d server reads; closed periods updated %v and %v; want 4 reads (request, cutoff, one per row), each row at its own read (%v)",
 					reads, up[0], up[1], rows)
 			}
 			for i, inv := range r.cycleInvoices() {
@@ -195,9 +196,9 @@ func TestBillingRun_EachSubscriptionIsBilledOnItsOwnTime(t *testing.T) {
 }
 
 // A subscription write closes an ended period first, then plans from the new
-// one. On a subscription's route the door binds one instant, and the close
-// and the schedule both read it: one read of the server's clock, in both
-// modes. The ended period's invoice is dated at its boundary.
+// one. A subscription's route runs on one instant, and the close and the
+// schedule both read it: one read of the server's clock, in both modes. The
+// ended period's invoice is dated at its boundary.
 func TestScheduleCancel_TheCloseAndTheScheduleShareOneInstant(t *testing.T) {
 	for _, live := range []bool{false, true} {
 		t.Run(map[bool]string{false: "test mode", true: "live"}[live], func(t *testing.T) {
@@ -214,10 +215,10 @@ func TestScheduleCancel_TheCloseAndTheScheduleShareOneInstant(t *testing.T) {
 	}
 }
 
-// Finalize collects right after it finalizes. On an invoice's route the door
-// binds one instant, and the finalize and the settle both read it, so an
-// invoice that credits cover is issued and paid at that one time: one read
-// of the server's clock, in both modes.
+// Finalize collects right after it finalizes. An invoice's route runs on one
+// instant, and the finalize and the settle both read it, so an invoice that
+// credits cover is issued and paid at that one time: one read of the
+// server's clock, in both modes.
 func TestFinalize_ACreditCoveredInvoiceIsIssuedAndPaidAtOneInstant(t *testing.T) {
 	for _, live := range []bool{false, true} {
 		t.Run(map[bool]string{false: "test mode", true: "live"}[live], func(t *testing.T) {
@@ -237,7 +238,7 @@ func TestFinalize_ACreditCoveredInvoiceIsIssuedAndPaidAtOneInstant(t *testing.T)
 			r.clk.stepFrom(start)
 			r.must(http.MethodPost, "/v1/invoices/"+id+"/finalize", time.Time{}, nil, http.StatusOK)
 			_, reads := r.clk.count()
-			want := start.Add(time.Second) // the door's read
+			want := start.Add(time.Second) // the request's read
 			got := r.must(http.MethodGet, "/v1/invoices/"+id, lagP0, nil, http.StatusOK)
 			issued, _ := time.Parse(time.RFC3339Nano, flowStr(got, "invoice", "issued_at"))
 			paid, _ := time.Parse(time.RFC3339Nano, flowStr(got, "invoice", "paid_at"))

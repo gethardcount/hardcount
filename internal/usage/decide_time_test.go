@@ -9,7 +9,6 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -34,30 +33,28 @@ func TestIngest_IsRecordedAtTheServersClock(t *testing.T) {
 	}
 }
 
-// In one batch, each event binds its own instant: a read of the server's
-// clock each, so nothing one event bound carries to the next.
-func TestBatchIngest_EachEventBindsItsOwnInstant(t *testing.T) {
-	past := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+// The events of one batch share the request's instant: none of them reads the
+// server's clock itself.
+func TestBatchIngest_TheEventsShareOneInstant(t *testing.T) {
+	at := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
 	store := newMemStore()
 	svc := NewService(store)
-	server := &usageSteppingClock{at: past}
+	server := &usageSteppingClock{at: at.Add(time.Hour)}
 	svc.SetClock(server)
 	var events []IngestInput
 	for i, customer := range []string{"cus_a", "cus_b", "cus_a"} {
 		events = append(events, IngestInput{CustomerID: customer, MeterID: "mtr_1", Quantity: dec(1), IdempotencyKey: fmt.Sprintf("evt-%d", i)})
 	}
-	if _, batchErrs := svc.BatchIngest(testMode(), "t1", events); len(batchErrs) != 0 {
+	if _, batchErrs := svc.BatchIngest(clock.WithEffectiveNow(testMode(), at), "t1", events); len(batchErrs) != 0 {
 		t.Fatalf("batch: %v", batchErrs)
 	}
-	if len(store.events) != len(events) || server.reads != len(events) {
-		t.Fatalf("%d events stored after %d server reads; want %d and one read each", len(store.events), server.reads, len(events))
+	if len(store.events) != len(events) || server.reads != 0 {
+		t.Fatalf("%d events stored after %d server reads; want %d and none", len(store.events), server.reads, len(events))
 	}
-	seen := map[time.Time]bool{}
 	for _, e := range store.events {
-		if seen[e.Timestamp] {
-			t.Errorf("%s shares %v with an earlier event; want its own instant", e.IdempotencyKey, e.Timestamp)
+		if !e.Timestamp.Equal(at) {
+			t.Errorf("%s stamped %v; want the request's %v", e.IdempotencyKey, e.Timestamp, at)
 		}
-		seen[e.Timestamp] = true
 	}
 }
 
@@ -134,20 +131,5 @@ func TestIngestCall_ChecksBothMappingsBeforeBuilding(t *testing.T) {
 	var de *errs.DomainError
 	if !errors.Is(err, errs.ErrValidation) || !errors.As(err, &de) || de.Field != "dimensions" {
 		t.Errorf("err %v; want invalid, on the field dimensions", err)
-	}
-}
-
-// build's caller binds; on a context with no instant, build refuses with an
-// internal error, and the ingest writes nothing, rather than stamp the
-// machine's time.
-func TestBuild_RefusesAContextWithNoInstant(t *testing.T) {
-	store := newMemStore()
-	svc := NewService(store)
-	_, err := svc.ingestAudited(testMode(), "t1", IngestInput{CustomerID: "cus_1", MeterID: "mtr_1", Quantity: dec(1)}, domain.UsageOriginAPI, nil)
-	if !errors.Is(err, errBuildUndecided) {
-		t.Fatalf("err %v; want errBuildUndecided", err)
-	}
-	if len(store.events) != 0 {
-		t.Errorf("%d events written; want none", len(store.events))
 	}
 }

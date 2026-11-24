@@ -664,8 +664,8 @@ func providerCostLabel(r domain.ProviderCostRate) string {
 func (h *ProviderCostHandler) Margin(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	customerID := chi.URLParam(r, "id")
-	// One instant for the report, the one the API's door bound: the default
-	// window and the rated usage then agree.
+	// One instant for the report, the request's: the default window and the
+	// rated usage then agree.
 	ctx := r.Context()
 	from, to, err := h.marginWindow(ctx, r)
 	if err != nil {

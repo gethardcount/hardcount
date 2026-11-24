@@ -48,7 +48,7 @@ func (s cnStaticInvoices) Get(context.Context, string, string) (domain.Invoice, 
 }
 
 // cnSendReq sends a credit note's email through the handler, on base when one
-// is given (the time the API's door decided), else on a plain request context.
+// is given (the request's instant), else on a plain request context.
 func cnSendReq(t *testing.T, h *Handler, id, body string, base ...context.Context) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/credit-notes/"+id+"/send", bytes.NewBufferString(body))

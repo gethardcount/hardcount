@@ -136,9 +136,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 func (s *Server) routes() chi.Router {
 	r := chi.NewRouter()
 	finder := &routeFinder{} // its root is set at the end of routes()
-	// The clock door ends every group; docs/architecture.md#the-path-of-a-request
-	// says why it sits last.
-	door := &clockDoor{clock: s.clk}
+	// Binding the request's time ends every group;
+	// docs/architecture.md#the-path-of-a-request says why it sits last.
+	requestTime := bindRequestTime(s.clk)
 	// chi hands both handlers down to every router mounted below, so the
 	// router's every 404 and 405 answers the JSON envelope; a 405 lists the
 	// path's methods.
@@ -147,8 +147,8 @@ func (s *Server) routes() chi.Router {
 		respond.MethodNotAllowed(w, req, finder.methods(req))
 	})
 	// The root chain; docs/architecture.md#the-path-of-a-request lists each
-	// step and says why the record, the metrics, the access log and the door
-	// sit where they do.
+	// step and says why the record, the metrics, the access log and the
+	// request's time sit where they do.
 	// Steps 1 to 5: useRequestEdge, below.
 	useRequestEdge(r, s.settings.TrustProxy, s.settings.TrustedProxies(), request.Begin(finder.route))
 	r.Use(mw.Metrics())
@@ -164,9 +164,9 @@ func (s *Server) routes() chi.Router {
 	r.Use(mw.AuditCoverage(auditRoute))
 
 	// Public
-	r.With(door.Middleware).Get("/health", handleHealth)
-	r.With(door.Middleware).Get("/health/ready", handleDeepHealth(s.db))
-	r.With(door.Middleware).Handle("/metrics", mw.MetricsAuth(s.opts.appEnv, s.settings.MetricsToken, mw.MetricsHandler()))
+	r.With(requestTime).Get("/health", handleHealth)
+	r.With(requestTime).Get("/health/ready", handleDeepHealth(s.db))
+	r.With(requestTime).Handle("/metrics", mw.MetricsAuth(s.opts.appEnv, s.settings.MetricsToken, mw.MetricsHandler()))
 
 	// Bootstrap, the one-time setup, takes no auth. RunBootstrap writes no
 	// audit row when deps.Audit is nil, and it mints a live secret key, so
@@ -183,7 +183,7 @@ func (s *Server) routes() chi.Router {
 	r.Group(func(r chi.Router) {
 		r.Use(s.bootstrapLimiter.Middleware())
 		r.Use(mw.Timeout(requestTimeout))
-		r.Use(door.Middleware)
+		r.Use(requestTime)
 		r.Mount("/v1/bootstrap", bootstrapH.Routes())
 	})
 
@@ -195,7 +195,7 @@ func (s *Server) routes() chi.Router {
 		r.Use(mw.CSRFGuard(allowedOrigins))
 		r.Use(s.authLimiter.Middleware())
 		r.Use(mw.Timeout(requestTimeout))
-		r.Use(door.Middleware)
+		r.Use(requestTime)
 		s.membersH.RegisterPublicRoutes(r)
 		r.Mount("/", s.dashboardAuthH.Routes())
 	})
@@ -205,7 +205,7 @@ func (s *Server) routes() chi.Router {
 	// over the mount's wildcard.
 	r.Group(func(r chi.Router) {
 		r.Use(mw.Timeout(requestTimeout))
-		r.Use(door.Middleware)
+		r.Use(requestTime)
 		r.Mount("/v1/webhooks", s.webhookH.Routes())
 		r.Post("/v1/webhooks/postmark", s.postmarkH.HandleWebhook)
 	})
@@ -216,7 +216,7 @@ func (s *Server) routes() chi.Router {
 	r.Group(func(r chi.Router) {
 		r.Use(s.publicPageLimiter.Middleware())
 		r.Use(mw.Timeout(requestTimeout))
-		r.Use(door.Middleware)
+		r.Use(requestTime)
 		r.Mount("/v1/public/payment-updates", s.publicPaymentH.Routes())
 		r.Mount("/v1/public/invoices", s.hostedInvoiceH.Routes())
 		r.Mount("/v1/public/cost-dashboard", s.customerH.PublicCostDashboardRoutes())
@@ -243,7 +243,7 @@ func (s *Server) routes() chi.Router {
 		// (event_stream_route.go).
 		r.Group(func(r chi.Router) {
 			r.Use(s.rateLimiter.Middleware())
-			r.Use(door.Middleware)
+			r.Use(requestTime)
 			r.Route("/webhook_events/stream", eventStreamRoute(s.webhookOutH, s.sessionSvc, s.authSvc, webhook.StreamHeartbeatInterval))
 		})
 
@@ -252,7 +252,7 @@ func (s *Server) routes() chi.Router {
 		r.Group(func(r chi.Router) {
 			r.Use(s.rateLimiter.Middleware())
 			r.Use(mw.Timeout(exportTimeout))
-			r.Use(door.Middleware)
+			r.Use(requestTime)
 			exportsH := newExportsHandler(s.customerStore, s.invoiceStore, s.subStore, s.usageStore, s.auditLogger, s.auditLogger)
 			r.Mount("/exports", exportsH.Routes())
 		})
@@ -265,7 +265,7 @@ func (s *Server) routes() chi.Router {
 		r.Group(func(r chi.Router) {
 			r.Use(s.ingestLimiter.Middleware())
 			r.Use(mw.Timeout(requestTimeout))
-			r.Use(door.Middleware)
+			r.Use(requestTime)
 			r.Post("/usage-events/backfill", s.usageH.Backfill)
 			r.Mount("/usage-events", s.usageH.Routes())
 			r.Mount("/integrations/litellm", litellm.New(s.customerStore, s.pricingSvc, s.usageSvc, s.usageSvc).Routes())
@@ -277,7 +277,7 @@ func (s *Server) routes() chi.Router {
 			// keepsNoKey says which requests Idempotency holds no key for.
 			r.Use(mw.Idempotency(s.db, keepsNoKey))
 			r.Use(mw.Timeout(requestTimeout))
-			r.Use(door.Middleware)
+			r.Use(requestTime)
 
 			r.Get("/whoami", s.handleWhoami)
 			r.Mount("/api-keys", s.authH.Routes())

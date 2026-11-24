@@ -53,8 +53,8 @@ func (c *capturingAudit) actions() []string {
 	return out
 }
 
-// A plan change's audit row runs on the request's instant, which the API's
-// door binds, and carries the proration outcome.
+// A plan change's audit row runs on the request's instant, which the API
+// binds, and carries the proration outcome.
 func TestHandler_UpdateItem_PlanChangeAuditRunsOnTheRequestsInstant(t *testing.T) {
 	ctx := postgres.WithLivemode(context.Background(), true)
 	tenantID := "t1"
@@ -96,7 +96,7 @@ func TestHandler_UpdateItem_PlanChangeAuditRunsOnTheRequestsInstant(t *testing.T
 	h.SetAuditLogger(rec)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
-	// The API's door binds the request's instant before the handler runs.
+	// The API binds the request's instant before the handler runs.
 	decided := clock.WithEffectiveNow(auth.WithTenantID(ctx, tenantID), frozen)
 	req := updateItemURL(decided, subID, itemID, body)
 	rr := httptest.NewRecorder()

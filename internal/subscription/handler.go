@@ -325,7 +325,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// All of the create's writes run on the instant the API's door bound.
+	// All of the create's writes run on the request's instant.
 	ctx := r.Context()
 	sub, err := h.svc.Create(ctx, tenantID, input)
 	if err != nil {
@@ -855,7 +855,7 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// One instant for the whole route: the door binds it (one read of the
+	// One instant for the whole route: the request's (one read of the
 	// server's clock), so the handler's own reads (the proration days, the
 	// period close, changeAt) and the service's agree. The item routes below
 	// run on it too.

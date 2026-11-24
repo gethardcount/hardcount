@@ -23,7 +23,7 @@ func (c *ctxCapturingCharger) ChargeInvoiceNow(ctx context.Context, _ string, in
 	return inv, nil
 }
 
-// Collect charges on the request's instant: the API's door binds it for
+// Collect charges on the request's instant: the API binds it for
 // POST /v1/invoices/{id}/collect, and the charge runs on it.
 func TestCollectPayment_ChargesOnTheRequestsInstant(t *testing.T) {
 	ctx := context.Background()
@@ -48,7 +48,7 @@ func TestCollectPayment_ChargesOnTheRequestsInstant(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/invoices/"+inv.ID+"/collect", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", inv.ID)
-	// The request's time, as the API's door binds it.
+	// The request's time, as the API binds it.
 	reqCtx := auth.WithTenantID(clock.WithEffectiveNow(postgres.WithLivemode(ctx, false), frozen), "t1")
 	reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
 	rr := httptest.NewRecorder()

@@ -7708,6 +7708,11 @@ export const getCreateUsageEventBatchUrl = () => {
  * earlier event or by another event in the batch. Those events
  * were not stored. A usage-only key (`hc_ingest_…`) or a secret key
  * can call it.
+ *
+ * Events sent with no `timestamp` share the request's time: they are
+ * all dated when Hardcount receives the batch. A `last` meter bills
+ * the event with the latest `timestamp`, so if the events of one
+ * request must have an order, send each one's `timestamp`.
  * @summary Send a batch of usage events
  */
 export const createUsageEventBatch = async (createUsageEventBatchBodyItem: CreateUsageEventBatchBodyItem[], options?: RequestInit): Promise<UsageEventBatchResult> => {

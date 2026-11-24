@@ -219,14 +219,14 @@ type Service struct {
 	//     its own read of the server's clock for that invoice;
 	//   - the scheduled job retries each due run on its own instant;
 	//   - an invoice action that closes the run (a void, a write-off, a
-	//     payment, a credit note) runs on that action's time, which the API's
-	//     door (api.clockDoor) binds for a request.
+	//     payment, a credit note) runs on that action's time, which the API
+	//     (api.bindRequestTime) binds for a request.
 	// Each entry point keeps that time, and a run's start always arrives with
 	// it bound. A due run's retry, or a resolve, that arrives with no instant
 	// bound reads this clock once (clock.EnsureEffectiveNow); a request on
-	// any other route arrives with the door's instant. Without
-	// that read, two reads of the time in one action could differ, and a
-	// store's stamp could fall on another time than the action's.
+	// any other route arrives with its request's instant. Without that read,
+	// two reads of the time in one action could differ, and a store's stamp
+	// could fall on another time than the action's.
 	clock clock.Clock
 }
 

@@ -322,7 +322,7 @@ func withReliefBiller(svc *Service) *reliefTimeBiller {
 }
 
 // A cancel's relief credit note is issued on the time its caller bound: the
-// cancel route's (the door), dunning's final action's (its run) or the
+// cancel route's (its request's), dunning's final action's (its run) or the
 // billing run's. The server's clock is not read.
 func TestSubscriptionRelief_IsIssuedOnTheDecidedTime(t *testing.T) {
 	for _, e := range reliefEntries() {

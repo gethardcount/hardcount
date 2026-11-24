@@ -66,9 +66,9 @@ func init() {
 	}
 }
 
-// heldEvent checks one row to hold and builds it. A row the checks refuse
-// could never be released, so it is refused now.
-func heldEvent(in HoldInput) (domain.HeldUsageEvent, error) {
+// heldEvent checks one row to hold and builds it, at now, the call's time.
+// A row the checks refuse could never be released, so it is refused now.
+func heldEvent(in HoldInput, now time.Time) (domain.HeldUsageEvent, error) {
 	if strings.TrimSpace(in.IdempotencyKey) == "" {
 		// A row without a key cannot be released safely: a resend would
 		// bill it twice.
@@ -96,9 +96,6 @@ func heldEvent(in HoldInput) (domain.HeldUsageEvent, error) {
 	if err != nil {
 		return domain.HeldUsageEvent{}, err
 	}
-	// The LiteLLM route binds no instant, and a held row bills nothing until
-	// it is released, so its "now" is the machine's time.
-	now := time.Now().UTC()
 	at := now
 	if in.EventAt != nil {
 		if in.EventAt.After(now.Add(usageFutureSkew)) {

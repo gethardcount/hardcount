@@ -3,7 +3,6 @@ package usage
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -53,23 +52,9 @@ func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
 // unwired, nothing is flagged (narrow tests).
 func (s *Service) SetOpenPeriodReader(r OpenPeriodReader) { s.periods = r }
 
-// SetClock sets the clock real time is read from: the server's clock, the one
-// the billing engine bills by. An ingest entry reads it once to bind its
-// instant when ctx carries none (bindNow). Without it, real time is the
-// machine's.
+// SetClock sets the service's clock: the server's clock, the one the billing
+// engine bills by. Every read through it returns the request's instant.
 func (s *Service) SetClock(c clock.Clock) { s.clock = c }
-
-// bindNow returns ctx with one instant bound, so all work below reads one
-// instant: the one ctx carries, else one read of the service's clock
-// (clock.EnsureEffectiveNow). Each ingest entry calls it once, before it
-// goes down: Ingest, each event of a batch, Backfill and a LiteLLM call
-// (IngestCall). Ingest and Backfill keep the instant the API's door bound;
-// the batch and LiteLLM routes get none from the door, so each event of a
-// batch, and each call, binds its own. Nothing below an ingest entry binds:
-// build reads the bound instant.
-func (s *Service) bindNow(ctx context.Context) context.Context {
-	return clock.EnsureEffectiveNow(ctx, s.clock)
-}
 
 // IngestInput is the internal service input — uses resolved internal IDs only.
 // The handler is responsible for resolving external identifiers before calling this.
@@ -115,21 +100,15 @@ func (s *Service) Backfill(ctx context.Context, tenantID string, input IngestInp
 	if input.Timestamp == nil {
 		return domain.UsageEvent{}, errs.Required("timestamp")
 	}
-	// Reject future timestamps, relative to the backfill's bound instant.
-	// Equality-with-now is allowed because the test-vs-prod clock race
-	// makes strict past-only brittle to verify, and the 'backfill' origin
-	// tag already distinguishes these rows from live POST traffic for
-	// audit purposes.
-	bound, input, err := s.decideEvent(ctx, input)
+	// A backfill may be dated up to the request's instant, not after it.
+	input, err := checkInput(input)
 	if err != nil {
 		return domain.UsageEvent{}, err
 	}
-	if input.Timestamp.After(s.clock.Now(bound)) {
+	if input.Timestamp.After(s.clock.Now(ctx)) {
 		return domain.UsageEvent{}, errs.Invalid("timestamp", "must not be in the future for backfill — use POST /usage-events for real-time ingest")
 	}
-	// The bound ctx goes downstream, so the check and the ingest read one
-	// instant.
-	return s.ingestAudited(bound, tenantID, input, domain.UsageOriginBackfill, s.backfillEmission(bound))
+	return s.ingestAudited(ctx, tenantID, input, domain.UsageOriginBackfill, s.backfillEmission(ctx))
 }
 
 // backfillEmission records the operator's backdated insert on the ingest tx.
@@ -170,11 +149,6 @@ const MaxDimensionKeys = 16
 // may be before it's rejected — absorbs minor client clock drift without
 // letting events be parked in a future billing period.
 const usageFutureSkew = 5 * time.Minute
-
-// errBuildUndecided is build's refusal of a context with no instant bound: a
-// fault in the caller, answered as an internal error (500), never a stamp on
-// the machine's time.
-var errBuildUndecided = errors.New("usage: an event was built with no instant bound; its caller must bind one first")
 
 // checkInput is an event's own checks, which read no clock: the customer and
 // the meter are named, and the dimensions and the quantity are valid. It
@@ -238,25 +212,11 @@ func validateDimensions(dims map[string]any) error {
 }
 
 func (s *Service) ingest(ctx context.Context, tenantID string, input IngestInput, origin domain.UsageEventOrigin) (domain.UsageEvent, error) {
-	ctx, input, err := s.decideEvent(ctx, input)
+	input, err := checkInput(input)
 	if err != nil {
 		return domain.UsageEvent{}, err
 	}
 	return s.ingestAudited(ctx, tenantID, input, origin, nil)
-}
-
-// decideEvent is the one rule of every ingest entry: an event's own checks
-// (checkInput), then its instant (bindNow). Callers go on with the input it
-// returns, whose quantity is the one recorded: build, below it, checks
-// nothing, so a caller that kept the original would store an unchecked
-// quantity. A single ingest, each event of a batch and Backfill go through
-// it; a LiteLLM call checks all its events the same way before its one bind.
-func (s *Service) decideEvent(ctx context.Context, input IngestInput) (context.Context, IngestInput, error) {
-	input, err := checkInput(input)
-	if err != nil {
-		return ctx, input, err
-	}
-	return s.bindNow(ctx), input, nil
 }
 
 // ingestAudited is ingest with an optional in-tx audit emission. Only backfill
@@ -360,19 +320,14 @@ func recordLate(ctx context.Context, ev domain.UsageEvent) {
 }
 
 // build is prepare without recording anything. Its caller has run checkInput
-// and bound its instant (decideEvent, Backfill, IngestCall), so
-// build checks nothing: it resolves the event's timestamp, refuses one in the
+// and runs on the request's instant, so build checks nothing: it resolves the event's timestamp, refuses one in the
 // future, composes the row, and reports whether the row is late. A caller
 // that builds rows it may not write (IngestCall builds a call's two mappings
 // and writes one) records only the rows it wrote.
 func (s *Service) build(ctx context.Context, tenantID string, input IngestInput, origin domain.UsageEventOrigin) (domain.UsageEvent, bool, error) {
-	// "Now" is the instant its caller bound. build refuses a context with
-	// none, rather than stamp the machine's time. An event with no timestamp
-	// lands at that time, and the future gate below compares against it.
-	now, ok := clock.EffectiveNow(ctx)
-	if !ok {
-		return domain.UsageEvent{}, false, errBuildUndecided
-	}
+	// "Now" is the instant its caller bound. An event with no timestamp lands
+	// at that time, and the future gate below compares against it.
+	now := s.clock.Now(ctx)
 	ts := now
 	if input.Timestamp != nil {
 		// Reject future-dated live events (a small clock-skew tolerance keeps
@@ -452,7 +407,8 @@ type BatchEventResult struct {
 //
 // Validation failures are collected for EVERY failing index (a bare
 // "quantity too large" across a 500-event batch was undebuggable) and
-// abort before any write. Idempotency replays count as deduplicated —
+// abort before any write. The events share one instant: the request's, or
+// one read of the service's clock when ctx carries none. Idempotency replays count as deduplicated —
 // success, not failure — matching the LiteLLM door. A failed open-period
 // read aborts before any write too, and a failed meter read rolls the batch
 // back (errIngestUnavailable).
@@ -460,11 +416,10 @@ func (s *Service) BatchIngest(ctx context.Context, tenantID string, events []Ing
 	prepared := make([]domain.UsageEvent, 0, len(events))
 	var batchErrs []error
 	for i, input := range events {
-		// Each event binds its own instant.
 		var ev domain.UsageEvent
-		evCtx, checked, err := s.decideEvent(ctx, input)
+		checked, err := checkInput(input)
 		if err == nil {
-			ev, err = s.prepare(evCtx, tenantID, checked, domain.UsageOriginAPI)
+			ev, err = s.prepare(ctx, tenantID, checked, domain.UsageOriginAPI)
 		}
 		if err != nil {
 			batchErrs = append(batchErrs, fmt.Errorf("event[%d]: %w", i, err))

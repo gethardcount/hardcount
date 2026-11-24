@@ -14,6 +14,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -192,8 +193,9 @@ func (s *Service) Connect(ctx context.Context, tenantID string, in ConnectInput)
 // its cancel: the tenant, the mode (checkMode proved it is the
 // connection's), the actor, so the invoices it finalizes are recorded under
 // the operator who connected, and the request id. It is capped at
-// PostConnectRetryTimeout. Each invoice binds its own instant after the
-// request has answered, as a job's row does.
+// PostConnectRetryTimeout. It drops the request's instant, as work a request
+// starts and leaves running does, so each invoice binds its own, as a job's
+// row does.
 //
 // Nothing waits for it at shutdown. A stop mid-row leaves that row pending
 // or finalized, never between: a tax retry writes the tax and the finalize
@@ -202,14 +204,14 @@ func (s *Service) Connect(ctx context.Context, tenantID string, in ConnectInput)
 // provider_auth one waits for a Retry tax click or the next connect. A wait
 // would not change what a stopped retry leaves.
 func (s *Service) startPostConnectRetry(ctx context.Context, tenantID string, livemode bool, expected int) {
-	retryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), PostConnectRetryTimeout)
+	retryCtx, cancel := context.WithTimeout(clock.WithoutInstant(context.WithoutCancel(ctx)), PostConnectRetryTimeout)
 	go s.runPostConnectRetry(retryCtx, cancel, tenantID, livemode, expected)
 }
 
 // runPostConnectRetry is the goroutine body that flushes stuck
 // invoices after a successful Connect, on ctx: the request's values
-// without its cancel, capped at PostConnectRetryTimeout (see the go
-// statement in Connect). cancel releases that timeout. A panic is
+// without its cancel or its instant, capped at PostConnectRetryTimeout
+// (startPostConnectRetry). cancel releases that timeout. A panic is
 // logged at ERROR and ends only this retry: a goroutine's panic
 // would otherwise stop the server.
 func (s *Service) runPostConnectRetry(ctx context.Context, cancel context.CancelFunc, tenantID string, livemode bool, expected int) {

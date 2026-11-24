@@ -16,7 +16,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
-// A request reaches an invoice handler on the instant the API's door bound;
+// A request reaches an invoice handler on the request's instant;
 // atDecidedTime stands for it (entryDecidedAt). These pin that the work a
 // handler starts runs on it: the collect a finalize starts, the setup-link
 // and invoice emails (the email outbox records the instant a send's ctx

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -283,7 +284,7 @@ func TestUsageIngest_ZeroIsStoredAsPlainZero(t *testing.T) {
 	ev, err := heldEvent(HoldInput{
 		ExternalCustomerID: "acme", EventName: "api_call", IdempotencyKey: "evt_held_zero",
 		Quantity: decimal.RequireFromString("0e99999999"), Reason: domain.HeldReasonCustomerNotFound,
-	})
+	}, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("held zero refused: %v", err)
 	}

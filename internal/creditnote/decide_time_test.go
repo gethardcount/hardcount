@@ -14,10 +14,10 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// A create with auto_issue runs on the instant the API's door bound and
-// reads no clock of its own: the create and the issue share that instant, so
-// the note is created and issued at the same time.
-func TestCreateRoute_CreateAndIssueShareTheDoorsInstant(t *testing.T) {
+// A create with auto_issue runs on the request's instant and reads no clock
+// of its own: the create and the issue share that instant, so the note is
+// created and issued at the same time.
+func TestCreateRoute_CreateAndIssueShareTheRequestsInstant(t *testing.T) {
 	past := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 	store := newMemStore()
 	invoices := &memInvoiceReader{invoices: map[string]domain.Invoice{

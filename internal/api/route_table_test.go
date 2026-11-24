@@ -73,9 +73,7 @@ func TestRouteTable_MatchesLiveRoutes(t *testing.T) {
 	report(undeclared, `route(s) have no entry in routeTable (internal/api/route_table.go). Declare
 who may call each one: needs(customerWrite), or another permission, a session
 value or anyCaller, or outsideAuth() for a route outside /v1's authentication.
-Start the entry with decidedIn("package.Type.Method") only when that function
-works through many records and binds one instant for each, so the door must
-bind none. docs/architecture.md, "Adding a route", has an example.`)
+docs/architecture.md, "Adding a route", has an example.`)
 	report(stale, `routeTable entr(y/ies) match no live route. The route was renamed or removed
 but its entry was not: delete the entry or update its pattern. Keys are
 canonical chi patterns (canonicalRoute), with their {placeholders}. A stale
@@ -104,11 +102,10 @@ routes and the GET routes under /v1/exports carry one; remove it.`)
 }
 
 // TestRouteTable_DeclarationsAreWhole: each entry says what its parts need,
-// and nothing else. A key is canonical. A decidedIn function exists. An
-// explicit audit's note
-// starts with a function that exists; an exempt one has a reason from the
-// closed list, and only a state-changing route is exempt: there is no honest
-// reason for handing out a whole table with no record.
+// and nothing else. A key is canonical. An explicit audit's note starts with
+// a function that exists; an exempt one has a reason from the closed list,
+// and only a state-changing route is exempt: there is no honest reason for
+// handing out a whole table with no record.
 func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 	validReasons := map[exemptReason]bool{
 		reasonNonMutatingPreview: true,
@@ -120,13 +117,6 @@ func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 		name := k.Method + " " + k.Pattern
 		if got := canonicalRoute(k.Pattern); got != k.Pattern {
 			t.Errorf("%s: key is not canonical (canonicalRoute gives %q); the root would never find it", name, got)
-		}
-		if fn := entry.decidedIn; fn != "" {
-			if strings.Count(fn, ".") != 2 {
-				t.Errorf("%s: decidedIn names a function as package.Type.Method, has %q", name, fn)
-			} else if err := functionExists(fn); err != nil {
-				t.Errorf("%s: %v", name, err)
-			}
 		}
 		a := entry.audit
 		if a.Coverage == 0 {
@@ -361,9 +351,9 @@ func TestIsShowOnce_OnlyOnAMarkedRoute(t *testing.T) {
 		{"POST", "/v1/api-keysx", false},
 		{"POST", "/v1/api-keys/hc_key_a", false},
 		{"POST", "/v1/api-keys/hc_key_a/rotate/extra", false},
-		// The /api-keys mount matches but its sub-router has no such route, so
-		// the ordinary group runs and its 404 is kept for a replay; no handler
-		// runs, so no secret is involved.
+		// No route serves it (chi matches no trailing slash after rotate), so
+		// the permission check answers 404 right after authentication
+		// (noRoute): no group step runs, Idempotency included, and no handler.
 		{"POST", "/v1/api-keys/hc_key_a/rotate/", false},
 		{"POST", "/v1/customers", false},
 		{"POST", "/v1/customers/hc_cus_a/payment-methods", false},

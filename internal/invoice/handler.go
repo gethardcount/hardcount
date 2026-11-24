@@ -543,9 +543,9 @@ func (h *Handler) finalize(w http.ResponseWriter, r *http.Request) {
 	// Collect now through the billing engine's one collector (credits, then
 	// the card, or the setup-link email). The finalize write already queued
 	// the invoice, so if this is unwired or the process dies mid-call the
-	// auto-charge sweep collects it on its next tick. It runs on the instant
-	// the door bound for the request, so the setup-link email it may enqueue
-	// carries the invoice's billing anchor (ADR-104).
+	// auto-charge sweep collects it on its next tick. It runs on the
+	// request's instant, so the setup-link email it may enqueue carries the
+	// invoice's billing anchor (ADR-104).
 	if h.collector != nil {
 		h.collector.CollectInvoice(r.Context(), tenantID, inv.ID, nil)
 		// Respond with the post-collection state (paid, failed, or still
@@ -1070,7 +1070,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// On the instant the door bound for the request, as finalize's collect.
+	// On the request's instant, as finalize's collect.
 	charged, err := h.charger.ChargeInvoiceNow(r.Context(), tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
 	if err != nil {
 		// ADR-026 boundary sanitization: ChargeInvoice wraps a

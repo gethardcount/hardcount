@@ -101,8 +101,7 @@ func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput)
 	if s.held == nil {
 		return CallResult{}, ErrHoldUnavailable
 	}
-	// decideEvent's rule, for a call's events: every event's own checks, in
-	// both mappings, come before the call's one bind.
+	// Every event's own checks, in both mappings, come first.
 	check := func(evs []CallEvent) ([]IngestInput, error) {
 		if evs == nil {
 			return nil, nil
@@ -133,8 +132,6 @@ func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput)
 	if err != nil {
 		return CallResult{}, err
 	}
-	// One instant for the call: build reads it.
-	ctx = s.bindNow(ctx)
 	// Both mappings are built, the store writes one, and only that one is
 	// recorded as late: a replay would otherwise count rows never written.
 	prep := func(inputs []IngestInput) ([]domain.UsageEvent, []domain.UsageEvent, error) {
@@ -212,11 +209,14 @@ func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput)
 }
 
 // HoldCall holds one call's events in one transaction, each with
-// heldEvent's checks. A key already held is counted as deduplicated.
+// heldEvent's checks. A key already held is counted as deduplicated. A row
+// with no timestamp is held at the call's time: the request's, as the rows a
+// call ingests are stamped.
 func (s *Service) HoldCall(ctx context.Context, tenantID string, in HoldCallInput) (CallResult, error) {
 	if s.held == nil {
 		return CallResult{}, ErrHoldUnavailable
 	}
+	now := s.clock.Now(ctx)
 	prep := func(evs []CallEvent) ([]domain.HeldUsageEvent, error) {
 		if evs == nil {
 			return nil, nil
@@ -233,7 +233,7 @@ func (s *Service) HoldCall(ctx context.Context, tenantID string, in HoldCallInpu
 				EventAt:            e.Timestamp,
 				ObservedCostMicros: e.ObservedCostMicros,
 				Reason:             in.Reason,
-			})
+			}, now)
 			if err != nil {
 				return nil, err
 			}

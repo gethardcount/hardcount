@@ -44,8 +44,8 @@ type Service struct {
 }
 
 // NewService builds the credit service. It reads the time from ctx: a
-// request's instant, which the API's door bound, or the instant of the
-// engine's work that reads a balance or draws one.
+// request's instant, or the instant of the engine's work that reads a
+// balance or draws one.
 func NewService(store Store) *Service {
 	return &Service{store: store}
 }

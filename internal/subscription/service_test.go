@@ -3231,13 +3231,13 @@ func TestCreate_WithNoInstantStampsWallClock(t *testing.T) {
 
 // TestSubMutators_StampTheDecidedTime enumerates every public Service
 // mutator that touches a subscription row, and asserts each stamps its
-// writes at the request's instant: the API's door binds it, and the
+// writes at the request's instant: the API binds it, and the
 // mutator's writes (updated_at, canceled_at) read it. Failure means a
 // mutator writes on a time of its own. Add a new mutator to the table below.
 func TestSubMutators_StampTheDecidedTime(t *testing.T) {
 	frozen := time.Date(2024, 4, 15, 12, 0, 0, 0, time.UTC)
 
-	// decided is the request's time, as the API's door binds it.
+	// decided is the request's time, as the API binds it.
 	decided := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), frozen)
 	newPinned := func(t *testing.T, status domain.SubscriptionStatus) (*Service, domain.Subscription) {
 		t.Helper()

@@ -144,7 +144,7 @@ func handlerEntries() []handlerEntry {
 	}
 }
 
-// An item route runs on the instant the API's door bound for it: each
+// An item route runs on its request's instant: each
 // clawback credit note is issued at that instant, and the server's clock is
 // never read.
 func TestItemRoutes_RunOnTheDecidedTime(t *testing.T) {
