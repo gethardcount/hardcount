@@ -1,7 +1,9 @@
 # Hardcount documentation
 
-Hardcount is a billing system you run yourself. Your app sends usage, and
-Hardcount prices it, makes the invoice and charges the card through Stripe.
+Hardcount is a billing system you run yourself, for teams that resell model
+access through their own LLM gateway, such as LiteLLM. Your gateway or your
+app sends usage, and Hardcount prices it, makes the invoice and charges the
+card through Stripe.
 
 **New here?** Read [How Hardcount works](how-hardcount-works.md), then run
 the [quick start](quick-start.md).

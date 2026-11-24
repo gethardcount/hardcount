@@ -59,7 +59,8 @@ shaped like a LiteLLM proxy fleet, across 300 customers. Half the events came
 in batches of 10, a quarter as LiteLLM callbacks (3 events each) and a quarter
 one at a time. The 20 minutes alternated steady load and bursts at five times
 the rate: steady for 5 minutes, burst for 3, steady 5, burst 3, steady 4. Then
-simulated time moved 32 days forward to bill all 300 customers. Last, each
+a test clock (simulated time, a feature since removed) moved 32 days forward
+to bill all 300 customers. Last, each
 of six dashboard calls ran 20 times, one at a time. The general rate limit
 was raised so that creating the 300 customers
 did not hit it; the ingest limit was left as shipped. CPU and memory were
