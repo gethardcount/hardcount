@@ -102,10 +102,11 @@ routes and the GET routes under /v1/exports carry one; remove it.`)
 }
 
 // TestRouteTable_DeclarationsAreWhole: each entry says what its parts need,
-// and nothing else. A key is canonical. An explicit audit's note starts with
-// a function that exists; an exempt one has a reason from the closed list,
-// and only a state-changing route is exempt: there is no honest reason for
-// handing out a whole table with no record.
+// and nothing else. A key is canonical. A route that takes any query
+// parameter lists none. An explicit audit's note starts with a function that
+// exists; an exempt one has a reason from the closed list, and only a
+// state-changing route is exempt: there is no honest reason for handing out a
+// whole table with no record.
 func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 	validReasons := map[exemptReason]bool{
 		reasonNonMutatingPreview: true,
@@ -117,6 +118,9 @@ func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 		name := k.Method + " " + k.Pattern
 		if got := canonicalRoute(k.Pattern); got != k.Pattern {
 			t.Errorf("%s: key is not canonical (canonicalRoute gives %q); the root would never find it", name, got)
+		}
+		if entry.anyQuery && len(entry.query) > 0 {
+			t.Errorf("%s: takes any query parameter and also lists %v; withAnyQuery and withQuery do not go together", name, entry.query)
 		}
 		a := entry.audit
 		if a.Coverage == 0 {
@@ -160,6 +164,26 @@ func TestRouteTable_AnyCallerStaysSmall(t *testing.T) {
 	sort.Strings(got)
 	if want := []string{"GET /v1/whoami"}; !slices.Equal(got, want) {
 		t.Errorf("anyCaller routes: %v, want %v. A route that changes or reads an account's data names its permission.", got, want)
+	}
+}
+
+// TestRouteTable_AnyQueryStaysSmall lists the routes that take any query
+// parameter, so one added to skip the query check shows in review.
+func TestRouteTable_AnyQueryStaysSmall(t *testing.T) {
+	var got []string
+	for k, d := range routeTable {
+		if d.anyQuery {
+			got = append(got, k.Method+" "+k.Pattern)
+		}
+	}
+	sort.Strings(got)
+	want := []string{
+		"GET /v1/public/cost-dashboard/{token}",
+		"POST /v1/webhooks/postmark",
+		"POST /v1/webhooks/stripe/{endpoint_id}",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("routes taking any query parameter: %v, want %v. A route takes any only when another party writes or adds to its URL.", got, want)
 	}
 }
 

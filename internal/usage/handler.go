@@ -477,7 +477,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 // aggregate returns server-side totals + per-meter breakdown for the
 // current filter. Mirrors the list handler's filter parsing exactly so
 // the dashboard's stat cards reflect the same scope as the events table.
-// Unlike list, limit/offset are ignored — Aggregate.TotalEvents is the
+// It is not a list and takes no limit or offset: Aggregate.TotalEvents is the
 // authoritative count, and ByMeter is the full filtered breakdown.
 func (h *Handler) aggregate(w http.ResponseWriter, r *http.Request) {
 	filter, err := parseListFilter(r)

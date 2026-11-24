@@ -40,16 +40,18 @@ Every request passes the root chain, then its group's chain, then its handler. I
 
 | Group | Steps, in order |
 |---|---|
-| `/health`, `/metrics` | the request's time (`/metrics` also checks its token) |
-| `/v1/bootstrap` | bootstrap rate limit, 30 s, the request's time |
-| `/v1/auth` | CSRF guard, sign-in rate limit, 30 s, the request's time |
-| `/v1/webhooks` | 30 s, the request's time; each provider's own check (Stripe's signature, Postmark's credentials) runs in its handler |
-| `/v1/public/…` (hosted invoice, payment update, cost dashboard) | public-page rate limit, 30 s, the request's time |
+| `/health`, `/metrics` | query check, the request's time (`/metrics` also checks its token) |
+| `/v1/bootstrap` | bootstrap rate limit, query check, 30 s, the request's time |
+| `/v1/auth` | CSRF guard, sign-in rate limit, query check, 30 s, the request's time |
+| `/v1/webhooks` | query check, 30 s, the request's time; each provider's own check (Stripe's signature, Postmark's credentials) runs in its handler |
+| `/v1/public/…` (hosted invoice, payment update, cost dashboard) | public-page rate limit, query check, 30 s, the request's time |
 | every other `/v1` route: | CSRF guard, authentication, the route's permission, then one of: |
-| — ordinary | general rate limit, Idempotency, 30 s, the request's time |
-| — usage ingest | ingest rate limit, 30 s, the request's time |
-| — exports | general rate limit, 5 minutes, the request's time |
-| — the event stream | general rate limit, the request's time |
+| — ordinary | general rate limit, query check, Idempotency, 30 s, the request's time |
+| — usage ingest | ingest rate limit, query check, 30 s, the request's time |
+| — exports | general rate limit, query check, 5 minutes, the request's time |
+| — the event stream | general rate limit, query check, the request's time |
+
+The query check (`refuseUnknownQuery`) refuses a query parameter the route table does not list for the route. In the signed-in `/v1` groups it comes after authentication, so a caller who is not signed in gets `401` and learns nothing about the route. It comes before Idempotency, so a refused request holds no key. A query string that does not parse is refused whole.
 
 The request's time is bound last, so it is read just before the handler runs: a request that waits in an earlier step, such as Idempotency's wait for the first request with its key, does not run on a time read before the wait, and a replayed request never reads the clock.
 
@@ -66,7 +68,8 @@ The request's time is bound last, so it is read just before the handler runs: a 
 `internal/api/route_table.go` has one line per route, saying:
 - who may call it: `needs(…)` with a permission, a dashboard session only or any caller, or `outsideAuth()` for a route outside authentication (the permission check reads this);
 - where its audit evidence comes from, when it changes state or exports (the audit detector);
-- whether its answer carries a secret shown once (Idempotency never keeps that answer).
+- whether its answer carries a secret shown once (Idempotency never keeps that answer);
+- which query parameters it takes. A request with any other is refused with `422`, `param` naming it (`refuseUnknownQuery`), as a body with an unknown field is.
 
 `TestRouteTable_MatchesLiveRoutes` walks the router and fails on a route with no entry, an entry with no route, or a missing audit. A server that would serve a route with no entry does not start, so a request with no entry is one no route serves.
 
@@ -79,7 +82,8 @@ The request's time is bound last, so it is read just before the handler runs: a 
    ```
    - who may call it: `needs(…)` with a permission value (`invoiceRead`, `invoiceWrite`, …), `membersSession`, `settingsSession` or `anyCaller`; or `outsideAuth()` for a route outside `/v1`'s authentication;
    - where its audit row comes from, if it changes state or exports: `.withAudit(explicit("…"))`, naming the function that writes it, or `.withAudit(exempt(reason, "…"))`, saying why it writes none;
-   - `.withShowOnce()`, when its answer carries a secret shown once.
+   - `.withShowOnce()`, when its answer carries a secret shown once;
+   - the query parameters its handler reads: `.withPaging()` for a list's `limit` and `offset`, and `.withQuery("status", …)` for the rest. With neither, it takes none. `.withAnyQuery()` is only for a URL another party writes or adds to, such as a webhook's; `TestRouteTable_AnyQueryStaysSmall` lists those routes.
 3. **Describe it in `api/openapi.yaml`** ([OpenAPI workflow](dev/openapi-workflow.md)).
 4. **Read or write is your choice.** A route that changes data takes its area's write permission. `TestRouteTable_WritesNeedAWritePermission` fails on a `POST`, `PUT`, `PATCH` or `DELETE` that takes a read one, unless the test lists it with its reason.
 5. **What fails when a part is forgotten:**
@@ -89,6 +93,7 @@ The request's time is bound last, so it is read just before the handler runs: a 
    - an explicit note naming a function that does not exist: `TestRouteTable_DeclarationsAreWhole` fails;
    - a handler that never writes the audit row its entry declares: `internal/api`'s `TestMain` fails the end-to-end run, naming the route, when a test drives it;
    - no `api/openapi.yaml` entry: `TestOpenAPISpec_MatchesRouter` fails;
+   - query parameters the table and `api/openapi.yaml` list differently: `TestOpenAPISpec_QueryParametersMatchTheTable` fails;
    - a new any-caller or session-only route: `TestRouteTable_AnyCallerStaysSmall` or `TestRouteTable_SessionOnlyRoutesAreListed` fails;
    - a new route an ingest key may call (`usageIngest`): `TestIngestKey_RefusedOnEveryRouteButUsage` fails until the route is in its `ingestKeyRoutes`.
 
@@ -105,6 +110,7 @@ The access log and the metrics name each request by its route's pattern when it 
 | `503 authentication_unavailable` | authentication | the session or key store could not be read |
 | `403`, `500` | the route's permission check | `403`: the caller lacks the route's permission, or the route takes only a dashboard session; it comes before the rate limit, Idempotency and the request's time. `500`: the route's entry names no caller, a fault in the table |
 | `429` | the group's rate limit | over the bucket, or any request while a fail-closed limiter cannot reach Redis |
+| `422 validation_error` | the query check | a query parameter the route does not take; `param` names the first in sorted order |
 | `409 conflict_idempotency` | Idempotency | the first request with the key is still running after the wait |
 | `409 conflict_idempotency_unresolved` | Idempotency | the first request's owner died before it stored an answer, so the outcome is unknown |
 | `422 idempotency_error` | Idempotency | the key reused for another request, or by another caller |

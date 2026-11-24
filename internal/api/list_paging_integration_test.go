@@ -405,8 +405,8 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 		})
 	}
 
-	// A set that does not page answers the same with or without the paging
-	// parameters, as docs/api/pagination.md says.
+	// A set that does not page takes no paging parameters: a request with one
+	// is refused, as docs/api/pagination.md says.
 	unpagedPaths := map[string]string{
 		"/v1/usage-events/held":              "/v1/usage-events/held",
 		"/v1/subscriptions/{id}/timeline":    "/v1/subscriptions/" + subA + "/timeline",
@@ -424,10 +424,9 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 			continue // /v1/members answers only a dashboard session
 		}
 		t.Run("unpaged "+route, func(t *testing.T) {
-			plain := call("GET", path, nil).want(t, 200, "plain")
-			paged := call("GET", with(path, "limit=1&offset=1&after=x"), nil).want(t, 200, "with paging parameters")
-			if string(plain.raw) != string(paged.raw) {
-				t.Errorf("limit, offset and after changed the answer:\n%s\n%s", clip(plain.raw), clip(paged.raw))
+			call("GET", path, nil).want(t, 200, "plain")
+			if r := call("GET", with(path, "limit=1"), nil); r.status != 422 || flowStr(r.body, "error", "param") != "limit" {
+				t.Errorf("with limit: %d %s, want 422 naming limit", r.status, clip(r.raw))
 			}
 		})
 	}
