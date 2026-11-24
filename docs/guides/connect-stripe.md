@@ -99,8 +99,13 @@ Hardcount**.
      your own address.
 
      ```bash
-     stripe listen --forward-to http://localhost:8080/v1/webhooks/stripe/hc_spc_…
+     stripe listen \
+       --events payment_intent.succeeded,payment_intent.payment_failed,checkout.session.completed,setup_intent.succeeded,setup_intent.setup_failed,charge.refund.updated,refund.created,refund.updated,refund.failed,charge.dispute.created,charge.dispute.updated,charge.dispute.closed \
+       --forward-to http://localhost:8080/v1/webhooks/stripe/hc_spc_…
      ```
+
+     The command names the events to forward, the same list as above: the
+     Stripe CLI does not start without one.
 
      **You see:** the CLI prints a signing secret (`whsec_…`).
 

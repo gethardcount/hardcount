@@ -143,6 +143,7 @@ from step 1a (`hc_spc_…`, the tenant's `stripe_provider_credentials.id`).
 
    ```bash
    stripe listen --api-key $STRIPE_SK \
+     --events payment_intent.succeeded,payment_intent.payment_failed,checkout.session.completed,setup_intent.succeeded,setup_intent.setup_failed,charge.refund.updated,refund.created,refund.updated,refund.failed,charge.dispute.created,charge.dispute.updated,charge.dispute.closed \
      --forward-to http://localhost:8080/v1/webhooks/stripe/<endpoint_id>
    ```
 

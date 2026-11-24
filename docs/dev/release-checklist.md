@@ -19,7 +19,7 @@ clean.
 
 - `cp .env.example .env`, then `make up` (Postgres, Redis, Mailpit), `make bootstrap` (prints the sign-in and the test keys), `make dev` (API on :8080) and `cd web-v2 && npm run dev` (dashboard on :5173).
 - The `.env.example` defaults send email to Mailpit and point email links at the dashboard on :5173. Read mail at http://localhost:8025.
-- Settings → Payments: paste the Stripe test keys. Run `stripe listen --forward-to localhost:8080/v1/webhooks/stripe/<hc_spc_id>` and paste its `whsec_…` back.
+- Settings → Payments: paste the Stripe test keys. Run the `stripe listen` command that page shows (it names the events to forward) and paste its `whsec_…` back.
 - Stripe test cards:
 
   | Card | Result |

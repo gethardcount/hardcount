@@ -3,7 +3,10 @@
 // this computer (localhost) shows an address Stripe can never call. There the
 // Stripe CLI relays the events instead: `stripe listen` holds a connection
 // open to Stripe and forwards each event to the local URL, and prints the
-// signing secret to paste in step B (docs/guides/connect-stripe.md).
+// signing secret to paste in step B (docs/guides/connect-stripe.md). The
+// command names the events to forward: the Stripe CLI refuses to start
+// without a choice of events, and naming Hardcount's own list forwards what a
+// real webhook endpoint would be sent, no more.
 //
 // Dependency-free so the unit tests can load it.
 
@@ -22,6 +25,6 @@ export function isLocalAddress(url: string): boolean {
   return host === 'localhost' || host.endsWith('.localhost') || host === '127.0.0.1' || host === '[::1]'
 }
 
-export function stripeListenCommand(webhookUrl: string): string {
-  return `stripe listen --forward-to ${webhookUrl}`
+export function stripeListenCommand(webhookUrl: string, events: readonly string[]): string {
+  return `stripe listen --events ${events.join(',')} --forward-to ${webhookUrl}`
 }

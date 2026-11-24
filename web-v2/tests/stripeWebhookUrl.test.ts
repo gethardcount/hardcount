@@ -18,6 +18,11 @@ test('only an address on this computer counts as one Stripe cannot reach', () =>
   }
 })
 
-test('the CLI command forwards to the webhook URL', () => {
-  assert.equal(stripeListenCommand('http://localhost:5173/v1/webhooks/stripe/hc_spc_1'), 'stripe listen --forward-to http://localhost:5173/v1/webhooks/stripe/hc_spc_1')
+// The Stripe CLI refuses `stripe listen` with no choice of events ("must
+// specify events to forward"), so the command names them.
+test('the CLI command names the events and forwards to the webhook URL', () => {
+  assert.equal(
+    stripeListenCommand('http://localhost:5173/v1/webhooks/stripe/hc_spc_1', ['payment_intent.succeeded', 'refund.created']),
+    'stripe listen --events payment_intent.succeeded,refund.created --forward-to http://localhost:5173/v1/webhooks/stripe/hc_spc_1',
+  )
 })

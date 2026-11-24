@@ -1663,7 +1663,7 @@ function WebhookSetup({ current, onSuccess }: {
             signed in to your Stripe account, run this and leave it running. It passes Stripe&rsquo;s events on to
             Hardcount and prints a signing secret (<code className="font-mono">whsec_…</code>) for step B.
           </p>
-          <CopyValueRow label="Command" value={stripeListenCommand(webhookUrl)} copied="Command copied" />
+          <CopyValueRow label="Command" value={stripeListenCommand(webhookUrl, STRIPE_WEBHOOK_EVENTS.map(e => e.name))} copied="Command copied" />
           <p className="text-xs text-muted-foreground">
             On a server Stripe can reach, add the webhook URL in Stripe instead.
           </p>
