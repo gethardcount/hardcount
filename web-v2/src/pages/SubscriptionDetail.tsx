@@ -5,9 +5,9 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
-import { CANCEL_IMMEDIATELY_SENTENCE, changePlanNowHelper, changeQuantityText, PAUSE_DIALOG_SENTENCE, pauseCollectionToast, planChangeToast, removeItemText, scheduleCancelToast } from '@/lib/subscriptionCopy'
+import { CANCEL_NOW_SENTENCE, changePlanNowHelper, changeQuantityText, PAUSE_DIALOG_SENTENCE, pauseCollectionToast, planChangeToast, removeItemText } from '@/lib/subscriptionCopy'
 import { api, formatCents, formatCentsBare, prorationText, formatDate, formatDateTime, type Subscription, type SubscriptionItem, type Plan, type ItemChangeResult } from '@/lib/api'
-import { civilDateFrom, formatCivilDate, formatCivilPeriod, startOfDayInTZ } from '@/lib/dates'
+import { civilDateFrom, formatCivilPeriod, startOfDayInTZ } from '@/lib/dates'
 import { showApiError } from '@/lib/formErrors'
 import { amountInputError, dollarsToWholeCents, wholeUnits } from '@/lib/priceInput'
 import { Combobox, type ComboboxOption } from '@/components/Combobox'
@@ -15,10 +15,10 @@ import { Callout } from '@/components/Callout'
 import { NoticeRow } from '@/components/NoticeRow'
 import { SendSetupLinkDialog } from '@/components/SendSetupLinkDialog'
 import {
-  NO_CARD_SENTENCE, NO_CARD_TITLE, billingFailureNextLine, billingFailureTitle, cancelScheduledSentence,
-  collectionPausedSentence, hasScheduledCancel, subscriptionNoticeLayout, type SubscriptionNoticeKind,
+  NO_CARD_SENTENCE, NO_CARD_TITLE, billingFailureNextLine, billingFailureTitle,
+  collectionPausedSentence, subscriptionNoticeLayout, type SubscriptionNoticeKind,
 } from '@/lib/subscriptionNotices'
-import { cancelAtPeriodEndText, periodLabels } from '@/lib/subscriptionPeriod'
+import { periodLabels } from '@/lib/subscriptionPeriod'
 import { previewView } from '@/lib/invoicePreview'
 import { useNowResolver } from '@/hooks/useNow'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
@@ -77,11 +77,6 @@ export default function SubscriptionDetailPage() {
   const queryClient = useQueryClient()
 
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
-  const [showCancelChoice, setShowCancelChoice] = useState(false)
-  // Default to the less-destructive option ("at period end") — Stripe / Linear
-  // / GitHub all default to the safer choice on destructive flows so a misclick
-  // doesn't escalate. Operator picks "immediately" deliberately.
-  const [cancelMode, setCancelMode] = useState<'period_end' | 'immediately'>('period_end')
   const [showPauseConfirm, setShowPauseConfirm] = useState(false)
   const [pauseResumesAt, setPauseResumesAt] = useState('')
   const [itemDialog, setItemDialog] = useState<ItemDialogState>(null)
@@ -213,23 +208,6 @@ export default function SubscriptionDetailPage() {
     onError: (err) => showApiError(err, 'Failed to cancel'),
   })
 
-  const scheduleCancelMutation = useMutation({
-    mutationFn: () => api.scheduleSubscriptionCancel(id!, { at_period_end: true }),
-    onSuccess: (updated) => {
-      invalidateAll()
-      const t = scheduleCancelToast(updated?.cancel_effective_at ? formatDate(updated.cancel_effective_at) : undefined)
-      toast.success(t.title, { description: t.description })
-      setShowCancelChoice(false)
-    },
-    onError: (err) => { invalidateAll(); showApiError(err, 'Failed to schedule cancellation') },
-  })
-
-  const clearScheduledCancelMutation = useMutation({
-    mutationFn: () => api.clearScheduledSubscriptionCancel(id!),
-    onSuccess: () => { invalidateAll(); toast.success('Cancellation undone', { description: 'The subscription will renew as usual.' }) },
-    onError: (err) => { invalidateAll(); showApiError(err, 'Failed to clear scheduled cancellation') },
-  })
-
   const pauseCollectionMutation = useMutation({
     mutationFn: () => {
       const body: { behavior: 'keep_as_draft'; resumes_at?: string } = { behavior: 'keep_as_draft' }
@@ -268,8 +246,6 @@ export default function SubscriptionDetailPage() {
 
   const acting =
     cancelMutation.isPending ||
-    scheduleCancelMutation.isPending ||
-    clearScheduledCancelMutation.isPending ||
     pauseCollectionMutation.isPending ||
     resumeCollectionMutation.isPending
 
@@ -294,19 +270,13 @@ export default function SubscriptionDetailPage() {
 
   const firstItemPlan = items[0] ? planById(items[0].plan_id) : undefined
 
-  // Every date below comes from one helper: the last covered day reads
-  // "through Nov 15", the boundary after it "Renews/Cancels Nov 16", and a
-  // canceled subscription never "renews" (lib/subscriptionPeriod).
-  const labels = periodLabels(
-    sub,
-    { date: (iso) => formatDate(iso), lastDay: (iso) => formatCivilDate(iso, undefined) },
-  )
+  // Every renewal and cancel date below comes from one helper, so a canceled
+  // subscription never "renews" (lib/subscriptionPeriod).
+  const labels = periodLabels(sub, (iso) => formatDate(iso))
 
-  const cancelScheduled = hasScheduledCancel(sub)
   const noticeLayout = subscriptionNoticeLayout({
     billingFailure: !!sub.billing_failure,
     needsCard: subNeedsCard,
-    cancelScheduled,
     collectionPaused: !!sub.pause_collection,
   })
 
@@ -345,23 +315,6 @@ export default function SubscriptionDetailPage() {
         return as === 'box'
           ? <Callout tone="amber" title={NO_CARD_TITLE} actions={action}>{NO_CARD_SENTENCE}</Callout>
           : <NoticeRow tone="amber" title={NO_CARD_TITLE} action={action}>{NO_CARD_SENTENCE}</NoticeRow>
-      }
-      case 'cancel_scheduled': {
-        const action = (
-          <Button variant="outline" size="sm" onClick={() => clearScheduledCancelMutation.mutate()} disabled={acting}>
-            {clearScheduledCancelMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Undoing…</> : 'Undo'}
-          </Button>
-        )
-        // cancel_effective_at is the backend's authoritative answer:
-        // cancel_at when set, else the end of the current period.
-        const sentence = cancelScheduledSentence(sub, {
-          effectiveLabel: sub.cancel_effective_at ? formatDateTime(sub.cancel_effective_at) : undefined,
-          accessThrough: labels.accessThrough,
-          cancelsOn: labels.cancelsOn,
-        })
-        return as === 'box'
-          ? <Callout tone="amber" title="Cancellation scheduled" actions={action}>{sentence}</Callout>
-          : <NoticeRow tone="amber" title="Cancellation scheduled" action={action}>{sentence}</NoticeRow>
       }
       case 'collection_paused': {
         // The sub stays active, but invoices generate as drafts and skip
@@ -415,7 +368,7 @@ export default function SubscriptionDetailPage() {
                   Pause collection…
                 </Button>
               )}
-              <Button variant="outline" className="border-destructive text-destructive hover:bg-destructive/10" onClick={() => setShowCancelChoice(true)} disabled={acting}>
+              <Button variant="outline" className="border-destructive text-destructive hover:bg-destructive/10" onClick={() => setShowCancelConfirm(true)} disabled={acting}>
                 Cancel
               </Button>
             </>
@@ -425,9 +378,9 @@ export default function SubscriptionDetailPage() {
       </div>
 
       {/* Notices: at most one box, the most urgent present (billing failure,
-          then no card, then scheduled cancel, then collection paused; see
-          lib/subscriptionNotices). Any other that applies is a one-line row
-          under the box, so the most urgent reads first, keeping its button. */}
+          then no card, then collection paused; see lib/subscriptionNotices).
+          Any other that applies is a one-line row under the box, so the most
+          urgent reads first, keeping its button. */}
       {noticeLayout.box && (
         <div className="mb-6 space-y-3">
           {renderNotice(noticeLayout.box, 'box')}
@@ -445,7 +398,7 @@ export default function SubscriptionDetailPage() {
 
         // Created and the current period's start are always at or before
         // the subscription's now, so they are marked past from the stored
-        // record; the renewal or cancel ahead is not.
+        // record; the renewal or collection resume ahead is not.
         timelinePoints.push({
           label: 'Created',
           date: formatDate(sub.created_at),
@@ -453,8 +406,7 @@ export default function SubscriptionDetailPage() {
         })
 
         // The dots read from periodLabels, the same dates as the summary
-        // and the list. A canceled subscription ends on its cancel; a
-        // scheduled cancel replaces the renewal.
+        // and the list. A canceled subscription ends on its cancel.
         if (sub.status === 'canceled') {
           if (sub.current_billing_period_start) {
             timelinePoints.push({ label: 'Last period', date: formatDate(sub.current_billing_period_start), isPast: true })
@@ -470,9 +422,7 @@ export default function SubscriptionDetailPage() {
               isPast: true,
             })
           }
-          if (labels.cancelsOn) {
-            timelinePoints.push({ label: 'Cancels', date: labels.cancelsOn, isPast: false })
-          } else if (sub.pause_collection) {
+          if (sub.pause_collection) {
             // Collection paused: invoices draft but don't charge, so the
             // next point is the resume. With no resume date the pause is
             // open-ended ("Indefinite").
@@ -567,9 +517,8 @@ export default function SubscriptionDetailPage() {
             <div className="flex-1 min-w-0 px-6 py-4">
               <p className="text-sm text-muted-foreground">Billing cycle</p>
               <p className="text-lg font-semibold text-foreground mt-1">
-                {/* One answer from periodLabels: Renews, Cancels (a
-                    scheduled cancel), or Canceled — never "Renews" on a
-                    canceled subscription. */}
+                {/* One answer from periodLabels: Renews or Canceled, never
+                    "Renews" on a canceled subscription. */}
                 {labels.next ? `${labels.next.label} ${labels.next.value}` : '\u2014'}
               </p>
               {sub.status !== 'canceled' && sub.current_billing_period_start && sub.current_billing_period_end && (
@@ -1064,71 +1013,13 @@ export default function SubscriptionDetailPage() {
         open={showCancelConfirm}
         onOpenChange={setShowCancelConfirm}
         title="Cancel subscription now"
-        description={CANCEL_IMMEDIATELY_SENTENCE}
+        description={CANCEL_NOW_SENTENCE}
         confirmWord="CANCEL"
         confirmLabel="Cancel subscription now"
         cancelLabel="Keep subscription"
         onConfirm={() => cancelMutation.mutate()}
         loading={cancelMutation.isPending}
       />
-
-      {/* Cancel Choice — radio-card pattern (Stripe / Linear / GitHub).
-          Two clear options with visible selection state, single primary
-          action in the footer that commits the chosen mode. "Immediately"
-          still routes through the typed-confirm dialog because the action
-          is irreversible — friction is intentional there. */}
-      <AlertDialog
-        open={showCancelChoice}
-        onOpenChange={(o) => { setShowCancelChoice(o); if (!o) setCancelMode('period_end') }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Cancel subscription</AlertDialogTitle>
-            <AlertDialogDescription>
-              Choose when this subscription should stop billing.
-              {labels.accessThrough && (
-                <> The current period runs through {labels.accessThrough}.</>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="space-y-2 py-2" role="radiogroup" aria-label="Cancellation timing">
-            <RadioCard
-              selected={cancelMode === 'period_end'}
-              onClick={() => setCancelMode('period_end')}
-              disabled={acting}
-              title="At period end"
-              description={cancelAtPeriodEndText(labels)}
-            />
-            <RadioCard
-              selected={cancelMode === 'immediately'}
-              onClick={() => setCancelMode('immediately')}
-              disabled={acting}
-              destructive
-              title="Immediately"
-              description={CANCEL_IMMEDIATELY_SENTENCE}
-            />
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={acting}>Keep subscription</AlertDialogCancel>
-            <Button
-              variant={cancelMode === 'immediately' ? 'destructive' : 'default'}
-              disabled={acting}
-              onClick={() => {
-                if (cancelMode === 'immediately') {
-                  setShowCancelChoice(false)
-                  setShowCancelConfirm(true)
-                } else {
-                  scheduleCancelMutation.mutate()
-                }
-              }}
-            >
-              {scheduleCancelMutation.isPending
-                ? <><Loader2 size={14} className="animate-spin mr-1.5" />Scheduling…</>
-                : cancelMode === 'immediately' ? 'Cancel immediately…' : 'Schedule cancellation'}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* Add item */}
       {itemDialog?.kind === 'add' && plansData && (
@@ -1780,57 +1671,5 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
         </form>
       </DialogContent>
     </Dialog>
-  )
-}
-
-// RadioCard renders a selectable option for choice-dialogs (Cancel,
-// Pause). Industry-standard shape: visible radio dot, title + sub-line,
-// clear selected/destructive states. Local to this file until a third
-// use case appears — premature to extract to /ui.
-function RadioCard({
-  selected, onClick, disabled, destructive, title, description,
-}: {
-  selected: boolean
-  onClick: () => void
-  disabled?: boolean
-  destructive?: boolean
-  title: string
-  description: string
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={selected}
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        'w-full text-left rounded-lg border p-3 transition-colors flex items-start gap-3',
-        selected
-          ? destructive
-            ? 'border-destructive bg-destructive/5'
-            : 'border-foreground bg-muted/40'
-          : 'border-border hover:border-foreground/40',
-        disabled && 'opacity-50 cursor-not-allowed',
-      )}
-    >
-      <span
-        className={cn(
-          'mt-0.5 h-4 w-4 rounded-full border-2 flex items-center justify-center shrink-0',
-          selected
-            ? destructive ? 'border-destructive' : 'border-foreground'
-            : 'border-muted-foreground',
-        )}
-        aria-hidden="true"
-      >
-        {selected && (
-          <span className={cn('h-2 w-2 rounded-full', destructive ? 'bg-destructive' : 'bg-foreground')} />
-        )}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className={cn('block text-sm font-medium', destructive && selected && 'text-destructive')}>{title}</span>
-        <span className="block text-xs text-muted-foreground mt-0.5 whitespace-normal">{description}</span>
-      </span>
-    </button>
   )
 }

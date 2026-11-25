@@ -37,8 +37,8 @@ import (
 // Period [2026-06-01, 2026-07-01), 30 days. The day-1 invoice is paid. The
 // cancel lands on 2026-06-16: 15 of 30 days unused, so the relief is a credit
 // note of 4900 × 15/30 = 2450c on the paid day-1 invoice, credited to the
-// balance. Both cancel paths run: the immediate Cancel and the scheduled
-// cancel's FireDueScheduledCancel, wired as internal/api/router.go wires them.
+// balance. The cancel is the immediate Cancel, wired as internal/api/router.go
+// wires it.
 //
 // Before the fix the final invoice was collected before the relief was
 // issued: with a card, the card was charged the whole final invoice and the
@@ -270,40 +270,6 @@ func (r *reliefCancelRig) cancelImmediately(t *testing.T) {
 	}
 }
 
-// scheduleCancel schedules the cancel for cancelAt.
-func (r *reliefCancelRig) scheduleCancel(t *testing.T) {
-	t.Helper()
-	tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer postgres.Rollback(tx)
-	if _, err := tx.ExecContext(r.ctx, `UPDATE subscriptions SET cancel_at = $1 WHERE id = $2`, r.cancelAt, r.subID); err != nil {
-		t.Fatalf("schedule cancel: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-}
-
-// fire is the billing run firing the scheduled cancel an hour after cancelAt.
-func (r *reliefCancelRig) fire() error {
-	return r.subSvc.FireDueScheduledCancel(clock.WithEffectiveNow(r.ctx, r.cancelAt.Add(time.Hour)), r.tenantID, r.subID, r.cancelAt)
-}
-
-// fireScheduledCancel is scheduleCancel then fire, checked.
-func (r *reliefCancelRig) fireScheduledCancel(t *testing.T) {
-	t.Helper()
-	r.scheduleCancel(t)
-	if err := r.fire(); err != nil {
-		t.Fatalf("fire scheduled cancel: %v", err)
-	}
-	sub, err := subscription.NewPostgresStore(r.db).Get(r.ctx, r.tenantID, r.subID)
-	if err != nil || sub.Status != domain.SubscriptionCanceled {
-		t.Fatalf("after the fire: %v status=%s, want canceled", err, sub.Status)
-	}
-}
-
 func (r *reliefCancelRig) finalInvoice(t *testing.T) domain.Invoice {
 	t.Helper()
 	invs, _, err := r.invStore.List(r.ctx, invoice.ListFilter{TenantID: r.tenantID})
@@ -353,111 +319,101 @@ func (r *reliefCancelRig) noPMNotified(invoiceID string) []int64 {
 func TestCancel_ReliefReducesFinalInvoice_CardOrNoCard(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 
-	cancels := []struct {
-		name string
-		run  func(*reliefCancelRig, *testing.T)
-	}{
-		{"immediate cancel", (*reliefCancelRig).cancelImmediately},
-		{"scheduled cancel", (*reliefCancelRig).fireScheduledCancel},
-	}
+	// Usage 3000c is more than the 2450c relief: the relief is spent on the
+	// final invoice, and 550c is left to collect.
+	t.Run("relief covers part of the final invoice", func(t *testing.T) {
+		const usageCents, wantDue = 3000, 3000 - reliefCents
+		for _, card := range []bool{true, false} {
+			r := newReliefCancelRig(t, db, fmt.Sprintf("1272 part card=%v", card), reliefRigOpts{card: card, usageUnits: usageCents})
+			r.cancelImmediately(t)
 
-	for _, c := range cancels {
-		// Usage 3000c is more than the 2450c relief: the relief is spent on the
-		// final invoice, and 550c is left to collect.
-		t.Run(c.name+"/relief covers part of the final invoice", func(t *testing.T) {
-			const usageCents, wantDue = 3000, 3000 - reliefCents
-			for _, card := range []bool{true, false} {
-				r := newReliefCancelRig(t, db, fmt.Sprintf("1272 %s part card=%v", c.name, card), reliefRigOpts{card: card, usageUnits: usageCents})
-				c.run(r, t)
-
-				final := r.finalInvoice(t)
-				if final.TotalAmountCents != usageCents {
-					t.Fatalf("card=%v: final invoice total = %dc, want %dc (the usage; the in-advance base is not billed again)", card, final.TotalAmountCents, usageCents)
-				}
-				if final.CreditsAppliedCents != reliefCents || final.AmountDueCents != wantDue {
-					t.Errorf("card=%v: final invoice credits_applied=%dc amount_due=%dc, want %dc and %dc: the relief must reduce the final invoice",
-						card, final.CreditsAppliedCents, final.AmountDueCents, reliefCents, wantDue)
-				}
-				if bal := r.balance(t); bal != 0 {
-					t.Errorf("card=%v: credit balance = %dc, want 0 (the relief was spent on the final invoice)", card, bal)
-				}
-				charges, notified := r.charger.charges(final.ID), r.noPMNotified(final.ID)
-				if card {
-					if len(charges) != 1 || charges[0] != wantDue {
-						t.Errorf("card on file: final invoice charges = %v, want one charge of %dc (the rest after the relief)", charges, wantDue)
-					}
-				} else {
-					if len(charges) != 0 {
-						t.Errorf("no card: final invoice charges = %v, want none", charges)
-					}
-					if len(notified) != 1 || notified[0] != wantDue {
-						t.Errorf("no card: no-card email for the final invoice = %v, want one, for %dc", notified, wantDue)
-					}
-				}
-			}
-		})
-
-		// Usage 1000c is less than the 2450c relief: the final invoice is paid
-		// by the relief alone, and 1450c stays on the balance.
-		t.Run(c.name+"/relief covers the whole final invoice", func(t *testing.T) {
-			const usageCents = 1000
-			for _, card := range []bool{true, false} {
-				r := newReliefCancelRig(t, db, fmt.Sprintf("1272 %s whole card=%v", c.name, card), reliefRigOpts{card: card, usageUnits: usageCents})
-				c.run(r, t)
-
-				final := r.finalInvoice(t)
-				if final.Status != domain.InvoicePaid || final.CreditsAppliedCents != usageCents || final.AmountDueCents != 0 {
-					t.Errorf("card=%v: final invoice status=%s credits_applied=%dc amount_due=%dc, want paid by %dc of the relief",
-						card, final.Status, final.CreditsAppliedCents, final.AmountDueCents, usageCents)
-				}
-				if bal := r.balance(t); bal != reliefCents-usageCents {
-					t.Errorf("card=%v: credit balance = %dc, want %dc (the relief left after paying the final invoice)", card, bal, reliefCents-usageCents)
-				}
-				if charges := r.charger.charges(final.ID); len(charges) != 0 {
-					t.Errorf("card=%v: final invoice charges = %v, want none", card, charges)
-				}
-				if notified := r.noPMNotified(final.ID); len(notified) != 0 {
-					t.Errorf("card=%v: no-card email for the final invoice = %v, want none (nothing is owed)", card, notified)
-				}
-			}
-		})
-
-		// The day-1 invoice is unpaid: 4000c of customer credits paid part of
-		// it, leaving 900c due, and there is no card. The 2450c relief is a
-		// credit note on that invoice. It clears the 900c due and takes 1550c
-		// of the credits off the invoice, back to the balance (ADR-061). Those
-		// 1550c must reduce the final invoice. In the old order the final
-		// invoice was collected first, with an empty balance.
-		t.Run(c.name+"/unpaid day-1 invoice: the credits the relief returns reduce the final invoice", func(t *testing.T) {
-			const (
-				usageCents      = 3000
-				day1Credit      = 4000
-				day1Due         = reliefBaseCents - day1Credit // 900
-				creditsReturned = reliefCents - day1Due        // 1550
-				wantDue         = usageCents - creditsReturned // 1450
-			)
-			r := newReliefCancelRig(t, db, "1272 "+c.name+" unpaid day-1", reliefRigOpts{usageUnits: usageCents, day1Credit: day1Credit})
-			if d := r.invoice(t, r.day1ID); d.PaymentStatus == domain.PaymentSucceeded || d.CreditsAppliedCents != day1Credit || d.AmountDueCents != day1Due {
-				t.Fatalf("fixture: day-1 invoice payment=%s credits_applied=%dc amount_due=%dc, want unpaid with %dc applied and %dc due",
-					d.PaymentStatus, d.CreditsAppliedCents, d.AmountDueCents, day1Credit, day1Due)
-			}
-			c.run(r, t)
-
-			if d := r.invoice(t, r.day1ID); d.AmountDueCents != 0 || d.CreditsAppliedCents != day1Credit-creditsReturned {
-				t.Errorf("day-1 invoice after the relief: credits_applied=%dc amount_due=%dc, want %dc and 0",
-					d.CreditsAppliedCents, d.AmountDueCents, day1Credit-creditsReturned)
-			}
 			final := r.finalInvoice(t)
-			if final.CreditsAppliedCents != creditsReturned || final.AmountDueCents != wantDue {
-				t.Errorf("final invoice credits_applied=%dc amount_due=%dc, want %dc and %dc: the credits the relief returned must reduce the final invoice",
-					final.CreditsAppliedCents, final.AmountDueCents, creditsReturned, wantDue)
+			if final.TotalAmountCents != usageCents {
+				t.Fatalf("card=%v: final invoice total = %dc, want %dc (the usage; the in-advance base is not billed again)", card, final.TotalAmountCents, usageCents)
+			}
+			if final.CreditsAppliedCents != reliefCents || final.AmountDueCents != wantDue {
+				t.Errorf("card=%v: final invoice credits_applied=%dc amount_due=%dc, want %dc and %dc: the relief must reduce the final invoice",
+					card, final.CreditsAppliedCents, final.AmountDueCents, reliefCents, wantDue)
 			}
 			if bal := r.balance(t); bal != 0 {
-				t.Errorf("credit balance = %dc, want 0 (the returned credits were spent on the final invoice)", bal)
+				t.Errorf("card=%v: credit balance = %dc, want 0 (the relief was spent on the final invoice)", card, bal)
 			}
-			if notified := r.noPMNotified(final.ID); len(notified) != 1 || notified[0] != wantDue {
-				t.Errorf("no-card email for the final invoice = %v, want one, for %dc", notified, wantDue)
+			charges, notified := r.charger.charges(final.ID), r.noPMNotified(final.ID)
+			if card {
+				if len(charges) != 1 || charges[0] != wantDue {
+					t.Errorf("card on file: final invoice charges = %v, want one charge of %dc (the rest after the relief)", charges, wantDue)
+				}
+			} else {
+				if len(charges) != 0 {
+					t.Errorf("no card: final invoice charges = %v, want none", charges)
+				}
+				if len(notified) != 1 || notified[0] != wantDue {
+					t.Errorf("no card: no-card email for the final invoice = %v, want one, for %dc", notified, wantDue)
+				}
 			}
-		})
-	}
+		}
+	})
+
+	// Usage 1000c is less than the 2450c relief: the final invoice is paid
+	// by the relief alone, and 1450c stays on the balance.
+	t.Run("relief covers the whole final invoice", func(t *testing.T) {
+		const usageCents = 1000
+		for _, card := range []bool{true, false} {
+			r := newReliefCancelRig(t, db, fmt.Sprintf("1272 whole card=%v", card), reliefRigOpts{card: card, usageUnits: usageCents})
+			r.cancelImmediately(t)
+
+			final := r.finalInvoice(t)
+			if final.Status != domain.InvoicePaid || final.CreditsAppliedCents != usageCents || final.AmountDueCents != 0 {
+				t.Errorf("card=%v: final invoice status=%s credits_applied=%dc amount_due=%dc, want paid by %dc of the relief",
+					card, final.Status, final.CreditsAppliedCents, final.AmountDueCents, usageCents)
+			}
+			if bal := r.balance(t); bal != reliefCents-usageCents {
+				t.Errorf("card=%v: credit balance = %dc, want %dc (the relief left after paying the final invoice)", card, bal, reliefCents-usageCents)
+			}
+			if charges := r.charger.charges(final.ID); len(charges) != 0 {
+				t.Errorf("card=%v: final invoice charges = %v, want none", card, charges)
+			}
+			if notified := r.noPMNotified(final.ID); len(notified) != 0 {
+				t.Errorf("card=%v: no-card email for the final invoice = %v, want none (nothing is owed)", card, notified)
+			}
+		}
+	})
+
+	// The day-1 invoice is unpaid: 4000c of customer credits paid part of
+	// it, leaving 900c due, and there is no card. The 2450c relief is a
+	// credit note on that invoice. It clears the 900c due and takes 1550c
+	// of the credits off the invoice, back to the balance (ADR-061). Those
+	// 1550c must reduce the final invoice. In the old order the final
+	// invoice was collected first, with an empty balance.
+	t.Run("unpaid day-1 invoice: the credits the relief returns reduce the final invoice", func(t *testing.T) {
+		const (
+			usageCents      = 3000
+			day1Credit      = 4000
+			day1Due         = reliefBaseCents - day1Credit // 900
+			creditsReturned = reliefCents - day1Due        // 1550
+			wantDue         = usageCents - creditsReturned // 1450
+		)
+		r := newReliefCancelRig(t, db, "1272 unpaid day-1", reliefRigOpts{usageUnits: usageCents, day1Credit: day1Credit})
+		if d := r.invoice(t, r.day1ID); d.PaymentStatus == domain.PaymentSucceeded || d.CreditsAppliedCents != day1Credit || d.AmountDueCents != day1Due {
+			t.Fatalf("fixture: day-1 invoice payment=%s credits_applied=%dc amount_due=%dc, want unpaid with %dc applied and %dc due",
+				d.PaymentStatus, d.CreditsAppliedCents, d.AmountDueCents, day1Credit, day1Due)
+		}
+		r.cancelImmediately(t)
+
+		if d := r.invoice(t, r.day1ID); d.AmountDueCents != 0 || d.CreditsAppliedCents != day1Credit-creditsReturned {
+			t.Errorf("day-1 invoice after the relief: credits_applied=%dc amount_due=%dc, want %dc and 0",
+				d.CreditsAppliedCents, d.AmountDueCents, day1Credit-creditsReturned)
+		}
+		final := r.finalInvoice(t)
+		if final.CreditsAppliedCents != creditsReturned || final.AmountDueCents != wantDue {
+			t.Errorf("final invoice credits_applied=%dc amount_due=%dc, want %dc and %dc: the credits the relief returned must reduce the final invoice",
+				final.CreditsAppliedCents, final.AmountDueCents, creditsReturned, wantDue)
+		}
+		if bal := r.balance(t); bal != 0 {
+			t.Errorf("credit balance = %dc, want 0 (the returned credits were spent on the final invoice)", bal)
+		}
+		if notified := r.noPMNotified(final.ID); len(notified) != 1 || notified[0] != wantDue {
+			t.Errorf("no-card email for the final invoice = %v, want one, for %dc", notified, wantDue)
+		}
+	})
 }

@@ -20,8 +20,6 @@ interface Sub extends Subscription {
   items: Item[]
   current_billing_period_end?: string
   next_billing_at?: string
-  cancel_at_period_end?: boolean
-  cancel_effective_at?: string
   canceled_at?: string
 }
 interface ItemChange {
@@ -128,7 +126,7 @@ test('a change of plan at renewal charges nothing and shows as pending until can
   await expect(row.getByRole('button', { name: 'Cancel', exact: true })).toHaveCount(0)
 })
 
-test('cancel at period end shows its date and can be undone; cancel now needs CANCEL typed and reads "Ended"', async ({ page }) => {
+test('cancel now needs CANCEL typed and reads "Ended"', async ({ page }) => {
   const { subscription } = await subscribedCustomer()
   const zone = await workspaceZone()
   const before = await getSub(subscription.id)
@@ -137,38 +135,9 @@ test('cancel at period end shows its date and can be undone; cancel now needs CA
   const main = page.getByRole('main')
   const billingCycle = summaryCell(page, 'Billing cycle')
   await expect(billingCycle).toContainText(`Renews ${renewsOn(before, zone)}`)
-  const choice = page.getByRole('alertdialog', { name: 'Cancel subscription' })
 
-  // At period end: the API keeps it active with a cancel date, and the page
-  // names that date until Undo clears it.
+  // The typed confirm stays disabled until CANCEL is typed.
   await main.getByRole('button', { name: 'Cancel', exact: true }).click()
-  await expect(choice.getByRole('radio', { name: /^At period end/ })).toBeChecked()
-  const scheduling = apiCall(page, 'POST', /\/schedule-cancel$/)
-  await choice.getByRole('button', { name: 'Schedule cancellation' }).click()
-  expect((await scheduling).ok()).toBe(true)
-  const scheduled = await getSub(subscription.id)
-  expect([scheduled.status, scheduled.cancel_at_period_end]).toEqual(['active', true])
-  const cancelsOn = day(scheduled.cancel_effective_at!, zone)
-  await expect(toasts(page).getByText(`Cancels at the end of the current period, ${cancelsOn}.`, { exact: true })).toBeVisible()
-  await expect(main.getByText(`it doesn't renew on ${cancelsOn}.`, { exact: false })).toBeVisible()
-  await expect(billingCycle).toContainText(`Cancels ${cancelsOn}`)
-
-  const undoing = apiCall(page, 'DELETE', /\/scheduled-cancel$/)
-  await main.getByRole('button', { name: 'Undo', exact: true }).click()
-  expect((await undoing).ok()).toBe(true)
-  await expect(toasts(page).getByText('Cancellation undone', { exact: true })).toBeVisible()
-  const undone = await getSub(subscription.id)
-  expect([undone.status, undone.cancel_at_period_end ?? false, undone.cancel_effective_at ?? null]).toEqual(['active', false, null])
-  // The notice is gone (the Activity list keeps its "Cancellation scheduled"
-  // entry, so look for the notice's own words and button).
-  await expect(main.getByText(`it doesn't renew on ${cancelsOn}.`, { exact: false })).toHaveCount(0)
-  await expect(main.getByRole('button', { name: 'Undo', exact: true })).toHaveCount(0)
-  await expect(billingCycle).toContainText(`Renews ${renewsOn(undone, zone)}`)
-
-  // Immediately: the typed confirm stays disabled until CANCEL is typed.
-  await main.getByRole('button', { name: 'Cancel', exact: true }).click()
-  await choice.getByRole('radio', { name: /^Immediately/ }).click()
-  await choice.getByRole('button', { name: 'Cancel immediately…' }).click()
   const confirm = page.getByRole('alertdialog', { name: 'Cancel subscription now' })
   const cancelNow = confirm.getByRole('button', { name: 'Cancel subscription now' })
   await expect(cancelNow).toBeDisabled()

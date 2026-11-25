@@ -22,7 +22,6 @@ type bfRow struct {
 	id          string
 	status      string // default active
 	nextBilling time.Time
-	cancelAt    *time.Time
 
 	// The saved record. failedFor nil = no record.
 	failedFor   *time.Time
@@ -92,14 +91,12 @@ func (s *bfSeed) sub(r bfRow) string {
 	s.exec(`INSERT INTO subscriptions (
 			id, tenant_id, code, display_name, customer_id, status, billing_time,
 			current_billing_period_start, current_billing_period_end, next_billing_at,
-			cancel_at,
 			livemode,
 			billing_failed_for, billing_failure_count, billing_failed_at, billing_next_attempt_at, billing_last_error,
 			created_at, updated_at
 		) VALUES ($1, $2, $1, $1, (SELECT id FROM customers WHERE tenant_id = $2 LIMIT 1), $3, 'calendar',
-		          $4, $5, $5, $6, false, $7, $8, $9, $10, $11, $4, $4)`,
+		          $4, $5, $5, false, $6, $7, $8, $9, $10, $4, $4)`,
 		r.id, s.tenantID, r.status, r.nextBilling.Add(-30*24*time.Hour), r.nextBilling,
-		postgres.NullableTime(r.cancelAt),
 		postgres.NullableTime(r.failedFor), r.count, failedAt, postgres.NullableTime(r.nextAttempt), lastErr)
 	return r.id
 }
@@ -211,9 +208,9 @@ func TestDueScans_WaitingAndParkedAreSkippedBeforeLimit(t *testing.T) {
 
 // TestDueScans_RecordForAnotherDueInstantDoesNotGate proves that work which
 // never failed cannot be skipped: a parked record saved for a due instant the
-// row no longer has gates nothing. Two ways the due instant moves without the
-// record being touched: the period advanced, and a mid-period cancel that was
-// failing was un-scheduled.
+// row does not have gates nothing: the period advanced without the record
+// being touched, or the record is for a later instant. The key is equality
+// with next_billing_at, not order.
 //
 // Mutation seam: replace the key test in domain.SubscriptionBillingFailingSQL
 // with `billing_failure_count > 0` and every subtest fails.
@@ -223,17 +220,16 @@ func TestDueScans_RecordForAnotherDueInstantDoesNotGate(t *testing.T) {
 
 	// The record is for the previous close, a month before the one now due.
 	s.sub(bfRow{id: "sub_bf_moved", nextBilling: old(10), failedFor: ptr(old(40)), count: 8})
-	// The record is for a mid-period cancel at -45d that has since been
-	// cleared (cancel_at is NULL); the close at -5d is other work.
-	s.sub(bfRow{id: "sub_bf_uncancel", nextBilling: old(5), failedFor: ptr(old(45)), count: 8})
+	// The record is for an instant after the close now due at -5d.
+	s.sub(bfRow{id: "sub_bf_later", nextBilling: old(5), failedFor: ptr(old(2)), count: 8})
 
-	for _, id := range []string{"sub_bf_moved", "sub_bf_uncancel"} {
+	for _, id := range []string{"sub_bf_moved", "sub_bf_later"} {
 		if bf := s.get(id).BillingFailure; bf != nil {
 			t.Fatalf("%s reads a billing failure from a record for another due instant: %+v", id, bf)
 		}
 	}
 
-	want := []string{"sub_bf_moved", "sub_bf_uncancel"}
+	want := []string{"sub_bf_moved", "sub_bf_later"}
 	t.Run("GetDueBilling", func(t *testing.T) {
 		got, err := s.store.GetDueBilling(s.ctx, s.now, s.now, nil, 50)
 		if err != nil {
@@ -245,6 +241,41 @@ func TestDueScans_RecordForAnotherDueInstantDoesNotGate(t *testing.T) {
 	})
 	t.Run("GetDueBillingForTenant", func(t *testing.T) {
 		got, err := s.store.GetDueBillingForTenant(s.ctx, s.tenantID, s.now, s.now, nil, 50)
+		if err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		if g := ids(got); !slices.Equal(g, want) {
+			t.Fatalf("got %v, want %v", g, want)
+		}
+	})
+}
+
+// TestDueScans_AdmitAtNextBillingAt: a subscription's due instant is its
+// next_billing_at, and both scans admit it once that is at or before dueBy
+// (now less the invoice grace), never earlier. The run's now does not admit
+// a row still inside its grace.
+//
+// Mutation seam: make either scan's `<=` a `<`, or compare next_billing_at
+// with now instead of dueBy, and its subtest fails.
+func TestDueScans_AdmitAtNextBillingAt(t *testing.T) {
+	s := newBFSeed(t, "nba")
+	dueBy := s.now.Add(-time.Hour)
+	s.sub(bfRow{id: "sub_nba_at", nextBilling: dueBy})
+	s.sub(bfRow{id: "sub_nba_after", nextBilling: dueBy.Add(time.Microsecond)})
+	s.sub(bfRow{id: "sub_nba_in_grace", nextBilling: s.now.Add(-time.Minute)})
+
+	want := []string{"sub_nba_at"}
+	t.Run("GetDueBilling", func(t *testing.T) {
+		got, err := s.store.GetDueBilling(s.ctx, s.now, dueBy, nil, 50)
+		if err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		if g := ids(got); !slices.Equal(g, want) {
+			t.Fatalf("got %v, want %v", g, want)
+		}
+	})
+	t.Run("GetDueBillingForTenant", func(t *testing.T) {
+		got, err := s.store.GetDueBillingForTenant(s.ctx, s.tenantID, s.now, dueBy, nil, 50)
 		if err != nil {
 			t.Fatalf("scan: %v", err)
 		}

@@ -1,11 +1,13 @@
 # ADR-120: A period's invoice is built after a grace period, and late usage after it is not billed automatically
 
 **Date:** 2026-10-14
-**Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace; amended 2026-10-22: dunning's final pause and cancel wait for the grace; amended 2026-10-22: late usage after the invoice is flagged; amended 2026-11-10: a spend-threshold invoice bills usage up to one grace before it is built); amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (after_close reads the meter's aggregation, built in PR-2; an event's answer says what Hardcount found when it arrived, and one unbilled counter, built in PR-6 #1390)
+**Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace; amended 2026-10-22: dunning's final pause and cancel wait for the grace; amended 2026-10-22: late usage after the invoice is flagged; amended 2026-11-10: a spend-threshold invoice bills usage up to one grace before it is built); amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (after_close reads the meter's aggregation, built in PR-2; an event's answer says what Hardcount found when it arrived, and one unbilled counter, built in PR-6 #1390); amended 2026-11-25: scheduled cancel is removed, so a due instant is a period end only, see the [amendment](#amendment-2026-11-25)
 
 **Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Until each part is built, this ADR describes the code. In the after_close rule, "every bucket of the meter is sum or count" becomes "the meter's aggregation is sum or count", and the `last_ever` case goes (PR-2, built in #1376: no meter has a `last_ever` rule any more, so the bullet on it below no longer applies). "Prices its meter" is read from each current plan at its pin of the period: the period's start, or where the subscription first joined the plan in it (PR-4, amended in #1388). Since PR-6 review round 2 the before-the-period-start case no longer asks whether a plan prices the meter (see the amendment of 2026-10-27). Built in PR-6 (#1390), with D07 folded in: the answer that writes an event carries a `billing_status` (`after_close`, `no_price`, `not_on_plan`, `outside_subscription`) when Hardcount finds a reason it is not billed, as a snapshot of what Hardcount found then, not a promise; and `hardcount_usage_after_close_total{origin}` became `hardcount_usage_unbilled_total{reason, origin}` (see the amendment of 2026-10-27 below). Two stated exceptions to "a flag is never false" stay (see "Where a present status can be wrong" in that amendment): a price write whose transaction spans a period start and commits after the ingest read, and a subscription change that commits between the read and the write. The grace and the after_close flag stay.
 
 ## Summary
+
+**Amended 2026-11-25:** scheduled cancel is removed. The grace counts from a period's end only, no final invoice of a scheduled cancel waits for it, and no usage is `outside_subscription` because of a schedule. The rest is in force.
 
 Hardcount builds a billing period's invoice once `INVOICE_GRACE_PERIOD` has
 passed after the period ends. The default is 1 hour, the range is 0 to 72
@@ -583,3 +585,17 @@ planned after the billing-engine changes now in progress.
   `internal/subscription/postgres.go` `GetDueBilling`,
   `GetDueBillingForTenant`; `internal/api/middleware/metrics.go`;
   `internal/domain/credit_expiry.go` `CreditDrawOwedSQL`.
+
+## Amendment 2026-11-25
+
+Scheduled cancel is removed. A due instant is now only a period end
+(`next_billing_at`), so decision 2 has one arm: both due scans and
+`billSubscription` admit a subscription once `next_billing_at` is at least
+the grace in the past, and there is no cancel branch. Gone with it: the
+final invoice of a cancel scheduled for a date, which waited for the grace
+(Summary, Consequences), its `canceled_at` at the scheduled date
+(decision 6), and the `cancel_at` arm in "Both scan arms and the engine use
+one instant". In the 2026-10-27 amendment, `outside_subscription` has no
+scheduled-cancel case, and time at or after the current period's end gets no
+status. A plan change set for the period end, and a scheduled end of a
+collection pause, still wait for the close.

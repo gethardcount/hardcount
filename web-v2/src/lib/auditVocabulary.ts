@@ -72,7 +72,6 @@ export function describeAction(entry: AuditEntry): string {
           : `Sent a payment-method setup link${label ? ` to ${label}` : ''}`
       }
       if (entry.resource_type === 'payment_method' && metaAction === 'default_changed') return `Set ${label || 'card'} as default`
-      if (entry.resource_type === 'subscription' && metaAction === 'cancel_cleared') return `Cleared scheduled cancellation${label ? ` on ${label}` : ''}`
       if (entry.resource_type === 'subscription' && metaAction === 'item_added') return `Added item${label ? ` to ${label}` : ''}`
       if (entry.resource_type === 'subscription' && metaAction === 'item_removed') return `Removed item${label ? ` from ${label}` : ''}`
       if (entry.resource_type === 'setting' && metaAction === 'settings_updated') {

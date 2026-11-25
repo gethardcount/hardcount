@@ -15,7 +15,7 @@ invoices that are due. Its first run after the grace period ends builds the
 invoice ([how long that takes](../../api/timing-and-limits.md#when-invoices-are-made)).
 
 - The same wait applies to `POST /v1/billing/run`, a billing run you start
-  by hand, and to the final invoice of a cancel scheduled for a date.
+  by hand.
 - These build the invoice at once, with no grace: an immediate cancel, and
   `POST /v1/subscriptions/{id}/retry-billing` on a subscription whose
   billing is failing.
@@ -31,13 +31,13 @@ invoice ([how long that takes](../../api/timing-and-limits.md#when-invoices-are-
 ```bash
 SUB=<subscription id>
 curl -sS "$API/v1/subscriptions/$SUB" -H "Authorization: Bearer $KEY" \
-  | jq '{status, current_billing_period_end, next_billing_at, cancel_at, billing_failure}'
+  | jq '{status, current_billing_period_end, next_billing_at, billing_failure}'
 # The setting in force is logged at boot, in nanoseconds (3600000000000 = 1 hour):
 #   {"msg":"invoice grace period","invoice_grace_period":3600000000000,...}
 ```
 
-The subscription is due once `next_billing_at`, or a `cancel_at` inside
-its current period, is at least `INVOICE_GRACE_PERIOD` in the past.
+The subscription is due once `next_billing_at`, its period end, is at
+least `INVOICE_GRACE_PERIOD` in the past.
 `billing_failure` is set when an attempt to bill it failed.
 
 **Fix:**
@@ -278,13 +278,11 @@ with its memo.
   final pause or cancel waits until that grace ends. The invoice page shows
   that time as "Final step", and the Payment retries page as "Final step in …".
   No charge is retried then: the pause or cancel runs.
-- **A cancel or plan change scheduled for a date.** It takes effect when
+- **A plan change set for the period end.** It takes effect when
   Hardcount builds that period's invoice, up to one grace period after the
-  date. Until then the subscription is `active` on its old plan.
-  `subscription.canceled` is sent then, with `canceled_at` at the scheduled
-  date. A scheduled end of a collection pause (a pause in charging the
-  customer) that falls after a period end waits for that period's invoice
-  too.
+  period end. Until then the subscription stays on its old plan. A
+  scheduled end of a collection pause (a pause in charging the customer)
+  that falls after a period end waits for that period's invoice too.
 - **The subscription's period.** During the grace the subscription still
   shows the ended period. Spend thresholds and the current credit balance
   do not count the new period's usage until the invoice is built.

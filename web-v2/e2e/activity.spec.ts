@@ -166,14 +166,12 @@ test('activity shots: an unpaid first invoice through emails, a credit note and 
   await shootCard(page, sent, 'sent-emails')
 })
 
-test('activity shots: spend thresholds, a cancellation undone, collection paused and resumed (subscription)', async ({ page }) => {
+test('activity shots: spend thresholds, collection paused and resumed (subscription)', async ({ page }) => {
   const plan = await planBilledInAdvance()
   const customer = (await createCustomer()) as Person
   const sub = await subscribe(customer.id, plan.id)
 
   await api('PUT', `/subscriptions/${sub.id}/billing-thresholds`, { amount_gte: 50000 })
-  await asPerson(page, 'POST', `/subscriptions/${sub.id}/schedule-cancel`, { at_period_end: true })
-  await asPerson(page, 'DELETE', `/subscriptions/${sub.id}/scheduled-cancel`)
   await api('PUT', `/subscriptions/${sub.id}/pause-collection`, { behavior: 'keep_as_draft' })
   await asPerson(page, 'DELETE', `/subscriptions/${sub.id}/pause-collection`)
 

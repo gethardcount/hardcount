@@ -521,50 +521,24 @@ func TestDunningFinalCancel_VoidsTheUnusedPrebillUnderItsOwnHold(t *testing.T) {
 	}
 }
 
-// A void run by dunning or by the billing run cancels, at Stripe, the
-// declined PaymentIntent recorded on the invoice, with the invoice's tenant's
-// key. Both run on a ctx that holds livemode and no tenant, as r.ctx does.
-// The Stripe client finds the key by the tenant on ctx, so
+// A void run by dunning's final cancel cancels, at Stripe, the declined
+// PaymentIntent recorded on the invoice, with the invoice's tenant's key. It
+// runs on a ctx that holds livemode and no tenant, as r.ctx does. The Stripe
+// client finds the key by the tenant on ctx, so
 // payment.Stripe.StopCollection names the void's tenant itself.
 //
 // Mutation: delete the auth.WithTenantID line in
-// payment.Stripe.StopCollection → both subtests see no Stripe request.
+// payment.Stripe.StopCollection → no Stripe request is seen.
 func TestBackgroundVoid_CancelsTheDeclinedPaymentIntentAtStripe(t *testing.T) {
-	t.Run("dunning final cancel", func(t *testing.T) {
-		r := newPrebillVoidRig(t, "Background Void PI Cancel: dunning", domain.DunningPolicy{
-			Enabled: true, RetryDays: []int{3},
-			FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible,
-		})
-		api := r.declinedAtStripe()
-		if _, tickErrs := r.dsvc.ProcessDueRuns(r.ctx, r.tenantID, 50); len(tickErrs) != 0 {
-			t.Fatalf("dunning tick: %v", tickErrs)
-		}
-		r.requireVoidedAndPaymentIntentCanceled(api)
+	r := newPrebillVoidRig(t, "Background Void PI Cancel: dunning", domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3},
+		FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
-
-	t.Run("scheduled cancel", func(t *testing.T) {
-		r := newPrebillVoidRig(t, "Background Void PI Cancel: schedule", waitingPolicy())
-		api := r.declinedAtStripe()
-		// Due a minute ago, on the period's first day, so the relief voids the
-		// wholly unused prebill.
-		at := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
-		tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
-		defer postgres.Rollback(tx)
-		if _, err := tx.ExecContext(r.ctx, `UPDATE subscriptions SET cancel_at = $1 WHERE id = $2`, at, r.sub.ID); err != nil {
-			t.Fatalf("schedule cancel: %v", err)
-		}
-		if err := tx.Commit(); err != nil {
-			t.Fatalf("commit: %v", err)
-		}
-		// The call the billing run makes for a due scheduled cancel.
-		if err := r.subSvc.FireDueScheduledCancel(r.ctx, r.tenantID, r.sub.ID, at); err != nil {
-			t.Fatalf("fire scheduled cancel: %v", err)
-		}
-		r.requireVoidedAndPaymentIntentCanceled(api)
-	})
+	api := r.declinedAtStripe()
+	if _, tickErrs := r.dsvc.ProcessDueRuns(r.ctx, r.tenantID, 50); len(tickErrs) != 0 {
+		t.Fatalf("dunning tick: %v", tickErrs)
+	}
+	r.requireVoidedAndPaymentIntentCanceled(api)
 }
 
 // finalActionMovers is dunning's view of the subscription service, as the

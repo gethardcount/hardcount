@@ -488,11 +488,7 @@ func TestE2E_WebhookPayloads_Subscription(t *testing.T) {
 	base := "/v1/subscriptions/" + subID
 	checkEventResource(t, "subscription.created", events.next("create", domain.EventSubscriptionCreated)[domain.EventSubscriptionCreated], getSub(subID))
 
-	ev := step("schedule cancel", domain.EventSubscriptionCancelScheduled, "POST", base+"/schedule-cancel", map[string]any{"at_period_end": true}, 200)
-	checkEventResource(t, "subscription.cancel_scheduled", ev, getSub(subID))
-	ev = step("clear scheduled cancel", domain.EventSubscriptionCancelCleared, "DELETE", base+"/scheduled-cancel", nil, 200)
-	checkEventResource(t, "subscription.cancel_cleared", ev, getSub(subID))
-	ev = step("pause collection", domain.EventSubscriptionCollectionPaused, "PUT", base+"/pause-collection", map[string]any{"behavior": "keep_as_draft"}, 200)
+	ev := step("pause collection", domain.EventSubscriptionCollectionPaused, "PUT", base+"/pause-collection", map[string]any{"behavior": "keep_as_draft"}, 200)
 	checkEventResource(t, "subscription.collection_paused", ev, getSub(subID))
 	if ev.Data["triggered_by"] != "operator" {
 		t.Errorf("subscription.collection_paused triggered_by = %v, want operator", ev.Data["triggered_by"])
@@ -505,16 +501,11 @@ func TestE2E_WebhookPayloads_Subscription(t *testing.T) {
 	// Again, with nothing to undo: 200 with the subscription as it is, and
 	// no event, since nothing changed.
 	unchanged := getSub(subID)
-	for _, again := range []struct{ what, path string }{
-		{"resume collection again", base + "/pause-collection"},
-		{"clear scheduled cancel again", base + "/scheduled-cancel"},
-	} {
-		if body := call("DELETE", again.path, flowReq{}).want(t, 200, again.what).body; body["updated_at"] != unchanged["updated_at"] {
-			t.Errorf("%s: updated_at %v, want %v (nothing changed)", again.what, body["updated_at"], unchanged["updated_at"])
-		}
-		if extra := events.next(again.what); len(extra) != 0 {
-			t.Errorf("%s queued %v, want none", again.what, extra)
-		}
+	if body := call("DELETE", base+"/pause-collection", flowReq{}).want(t, 200, "resume collection again").body; body["updated_at"] != unchanged["updated_at"] {
+		t.Errorf("resume collection again: updated_at %v, want %v (nothing changed)", body["updated_at"], unchanged["updated_at"])
+	}
+	if extra := events.next("resume collection again"); len(extra) != 0 {
+		t.Errorf("resume collection again queued %v, want none", extra)
 	}
 
 	added := call("POST", base+"/items", flowReq{body: map[string]any{"plan_id": extra, "quantity": 2}}).want(t, 201, "add item").body
@@ -617,8 +608,8 @@ func TestE2E_WebhookPayloads_CreditBalance(t *testing.T) {
 }
 
 // TestE2E_WebhookPayloads_SubscriptionSchedule drives the schedule-side
-// subscription.* emitters (the billing engine at the period's end): a plan
-// change that comes due, and a cancel at period end.
+// subscription.* emitter (the billing engine at the period's end): a plan
+// change that comes due.
 func TestE2E_WebhookPayloads_SubscriptionSchedule(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	start := time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC)
@@ -645,28 +636,22 @@ func TestE2E_WebhookPayloads_SubscriptionSchedule(t *testing.T) {
 	customerID := flowStr(call("POST", "/v1/customers", map[string]any{
 		"external_id": "wps-cust", "display_name": "Webhook Payload Schedule",
 	}).want(t, 201, "create customer").body, "id")
-	newSub := func(code string) map[string]any {
-		return call("POST", "/v1/subscriptions", map[string]any{
-			"code": code, "display_name": code, "customer_id": customerID,
-			"items": []map[string]any{{"plan_id": starter, "quantity": 1}}, "billing_time": "anniversary",
-		}).want(t, 201, "create "+code).body
-	}
 	getSub := func(id string) map[string]any {
 		t.Helper()
 		return call("GET", "/v1/subscriptions/"+id, nil).want(t, 200, "get subscription").body
 	}
-	changing := newSub("wps-change")
+	changing := call("POST", "/v1/subscriptions", map[string]any{
+		"code": "wps-change", "display_name": "wps-change", "customer_id": customerID,
+		"items": []map[string]any{{"plan_id": starter, "quantity": 1}}, "billing_time": "anniversary",
+	}).want(t, 201, "create wps-change").body
 	changeItem := flowStr(changing["items"].([]any)[0].(map[string]any), "id")
 	call("PATCH", "/v1/subscriptions/"+flowStr(changing, "id")+"/items/"+changeItem,
 		map[string]any{"new_plan_id": pro, "immediate": false}).want(t, 200, "schedule plan change")
-	ending := newSub("wps-ending")
-	call("POST", "/v1/subscriptions/"+flowStr(ending, "id")+"/schedule-cancel", map[string]any{"at_period_end": true}).want(t, 200, "schedule cancel")
 	events.next("setup")
 
-	// Past the first period end: the plan change applies and the scheduled
-	// cancel fires.
+	// Past the first period end: the plan change applies.
 	tickAt(t, srv, wall, tenantID, start.AddDate(0, 1, 1))
-	got := events.next("period end", domain.EventSubscriptionPendingChangeApplied, domain.EventSubscriptionCanceled)
+	got := events.next("period end", domain.EventSubscriptionPendingChangeApplied)
 	ev := got[domain.EventSubscriptionPendingChangeApplied]
 	// The change applies at the period end, before the close that starts
 	// the next period: the event shows the period that just ended.
@@ -675,11 +660,6 @@ func TestE2E_WebhookPayloads_SubscriptionSchedule(t *testing.T) {
 	if ev.Data["item_id"] != changeItem || ev.Data["old_plan_id"] != starter || flowStr(ev.Data, "applied_at") == "" {
 		t.Errorf("subscription.pending_change.applied extras = %v / %v / %v, want %s / %s / a time",
 			ev.Data["item_id"], ev.Data["old_plan_id"], ev.Data["applied_at"], changeItem, starter)
-	}
-	ev = got[domain.EventSubscriptionCanceled]
-	checkEventResource(t, "subscription.canceled (schedule)", ev, getSub(flowStr(ending, "id")))
-	if ev.Data["canceled_by"] != "schedule" {
-		t.Errorf("subscription.canceled canceled_by = %v, want schedule", ev.Data["canceled_by"])
 	}
 }
 

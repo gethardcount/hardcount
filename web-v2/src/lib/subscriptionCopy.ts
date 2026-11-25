@@ -6,15 +6,6 @@ export interface ToastCopy {
   description?: string
 }
 
-// After "Schedule cancellation". effectiveLabel is the server's
-// cancel_effective_at, formatted: the end of the current period.
-export function scheduleCancelToast(effectiveLabel: string | undefined): ToastCopy {
-  if (effectiveLabel) {
-    return { title: 'Cancellation scheduled', description: `Cancels at the end of the current period, ${effectiveLabel}.` }
-  }
-  return { title: 'Cancellation scheduled', description: 'Cancels at the end of the current period.' }
-}
-
 // After "Pause collection". resumesLabel is the formatted resumes_at the
 // server saved, if any. "Saved as drafts until" bounds when NEW invoices
 // are drafts; it must not say they get charged on resume: a period that
@@ -35,11 +26,10 @@ export const PAUSE_DIALOG_SENTENCE =
   'New invoices are saved as drafts and not charged. Drafts made while paused stay drafts after you resume; finalize them to collect. ' +
   'Payment retries already running on unpaid invoices continue. To stop them, void each invoice or mark it uncollectible.'
 
-// The "Immediately" choice and the typed confirm after it. Cancelling now
-// bills a final invoice for time and usage so far (billing.Engine
-// priceFinalOnCancel) and credits unused prepaid time, so the words name
-// that final charge.
-export const CANCEL_IMMEDIATELY_SENTENCE =
+// The "Cancel subscription now" confirm. Cancelling bills a final invoice for
+// time and usage so far (billing.Engine priceFinalOnCancel) and credits unused
+// prepaid time, so the words name that final charge.
+export const CANCEL_NOW_SENTENCE =
   "Ends the subscription now. Time and usage so far go on a final invoice; unused prepaid time is credited. This can't be undone."
 
 // After an item's plan change with no proration to report: a scheduled

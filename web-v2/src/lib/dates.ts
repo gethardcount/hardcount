@@ -211,18 +211,18 @@ export function civilDateFrom(nowMs: number, days: number, timezone: string): st
 // its INCLUSIVE last covered day instead — "Jun 1 – Jun 30", not "Jun 1 – Jul 1"
 // — so the operator never has to mentally subtract a day.
 //
-// These two helpers are the client-side mirror of the Go functions
-// domain.InclusiveDisplayEnd / domain.FormatInclusivePeriod (the canonical
-// spec — keep them byte-for-byte identical). The CANONICAL billing-period range
-// is authored by the backend and rendered verbatim — invoices via
+// formatCivilPeriod is the client-side mirror of the Go function
+// domain.FormatInclusivePeriod (the canonical spec — keep them byte-for-byte
+// identical). The CANONICAL billing-period range is authored by the backend
+// and rendered verbatim — invoices via
 // `billing_period_display` and subscriptions via `current_billing_period_display`
 // (both computed by FormatInclusivePeriod in the org billing TZ). Prefer those
 // authored strings over re-deriving from the half-open start/end, so the Go and
 // TS inclusive-day logic can't drift.
 //
-// What remains for these helpers: auxiliary period/date labels the backend does
-// not author — a single inclusive period-end date, a line-item's "Covers …"
-// span. Anchor them in the OWNING entity's billing timezone:
+// What remains for this helper: auxiliary period labels the backend does not
+// author, such as a line-item's "Covers …" span. Anchor them in the OWNING
+// entity's billing timezone:
 //   - INVOICE-anchored dates → pass `invoice.billing_timezone` (the org TZ
 //     denormalized at issue, ADR-077 — stays fixed if the org later re-zones).
 //   - SUBSCRIPTION-anchored dates → pass undefined; a sub bills in the one org
@@ -282,34 +282,18 @@ export function usageFilterEndYMD(startISO: string, endISO: string, timezone?: s
   return ymd < startYMD ? startYMD : ymd
 }
 
-// formatCivilDate renders the INCLUSIVE last covered day of a half-open
-// period_end as "MMM d, yyyy" ("Jun 30, 2028"). Use for a single period-boundary
-// label that means "last day covered" (e.g. a cycle's end). NOT for event dates
-// ("Renews", "Cancels", "Next billing") — those fire on the exclusive boundary
-// instant and must keep formatDate(). Empty input → "". Mirrors Go
-// domain.InclusiveDisplayEnd + the "Jan 2, 2006" layout.
-//
-// `timezone` is REQUIRED (ADR-076): a civil-day render must name its zone —
-// `invoice.billing_timezone` for an invoice-anchored date, or undefined for a
-// subscription-anchored one (→ live tenant/org TZ, the sub's actual anchor,
-// ADR-077). The type forbids OMITTING the argument so a caller can't render a
-// civil day without consciously choosing its zone (the FE bug class).
-export function formatCivilDate(endISO: string | null | undefined, timezone: string | undefined): string {
-  if (!endISO) return ''
-  const tz = timezone || tenantTZ()
-  const [y, m, d] = inclusiveEndYMD(endISO, tz)
-  return format(new Date(y, m - 1, d), 'MMM d, yyyy')
-}
-
 // formatCivilPeriod renders the human period range "<start> – <inclusiveEnd>"
 // (en-dash) in tenant TZ — the exact string the invoice's backend
 // billing_period_display shows, so a period reads identically wherever it
 // appears. Returns "" when the period is empty (start == end). Clamps the
 // inclusive end to >= the start's civil day so a sub-day stub never inverts.
 // Mirrors Go domain.FormatInclusivePeriod.
-// `timezone` is REQUIRED (ADR-076) — see formatCivilDate. Pass
-// `invoice.billing_timezone` for an invoice-anchored period, or undefined for a
-// subscription-anchored one (→ live tenant/org TZ); the argument can't be omitted.
+//
+// `timezone` is REQUIRED (ADR-076): a civil-day render must name its zone —
+// `invoice.billing_timezone` for an invoice-anchored period, or undefined for
+// a subscription-anchored one (→ live tenant/org TZ, the sub's actual anchor,
+// ADR-077). The type forbids OMITTING the argument so a caller can't render a
+// civil day without consciously choosing its zone.
 export function formatCivilPeriod(
   startISO: string | null | undefined,
   endISO: string | null | undefined,

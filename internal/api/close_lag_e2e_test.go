@@ -346,64 +346,6 @@ func (r *lagRig) exec(query string, args ...any) {
 	}
 }
 
-// --- D1: cancel schedule ------------------------------------------------------
-
-// TestCloseLag_ScheduleCancelAtPeriodEnd_InGap: the operator schedules
-// cancel-at-period-end two hours after B, before the billing run closed P0.
-// "Period end" means the end of the period that is running, May's. The
-// subscription must stay active through May, and May's prepaid base must be
-// billed when P0 closes.
-//
-// Mutation seam: drop the pre-close from Service.ScheduleCancel → the close
-// cancels the subscription retroactively at B and May is never billed.
-func TestCloseLag_ScheduleCancelAtPeriodEnd_InGap(t *testing.T) {
-	r := newLagRig(t, "in_advance", false)
-	r.ingest(lagP0.AddDate(0, 0, 19), 100)
-	r.ingest(lagB.Add(time.Hour), 50)
-
-	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", lagB.Add(2*time.Hour), map[string]any{"at_period_end": true}, http.StatusOK)
-	r.run(lagB.Add(3 * time.Hour))
-
-	s := r.sub()
-	invs := r.invoices()
-	r.logInvoices(invs)
-	t.Logf("after the run: status=%s canceled_at=%v period=[%v, %v) cancel_at_period_end=%v", s.Status, s.CanceledAt, s.CurrentBillingPeriodStart, s.CurrentBillingPeriodEnd, s.CancelAtPeriodEnd)
-	if s.Status != domain.SubscriptionActive || !s.CurrentBillingPeriodStart.Equal(lagB) || !s.CancelAtPeriodEnd {
-		t.Errorf("status=%s period start=%v cancel_at_period_end=%v, want active in [May 1, Jun 1) and canceling at Jun 1", s.Status, s.CurrentBillingPeriodStart, s.CancelAtPeriodEnd)
-	}
-	may := r.cycleInvoice(invs, lagB)
-	if may.sum("base_fee") != 3000 || may.sum("usage") != 100 {
-		t.Errorf("P0's close (header [May 1, Jun 1)): base=%dc usage=%dc, want May's prepaid 3000c base and April's 100c usage", may.sum("base_fee"), may.sum("usage"))
-	}
-}
-
-// TestCloseLag_ClearScheduledCancel_InGap: the subscription was scheduled to
-// cancel at the end of April. Two hours after B the operator clears the
-// schedule. The cancel took effect at B; a clear after B cannot undo it. The
-// subscription is canceled at B and May is not billed.
-func TestCloseLag_ClearScheduledCancel_InGap(t *testing.T) {
-	r := newLagRig(t, "in_advance", false)
-	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", lagP0.AddDate(0, 0, 9), map[string]any{"at_period_end": true}, http.StatusOK)
-
-	code, raw := r.do(http.MethodDelete, "/v1/subscriptions/"+r.subID+"/scheduled-cancel", lagB.Add(2*time.Hour), nil)
-	// The answer must say the clear did not happen: a 200 would show the
-	// operator "Scheduled cancellation cleared" for a cancel already in force.
-	wantAPIError(t, code, raw, http.StatusConflict, "invalid_state", "already took effect")
-	r.run(lagB.Add(3 * time.Hour))
-
-	s := r.sub()
-	invs := r.invoices()
-	r.logInvoices(invs)
-	if s.Status != domain.SubscriptionCanceled || s.CanceledAt == nil || !s.CanceledAt.Equal(lagB) {
-		t.Errorf("status=%s canceled_at=%v, want canceled at B (%v): the schedule had already taken effect", s.Status, s.CanceledAt, lagB)
-	}
-	for _, i := range invs {
-		if i.sum("base_fee") > 0 && !i.start.Before(lagB) {
-			t.Errorf("May base billed (%dc on %s [%v, %v)) after a cancel that took effect at B", i.sum("base_fee"), i.reason, i.start, i.end)
-		}
-	}
-}
-
 // --- D1: collection pause -----------------------------------------------------
 
 // TestCloseLag_PauseCollection_InGap: collection is paused two hours after B.

@@ -84,8 +84,6 @@ const PAYMENT_IN_BADGE = new Set(['succeeded', 'processing', 'failed'])
 export interface SubscriptionStatusInput {
   status: SubscriptionStatus
   pause_collection?: { behavior?: string; resumes_at?: string | null } | null
-  cancel_at_period_end?: boolean
-  cancel_at?: string | null
 }
 
 // subscriptionStatus is the main badge for a subscription.
@@ -109,18 +107,6 @@ export function collectionPausedFlag(sub: SubscriptionStatusInput, nowMs: number
   if (!pause) return null
   if (nowMs !== undefined && pause.resumes_at && new Date(pause.resumes_at).getTime() <= nowMs) return null
   return { label: 'Collection paused', tone: 'warning' }
-}
-
-// subscriptionFlags are the secondary chips shown beside the main badge, for
-// states the main status does not carry: collection paused (often by
-// dunning) and a scheduled cancel. Only for live subscriptions.
-export function subscriptionFlags(sub: SubscriptionStatusInput, nowMs: number | undefined): StatusDisplay[] {
-  if (sub.status !== 'active') return []
-  const flags: StatusDisplay[] = []
-  const paused = collectionPausedFlag(sub, nowMs)
-  if (paused) flags.push(paused)
-  if (sub.cancel_at_period_end || sub.cancel_at) flags.push({ label: 'Cancel scheduled', tone: 'warning' })
-  return flags
 }
 
 // dunningRunStatus is a dunning run's badge. An active run is a payment

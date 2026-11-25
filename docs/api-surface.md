@@ -184,8 +184,6 @@ A subscription puts a customer on a plan.
 | `DELETE` | `/v1/subscriptions/{id}/items/{itemID}` | Remove a plan from the subscription |
 | `PUT` | `/v1/subscriptions/{id}/pause-collection` | Keep the billing cycle, but leave new invoices as drafts |
 | `DELETE` | `/v1/subscriptions/{id}/pause-collection` | Resume collection |
-| `POST` | `/v1/subscriptions/{id}/schedule-cancel` | Cancel later: send `{"at_period_end": true}`, or a `cancel_at` time |
-| `DELETE` | `/v1/subscriptions/{id}/scheduled-cancel` | Remove a scheduled cancel |
 | `POST` | `/v1/subscriptions/{id}/cancel` | Cancel now |
 | `POST` | `/v1/subscriptions/{id}/retry-billing` | Clear a billing failure (an ended period that could not be invoiced) and bill now |
 | `GET` | `/v1/subscriptions?billing=failing` | List subscriptions whose billing is failing |
@@ -266,7 +264,7 @@ present was true at that moment:
 |---|---|---|
 | `after_close` | The event's time is already invoiced (see Late usage below). | Bill it with a one-off invoice if it should be charged. A price added to a plan does not bill it. |
 | `not_on_plan` | A billing period not invoiced yet holds the event's time, but its plan has no price for the meter. | To bill later usage, add a price for the meter to the plan, or move the customer to a plan that has one. Check the invoice before you bill this event by hand. |
-| `outside_subscription` | No active subscription of the customer bills the event's time. For example, there is none, or the time is before one starts, or after one ends or its scheduled cancel. | Check the event's customer and timestamp. |
+| `outside_subscription` | No active subscription of the customer bills the event's time. For example, there is none, or the time is before one starts or after one ends. | Check the event's customer and timestamp. |
 | `no_price` | The plan that bills the event's time prices the meter, but no price of it takes the event's `dimensions`. A price takes an event whose dimensions include all of the price's `dimension_match` labels. A price's labels are text, so a number or a true/false value in the event never matches: the number `1` does not match `"1"`. Send dimension values as strings. | Add a price for those dimensions to bill later usage. Check the invoice before you bill this event by hand. |
 
 No `billing_status` means Hardcount found no reason then. It is not a promise
@@ -275,7 +273,7 @@ that the event will be billed.
 - Hardcount checks only the customer's current billing periods. Time after a
   period end whose invoice is not built yet is not checked.
 - A later change can change the outcome either way: a subscription
-  created or changed, a scheduled cancel undone, or a price added.
+  created or changed, or a price added.
 - The invoice is the final answer.
 
 A present status can be wrong in two cases:
@@ -334,7 +332,6 @@ An event counts toward the billing period its `timestamp` falls in.
   - an immediate cancel;
   - an item added, changed or removed, or a pending item change canceled;
   - a pause or resume of collection;
-  - a scheduled cancel, or its removal;
   - `retry-billing`;
   - a spend-threshold invoice.
 

@@ -207,6 +207,20 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 			body:       map[string]any{"trial_end": "2026-12-01T00:00:00Z"},
 			keptMethod: "GET", kept: "/v1/subscriptions/" + subID,
 		},
+		// A cancel takes effect when it is made, so nothing replaces the
+		// scheduled cancel operations. The kept call reads the subscription
+		// they name.
+		{
+			name:   "subscription schedule cancel",
+			method: "POST", path: "/v1/subscriptions/" + subID + "/schedule-cancel",
+			body:       map[string]any{"at_period_end": true},
+			keptMethod: "GET", kept: "/v1/subscriptions/" + subID,
+		},
+		{
+			name:   "subscription clear scheduled cancel",
+			method: "DELETE", path: "/v1/subscriptions/" + subID + "/scheduled-cancel",
+			keptMethod: "GET", kept: "/v1/subscriptions/" + subID,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

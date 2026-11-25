@@ -85,24 +85,6 @@ export interface Subscription {
   started_at?: string;
   /** When the subscription was canceled. Absent until then. */
   canceled_at?: string;
-  /**
-     * The instant a cancel is scheduled for, when it was scheduled
-     * with `cancel_at`. Absent when none is set, and after the
-     * subscription is canceled.
-     */
-  cancel_at?: string;
-  /**
-     * True when the subscription cancels at the end of the current
-     * period. False after the subscription is canceled.
-     */
-  cancel_at_period_end: boolean;
-  /**
-     * When a scheduled cancel takes effect: `cancel_at` when set;
-     * otherwise, with `cancel_at_period_end`,
-     * `current_billing_period_end`. Absent when no cancel is
-     * scheduled.
-     */
-  cancel_effective_at?: string;
   pause_collection?: SubscriptionPauseCollection;
   billing_thresholds?: SubscriptionBillingThresholds;
   /**

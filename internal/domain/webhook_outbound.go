@@ -177,8 +177,6 @@ const (
 	EventSubscriptionPendingChangeScheduled = "subscription.pending_change.scheduled"
 	EventSubscriptionPendingChangeApplied   = "subscription.pending_change.applied"
 	EventSubscriptionPendingChangeCanceled  = "subscription.pending_change.canceled"
-	EventSubscriptionCancelScheduled        = "subscription.cancel_scheduled"
-	EventSubscriptionCancelCleared          = "subscription.cancel_cleared"
 	EventSubscriptionCollectionPaused       = "subscription.collection_paused"
 	EventSubscriptionCollectionResumed      = "subscription.collection_resumed"
 	EventSubscriptionThresholdCrossed       = "subscription.threshold_crossed"
@@ -266,8 +264,6 @@ var KnownWebhookEventTypes = map[string]bool{
 	EventSubscriptionPendingChangeScheduled: true,
 	EventSubscriptionPendingChangeApplied:   true,
 	EventSubscriptionPendingChangeCanceled:  true,
-	EventSubscriptionCancelScheduled:        true,
-	EventSubscriptionCancelCleared:          true,
 	EventSubscriptionCollectionPaused:       true,
 	EventSubscriptionCollectionResumed:      true,
 	EventSubscriptionThresholdCrossed:       true,

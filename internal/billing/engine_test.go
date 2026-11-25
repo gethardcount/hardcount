@@ -370,10 +370,7 @@ func (m *mockSubs) GetDueBilling(_ context.Context, _, dueBy time.Time, exclude 
 		}
 		eligible := s.Status == domain.SubscriptionActive
 		due := s.NextBillingAt != nil && !s.NextBillingAt.After(dueBy)
-		// Mirror the real query's ADR-097 cancel arm: a due cancel_at is
-		// admitted even when next_billing_at is future.
-		cancelDue := s.CancelAt != nil && !s.CancelAt.After(dueBy)
-		if eligible && (due || cancelDue) {
+		if eligible && due {
 			result = append(result, s)
 		}
 	}
@@ -405,27 +402,6 @@ func (m *mockSubs) Get(_ context.Context, _, id string) (domain.Subscription, er
 // (billing_failure_integration_test.go).
 func (m *mockSubs) RecordBillingFailure(context.Context, string, string, subscription.BillingFailureWrite) (bool, error) {
 	return true, nil
-}
-
-// FireScheduledCancellationTx mirrors the store's terminal close: CAS on
-// status=active AND the period snapshot; a loser sees ErrWatermarkMoved.
-func (m *mockSubs) FireScheduledCancellationTx(_ context.Context, _ *sql.Tx, _, id string, expected subscription.PeriodSnapshot, at time.Time) (domain.Subscription, error) {
-	m.closePeriodCalls++
-	s, ok := m.subs[id]
-	if !ok {
-		return domain.Subscription{}, errs.ErrNotFound
-	}
-	if s.Status != domain.SubscriptionActive || !mockSnapshotMatches(s, expected) {
-		return domain.Subscription{}, subscription.ErrWatermarkMoved
-	}
-	s.Status = domain.SubscriptionCanceled
-	atCopy := at
-	s.CanceledAt = &atCopy
-	s.NextBillingAt = nil
-	s.CancelAt = nil
-	s.CancelAtPeriodEnd = false
-	m.subs[id] = s
-	return s, nil
 }
 
 func (m *mockSubs) ClearPauseCollection(_ context.Context, _, id string) (domain.Subscription, error) {
@@ -1509,41 +1485,29 @@ func TestBillOnePeriod_NeedsNextBillingAt(t *testing.T) {
 }
 
 // A cancel's final invoice is issued, created and due from the instant the
-// cancel runs at, which its caller bound, whatever its cancel instant (at).
-// Dunning's final action binds the escalation: the invoice is dated at it. A
-// due scheduled cancel passes its cancel_at as at and runs on the run's
-// instant: the invoice is dated at the run's instant.
+// cancel runs at, which its caller bound. Dunning's final action binds the
+// escalation and cancels at it: the invoice is dated at it.
 func TestPlanCancelBill_TheFinalInvoiceIsDatedAtTheBoundInstant(t *testing.T) {
 	escalation := time.Date(2026, 3, 20, 6, 0, 0, 0, time.UTC)
-	for _, c := range []struct {
-		name      string
-		at, bound time.Time
-	}{
-		{"dunning's cancel, bound to the escalation", escalation, escalation},
-		{"a due scheduled cancel, at its cancel_at, bound to the run's instant", escalation.Add(-48 * time.Hour), escalation},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			engine, subs, _, _, invoices := setupEngine()
-			sub := subs.subs["sub_1"]
-			ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), c.bound)
+	engine, subs, _, _, invoices := setupEngine()
+	sub := subs.subs["sub_1"]
+	ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), escalation)
 
-			write, err := engine.PlanCancelBill(ctx, sub, c.at)
-			if err != nil {
-				t.Fatalf("PlanCancelBill: %v", err)
-			}
-			if _, _, _, err := write(ctx, nil, sub); err != nil {
-				t.Fatalf("write the plan: %v", err)
-			}
-			if len(invoices.invoices) != 1 {
-				t.Fatalf("%d invoices; want the final invoice", len(invoices.invoices))
-			}
-			inv := invoices.invoices[0]
-			wantDue := domain.AddDaysIn(c.bound, 30, time.UTC) // the fake tenant's Net 30, UTC
-			if inv.IssuedAt == nil || !inv.IssuedAt.Equal(c.bound) || !inv.CreatedAt.Equal(c.bound) || inv.DueAt == nil || !inv.DueAt.Equal(wantDue) {
-				t.Errorf("issued %v, created %v, due %v; want issued and created at the bound instant %v, due %v",
-					inv.IssuedAt, inv.CreatedAt, inv.DueAt, c.bound, wantDue)
-			}
-		})
+	write, err := engine.PlanCancelBill(ctx, sub, escalation)
+	if err != nil {
+		t.Fatalf("PlanCancelBill: %v", err)
+	}
+	if _, _, _, err := write(ctx, nil, sub); err != nil {
+		t.Fatalf("write the plan: %v", err)
+	}
+	if len(invoices.invoices) != 1 {
+		t.Fatalf("%d invoices; want the final invoice", len(invoices.invoices))
+	}
+	inv := invoices.invoices[0]
+	wantDue := domain.AddDaysIn(escalation, 30, time.UTC) // the fake tenant's Net 30, UTC
+	if inv.IssuedAt == nil || !inv.IssuedAt.Equal(escalation) || !inv.CreatedAt.Equal(escalation) || inv.DueAt == nil || !inv.DueAt.Equal(wantDue) {
+		t.Errorf("issued %v, created %v, due %v; want issued and created at the escalation %v, due %v",
+			inv.IssuedAt, inv.CreatedAt, inv.DueAt, escalation, wantDue)
 	}
 }
 
@@ -2452,181 +2416,6 @@ func TestRunCycle_NoPendingChange_AppliesNothing(t *testing.T) {
 	}
 }
 
-// TestRunCycle_CancelAtPeriodEnd_FiresAtBoundary locks in the schedule-cancel
-// behaviour: when a sub has cancel_at_period_end=true and the cycle scan
-// observes an instant at or after period end, the engine generates the final invoice
-// for the just-ended period AND transitions status to canceled — instead of
-// rolling next_billing_at to a future date that would never be reached.
-func TestRunCycle_CancelAtPeriodEnd_FiresAtBoundary(t *testing.T) {
-	periodStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	periodEnd := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-
-	subs := &mockSubs{
-		subs: map[string]domain.Subscription{
-			"sub_1": {
-				ID: "sub_1", TenantID: "t1", CustomerID: "cus_1",
-				Items:                     []domain.SubscriptionItem{{PlanID: "pln_1", Quantity: 1}},
-				Status:                    domain.SubscriptionActive,
-				BillingTime:               domain.BillingTimeCalendar,
-				CurrentBillingPeriodStart: &periodStart,
-				CurrentBillingPeriodEnd:   &periodEnd,
-				NextBillingAt:             &periodEnd,
-				CancelAtPeriodEnd:         true,
-			},
-		},
-		cycleUpdated: make(map[string]bool),
-	}
-	pricing := &mockPricing{
-		plans: map[string]domain.Plan{
-			"pln_1": {
-				ID: "pln_1", Name: "Pro", Currency: "USD",
-				BillingInterval: domain.BillingMonthly,
-				BaseAmountCents: 4900,
-			},
-		},
-	}
-	invoices := &mockInvoices{}
-	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
-
-	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
-	}
-
-	if len(invoices.invoices) != 1 {
-		t.Fatalf("got %d invoices, want 1 (final invoice for just-ended period)", len(invoices.invoices))
-	}
-
-	updated := subs.subs["sub_1"]
-	if updated.Status != domain.SubscriptionCanceled {
-		t.Errorf("status: got %q, want canceled", updated.Status)
-	}
-	if updated.CanceledAt == nil {
-		t.Error("canceled_at must be set after scheduled cancel fires")
-	}
-	if updated.CancelAtPeriodEnd {
-		t.Error("cancel_at_period_end must be cleared after firing")
-	}
-	if updated.NextBillingAt != nil {
-		t.Error("next_billing_at must be nil on canceled sub")
-	}
-	// subscription.canceled (canceled_by=schedule) is queued in the cancel
-	// tx by the store's FireScheduledCancellation writer, proven by the
-	// real-Postgres lifecycle_outbox_integration_test.go.
-}
-
-// TestRunCycle_CancelAt_FiresWhenTimestampReached covers the timestamp-based
-// schedule. Setting cancel_at to the period boundary should fire the cancel
-// at the same point cancel_at_period_end would, but via the timestamp path.
-func TestRunCycle_CancelAt_FiresWhenTimestampReached(t *testing.T) {
-	periodStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	periodEnd := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-	cancelAt := periodEnd
-
-	subs := &mockSubs{
-		subs: map[string]domain.Subscription{
-			"sub_1": {
-				ID: "sub_1", TenantID: "t1", CustomerID: "cus_1",
-				Items:                     []domain.SubscriptionItem{{PlanID: "pln_1", Quantity: 1}},
-				Status:                    domain.SubscriptionActive,
-				BillingTime:               domain.BillingTimeCalendar,
-				CurrentBillingPeriodStart: &periodStart,
-				CurrentBillingPeriodEnd:   &periodEnd,
-				NextBillingAt:             &periodEnd,
-				CancelAt:                  &cancelAt,
-			},
-		},
-		cycleUpdated: make(map[string]bool),
-	}
-	pricing := &mockPricing{
-		plans: map[string]domain.Plan{
-			"pln_1": {
-				ID: "pln_1", Name: "Pro", Currency: "USD",
-				BillingInterval: domain.BillingMonthly,
-				BaseAmountCents: 4900,
-			},
-		},
-	}
-	invoices := &mockInvoices{}
-	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
-
-	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
-	}
-
-	updated := subs.subs["sub_1"]
-	if updated.Status != domain.SubscriptionCanceled {
-		t.Errorf("status: got %q, want canceled", updated.Status)
-	}
-	if updated.CancelAt != nil {
-		t.Error("cancel_at must be cleared after firing")
-	}
-}
-
-// TestShouldFireScheduledCancel covers the predicate's edge cases directly.
-// Boundary equality matters: the period-end transition must fire when
-// the run's instant equals period_end, not just strictly past it, otherwise a sub
-// that gets billed at the exact boundary tick would skip its cancel.
-func TestShouldFireScheduledCancel(t *testing.T) {
-	t0 := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-	tests := []struct {
-		name      string
-		sub       domain.Subscription
-		periodEnd time.Time
-		now       time.Time
-		want      bool
-	}{
-		{
-			name:      "no schedule, never fires",
-			sub:       domain.Subscription{},
-			periodEnd: t0,
-			now:       t0,
-			want:      false,
-		},
-		{
-			name:      "at_period_end, before boundary",
-			sub:       domain.Subscription{CancelAtPeriodEnd: true},
-			periodEnd: t0,
-			now:       t0.Add(-time.Second),
-			want:      false,
-		},
-		{
-			name:      "at_period_end, exactly at boundary",
-			sub:       domain.Subscription{CancelAtPeriodEnd: true},
-			periodEnd: t0,
-			now:       t0,
-			want:      true,
-		},
-		{
-			name:      "at_period_end, past boundary",
-			sub:       domain.Subscription{CancelAtPeriodEnd: true},
-			periodEnd: t0,
-			now:       t0.Add(time.Hour),
-			want:      true,
-		},
-		{
-			name:      "cancel_at, before timestamp",
-			sub:       domain.Subscription{CancelAt: &t0},
-			periodEnd: t0.Add(time.Hour),
-			now:       t0.Add(-time.Second),
-			want:      false,
-		},
-		{
-			name:      "cancel_at, exactly at timestamp",
-			sub:       domain.Subscription{CancelAt: &t0},
-			periodEnd: t0.Add(time.Hour),
-			now:       t0,
-			want:      true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := shouldFireScheduledCancel(tt.sub, tt.periodEnd, tt.now); got != tt.want {
-				t.Errorf("got %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 // TestRunCycle_PauseCollection_GeneratesDraft locks in the Stripe-parity
 // behavior: a sub with pause_collection set still has its cycle advanced and
 // an invoice generated, but the invoice is created as draft (which keeps it
@@ -2690,73 +2479,6 @@ func TestRunCycle_PauseCollection_GeneratesDraft(t *testing.T) {
 // The engine's cycle scan never resumes pause_collection: the scheduler
 // runs Service.ProcessExpiredPauseCollections as its own phase after the
 // cycle scan, covered by service-level tests in the subscription package.
-
-// TestRunCycle_InAdvance_ScheduledCancelAtPeriodEnd_NoOvercharge locks in
-// the PR-9 fix: when a scheduled cancel is set to fire at the upcoming
-// period boundary, the cycle-close invoice MUST NOT include an in_advance
-// base line for the upcoming (about-to-cancel) period. Pre-fix, the cycle
-// close emitted the next-period base ($100 example) and THEN
-// advanceCycleOrCancel fired the cancel — leaving the customer billed for
-// a period they wouldn't use.
-//
-// Post-fix expected at cycle close on an in_advance sub with
-// cancel_at_period_end=true:
-//   - No base line (in_advance + about-to-terminate → skip)
-//   - Usage line for the just-elapsed period (in-arrears for usage is
-//     always correct, captures final consumption)
-//   - Then the scheduled cancel fires
-func TestRunCycle_InAdvance_ScheduledCancelAtPeriodEnd_NoOvercharge(t *testing.T) {
-	periodStart := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
-	periodEnd := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-
-	subs := &mockSubs{
-		subs: map[string]domain.Subscription{
-			"sub_1": {
-				ID: "sub_1", TenantID: "t1", CustomerID: "cus_1",
-				Items:                     []domain.SubscriptionItem{{PlanID: "pln_1", Quantity: 1}},
-				Status:                    domain.SubscriptionActive,
-				BillingTime:               domain.BillingTimeCalendar,
-				CurrentBillingPeriodStart: &periodStart,
-				CurrentBillingPeriodEnd:   &periodEnd,
-				NextBillingAt:             &periodEnd,
-				CancelAtPeriodEnd:         true,
-			},
-		},
-		cycleUpdated: make(map[string]bool),
-	}
-	pricing := &mockPricing{
-		plans: map[string]domain.Plan{
-			"pln_1": {
-				ID: "pln_1", Currency: "USD", BillingInterval: domain.BillingMonthly,
-				BaseAmountCents: 10000,
-				BaseBillTiming:  domain.BillInAdvance,
-			},
-		},
-	}
-	invoices := &mockInvoices{}
-	clk := clock.NewFake(periodEnd.Add(time.Nanosecond))
-	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, clk))
-
-	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
-	}
-
-	// Sub must have been canceled by advanceCycleOrCancel.
-	if subs.subs["sub_1"].Status != domain.SubscriptionCanceled {
-		t.Errorf("status: got %q, want canceled", subs.subs["sub_1"].Status)
-	}
-
-	// Pre-PR-9: customer billed $10000 for the upcoming (will-not-be-
-	// used) period. PR-9: in_advance base line is skipped at cycle
-	// close because the cancel is about to fire. Post-empty-skip
-	// fix: when there's no base AND no usage to bill, the engine
-	// skips emitting the cycle-close invoice entirely (matches Stripe
-	// / Lago / Chargebee / Orb — $0 cycle invoices aren't emitted).
-	// The cancel still fires correctly via advanceCycleOrCancel.
-	if len(invoices.invoices) != 0 {
-		t.Errorf("expected zero cycle-close invoices (in_advance base skipped + no usage = nothing to bill), got %d", len(invoices.invoices))
-	}
-}
 
 // TestRunCycle_SkipEmptyCycleInvoice_NoChargeAttempt locks in the
 // industry-standard "don't emit $0 cycle invoices" behavior. When

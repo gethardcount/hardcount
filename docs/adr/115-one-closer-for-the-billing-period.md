@@ -1,10 +1,12 @@
 # ADR-115: One closer for the billing period
 
-**Status:** Accepted (2026-08-30; amended 2026-10-23: `reset_billing_cycle` is removed, so a threshold fire never moves the period, see the [amendment](#amendment-2026-10-23-a-threshold-fire-never-moves-the-period))
+**Status:** Accepted (2026-08-30; amended 2026-10-23: `reset_billing_cycle` is removed, so a threshold fire never moves the period, see the [amendment](#amendment-2026-10-23-a-threshold-fire-never-moves-the-period); amended 2026-11-25: scheduled cancel is removed, so there is no terminal close, see the [amendment](#amendment-2026-11-25))
 **Supersedes:** the watermark compare-and-swap of ADR-114 PR-B (`AdvanceBillingCycle`) and the never-shipped monotonic guard [ADR-114, "Fencing boundary"](114-leader-leases-tick-scoped-fencing.md#fencing-boundary-the-five-claim-funnels) named; extends ADR-066's fire+re-anchor atomicity to every period writer.
 **Related:** ADR-065 (threshold scan boundary / fire-once), ADR-066 (threshold watermark protocol), ADR-114 (leader leases; `POST /v1/billing/run` stays unfenced).
 
 ## Summary
+
+**Amended 2026-11-25:** scheduled cancel is removed. `FireScheduledCancellationTx`, the terminal close, is gone: every period close runs `ClosePeriodTx` and opens the next period. The rest is in force.
 
 Every invoice that bills a subscription's billing period, and every write that moves that period, commits in one transaction whose first statement is a compare-and-swap `UPDATE` (`subscription.ClosePeriodTx`, or `FireScheduledCancellationTx` when a scheduled cancellation fires at the close). That `UPDATE` locks the row and checks that `status`, `current_billing_period_start` and `next_billing_at` still match what the writer read; a writer that lost the race writes nothing and gets `ErrWatermarkMoved`. A threshold invoice that does not reset the period runs the same `UPDATE` with unchanged values, only to take the lock and check. The cycle close also re-reads the threshold watermark inside its transaction and rolls back if a threshold invoice billed part of the window since it built its lines. Before this, two such writers could plan from the same period and both commit, billing usage twice. A plan swap may now return 409 `subscription_period_moved`, and operators should set `idle_in_transaction_session_timeout = '30s'` on `hardcount_app`. Since 2026-10-18 every write to a subscription's items also locks the subscription row first, and an item change is priced from the state read under that lock ([amendment](#amendment-2026-10-18-item-writers-lock-the-subscription-row-first)).
 
@@ -365,3 +367,15 @@ microsecond), `TestPlanSwap_InAdvance_AtFireInstant_Succeeds`,
 ## Amendment 2026-11-10: the immediate cancel proves the same snapshot
 
 The immediate cancel and dunning's cancel now run this compare-and-set too: `CancelAtomicWithBill`'s first statement matches the status, period start and `next_billing_at` the cancel priced its final invoice from, before its transaction opened. The scheduled mid-period cancel's statement adds the period to its `cancel_at` match. A moved period writes nothing, and the cancel plans again once ([ADR-139](139-cancel-prices-before-its-transaction.md)).
+
+## Amendment 2026-11-25
+
+Scheduled cancel is removed, so a subscription ends only by a cancel that
+takes effect now. The terminal close is gone with it:
+`FireScheduledCancellationTx`, the compare-and-set plus `status = 'active'`
+that ended a subscription at a period end (decision 1), and the scheduled
+mid-period cancel's match on `cancel_at` (amendment 2026-11-10). Every
+period close now runs `ClosePeriodTx` and opens the next period, and a base
+fee billed in advance for that period is always on the close's invoice. The
+other closers are unchanged, and each still runs the compare-and-set as the
+first statement of its transaction.

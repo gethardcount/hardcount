@@ -37,8 +37,6 @@ const (
 	kindCreated             = "subscription.created"
 	kindActivated           = "subscription.activated"
 	kindCanceled            = "subscription.canceled"
-	kindCancelScheduled     = "subscription.cancel_scheduled"
-	kindCancelCleared       = "subscription.cancel_cleared"
 	kindCollectionPaused    = "subscription.collection_paused"
 	kindCollectionResumed   = "subscription.collection_resumed"
 	kindBillingRetried      = "subscription.billing_retried"
@@ -152,13 +150,6 @@ func describeSubscriptionAction(action string, meta map[string]any, lb lineLabel
 func describeUpdate(meta map[string]any, lb lineLabels) activity.Line {
 	l := activity.Line{Tone: activity.ToneNeutral}
 	switch a := metaString(meta, "action"); a {
-	case domain.SubAuditCancelScheduled:
-		l.Kind, l.Title = kindCancelScheduled, "Cancellation scheduled"
-		if seg := cancelScheduledWhen(meta); seg != nil {
-			l.Detail = append(l.Detail, seg)
-		}
-	case domain.SubAuditCancelCleared:
-		l.Kind, l.Title = kindCancelCleared, "Scheduled cancellation cleared"
 	case domain.SubAuditCollectionPaused:
 		// Warning: invoices will not be collected while it lasts. The title
 		// says it all, so there is no problem line; the meta says why or
@@ -229,6 +220,12 @@ func describeUpdate(meta map[string]any, lb lineLabels) activity.Line {
 		l.Kind, l.Title = kindChanged, "Trial ended"
 	case "trial_extended":
 		l.Kind, l.Title = kindChanged, "Trial extended"
+	case "cancel_scheduled":
+		// Written only by earlier releases, which could schedule a cancel.
+		// Kept, with the next case, so those rows still read.
+		l.Kind, l.Title = kindChanged, "Cancellation scheduled"
+	case "cancel_cleared":
+		l.Kind, l.Title = kindChanged, "Scheduled cancellation cleared"
 	default:
 		return changedFallback("update action", a)
 	}
@@ -296,33 +293,14 @@ func changedFallback(what, token string) activity.Line {
 	return activity.Line{Kind: kindChanged, Title: "Subscription changed", Tone: activity.ToneNeutral}
 }
 
-// cancelWhy says why a subscription was canceled when no person did it: the
-// schedule or payment recovery. A person's or API key's cancel needs no why;
-// the actor says who.
+// cancelWhy says why a subscription was canceled when no person did it:
+// payment recovery ran out. A person's or API key's cancel needs no why; the
+// actor says who.
 func cancelWhy(meta map[string]any) string {
-	switch metaString(meta, "canceled_by") {
-	case "schedule":
-		return "Scheduled cancellation"
-	case "dunning":
+	if metaString(meta, "canceled_by") == "dunning" {
 		return "Payment retries ran out"
 	}
 	return ""
-}
-
-// cancelScheduledWhen is S-4's meta: when the scheduled cancellation lands.
-func cancelScheduledWhen(meta map[string]any) activity.Segment {
-	if t, ok := metaTime(meta, "cancel_at"); ok {
-		return activity.Segment{activity.T("On "), activity.At(t)}
-	}
-	atPeriodEnd, _ := meta["cancel_at_period_end"].(bool)
-	if !atPeriodEnd {
-		return nil
-	}
-	label := "At the end of the current period"
-	if t, ok := metaTime(meta, "cancel_effective_at"); ok {
-		return activity.Segment{activity.T(label + " ("), activity.At(t), activity.T(")")}
-	}
-	return activity.Text(label)
 }
 
 // prorationNotAppliedProblem says what did not happen when an item change's
@@ -558,8 +536,8 @@ func legacyStatus(t activity.Tone) string {
 // fields, without the actor, which the card shows from actor_name. The card
 // prints detail_timestamp after detail, in the account's timezone, so a time
 // part in the last segment becomes detail_timestamp with the words before it
-// as the end of detail ("Resumes " + the instant). A time part's
-// closing ")" has no place there and is left out.
+// as the end of detail ("Resumes " + the instant). Parts after the time part
+// have no place there and are left out.
 func legacyDetail(l activity.Line) (string, string) {
 	var segs []string
 	ts := ""
@@ -581,7 +559,7 @@ func legacyDetail(l activity.Line) (string, string) {
 			continue
 		}
 		ts = s[at].Time.UTC().Format(time.RFC3339)
-		if before := strings.TrimRight(activity.SegmentText(s[:at]), " ("); before != "" {
+		if before := strings.TrimRight(activity.SegmentText(s[:at]), " "); before != "" {
 			segs = append(segs, before)
 		}
 	}

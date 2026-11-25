@@ -43,10 +43,8 @@ export interface DunningPolicyInput {
      * already paused, the subscription is canceled, or the invoice
      * was paid first. `cancel` cancels the subscription and sends
      * `subscription.canceled` with `canceled_by: dunning`. It does
-     * nothing if the subscription is already canceled. If a scheduled
-     * cancel was already due, that cancel happens instead, and its
-     * event says `canceled_by: schedule`. `none` leaves it alone. An
-     * invoice with no subscription is not affected.
+     * nothing if the subscription is already canceled. `none` leaves
+     * it alone. An invoice with no subscription is not affected.
      */
   final_subscription_action: DunningPolicyInputFinalSubscriptionAction;
   /**

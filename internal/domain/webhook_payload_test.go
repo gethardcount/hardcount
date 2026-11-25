@@ -194,12 +194,12 @@ func goldenWebhookData(t *testing.T, eventType string) map[string]any {
 		return PaymentMethodWebhookData(goldenPaymentMethod(), map[string]any{"stripe_payment_method_id": "pm_golden"})
 	case EventPaymentMethodUpdated:
 		return PaymentMethodWebhookData(goldenPaymentMethod(), map[string]any{"stripe_customer_id": "cus_golden"})
-	case EventSubscriptionCreated, EventSubscriptionCancelScheduled, EventSubscriptionCancelCleared:
+	case EventSubscriptionCreated:
 		return SubscriptionWebhookData(goldenSubscription(), nil)
 	case EventSubscriptionCollectionPaused:
 		return SubscriptionWebhookData(goldenSubscription(), map[string]any{"triggered_by": "operator"})
 	case EventSubscriptionCanceled:
-		return SubscriptionWebhookData(goldenSubscription(), map[string]any{"canceled_by": "schedule"})
+		return SubscriptionWebhookData(goldenSubscription(), map[string]any{"canceled_by": "operator"})
 	case EventSubscriptionCollectionResumed:
 		return SubscriptionWebhookData(goldenSubscription(), map[string]any{"triggered_by": "schedule", "resumed_at": goldenAt})
 	case EventSubscriptionItemAdded, EventSubscriptionItemUpdated, EventSubscriptionItemRemoved,

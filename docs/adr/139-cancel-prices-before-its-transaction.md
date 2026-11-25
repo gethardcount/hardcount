@@ -1,9 +1,11 @@
 # ADR-139: A cancel prices before its transaction, then proves the plan on it
 
 **Date:** 2026-11-10
-**Status:** Accepted
+**Status:** Accepted (amended 2026-11-25: scheduled cancel is removed, see the [amendment](#amendment-2026-11-25))
 
 ## Summary
+
+**Amended 2026-11-25:** scheduled cancel is removed, so this decision covers the immediate cancel and dunning's cancel. The rest is in force.
 
 An immediate cancel, a scheduled mid-period cancel and dunning's cancel now price their final invoice and plan their relief with no transaction open: the usage reads, the tax call (a network call for a Stripe Tax tenant) and the reads of the funding invoices all run first. Then one transaction writes the plan. Its first statement is a compare-and-set on the period the plan was priced from. Next it compares the items and the billing-interval rows with the ones planned, and reads the threshold watermark again. If anything moved, nothing is written and the cancel plans again once; a second move is returned as `ErrWatermarkMoved`, which the cancel API answers `409` `concurrent_change`. Before, the pricing ran inside the transaction, so a slow tax call held the subscription row and a pool connection for its whole length. The cross-interval plan swap still prices inside its transaction (P1-23 PR-2).
 
@@ -65,3 +67,12 @@ An immediate cancel, a scheduled mid-period cancel and dunning's cancel now pric
 - `internal/subscription/service.go`: `cancel`, `cancelOnce`, `FireDueScheduledCancel`, `sameIntervals`
 - `internal/subscription/postgres.go`: `CancelAtomicWithBill`, `FireScheduledCancellationWithBill`
 - Tests: `internal/billing/cancel_plans_before_tx_integration_test.go`, `internal/api/cancel_replan_e2e_test.go`
+
+## Amendment 2026-11-25
+
+Scheduled cancel is removed, so there is no scheduled mid-period cancel to
+price. This decision now covers the immediate cancel and dunning's cancel.
+Gone: `FireScheduledCancellationWithBill` and `FireDueScheduledCancel`, the
+`cancel_at` term of the compare-and-set and its "superseded (scheduled)"
+outcome (decision 2), the scheduled cancel's `at` (decision 4), and its
+second fire from `billSubscription` (decision 5).

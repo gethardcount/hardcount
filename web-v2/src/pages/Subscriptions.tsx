@@ -41,7 +41,6 @@ import { TableSkeleton } from '@/components/ui/TableSkeleton'
 
 import { Plus, Search, Download, ArrowUpDown, ArrowUp, ArrowDown, Repeat } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
-import { formatCivilDate } from '@/lib/dates'
 import { nextBillCell, periodLabels } from '@/lib/subscriptionPeriod'
 import { useNowResolver } from '@/hooks/useNow'
 
@@ -353,16 +352,9 @@ export default function SubscriptionsPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground whitespace-normal min-w-[9rem]">
-                        {(() => {
-                          // Same dates as the subscription page: a canceled
-                          // row reads "Ended …", never a renewal date.
-                          const cell = nextBillCell(periodLabels(
-                            sub,
-                            { date: (iso) => formatDate(iso), lastDay: (iso) => formatCivilDate(iso, undefined) },
-                          ))
-                          if (!cell) return '\u2014'
-                          return <span className={cn(cell.tone === 'scheduled' && 'text-warning-foreground')}>{cell.text}</span>
-                        })()}
+                        {/* Same dates as the subscription page: a canceled
+                            row reads "Ended …", never a renewal date. */}
+                        {nextBillCell(periodLabels(sub, (iso) => formatDate(iso))) ?? '\u2014'}
                       </TableCell>
                     </TableRow>
                   ))}

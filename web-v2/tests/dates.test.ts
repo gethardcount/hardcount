@@ -5,7 +5,7 @@
 // `npm test` (Vitest).
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { startOfDayInTZ, endOfDayInTZ, startOfNextDayInTZ, creditExpiryLabel, isBeforeCivilToday, formatInvoiceDate, formatCivilDate, usageFilterEndYMD, civilDateFrom, addCalendarMonthInTZ } from '../src/lib/dates.ts'
+import { startOfDayInTZ, endOfDayInTZ, startOfNextDayInTZ, creditExpiryLabel, isBeforeCivilToday, formatInvoiceDate, formatCivilPeriod, usageFilterEndYMD, civilDateFrom, addCalendarMonthInTZ } from '../src/lib/dates.ts'
 import { setTenantTimezone } from '../src/lib/api.ts'
 
 test('startOfDayInTZ = 00:00 of the civil day in the given zone, as a UTC instant', () => {
@@ -69,7 +69,7 @@ test('formatInvoiceDate falls back to the tenant zone when the invoice has none'
 test('a helper given no zone throws before the account zone is known, instead of guessing UTC', () => {
   assert.throws(() => creditExpiryLabel('2026-12-01T00:00:00.000Z'), /account time zone/)
   assert.throws(() => formatInvoiceDate('2027-07-10T18:30:00Z', ''), /account time zone/)
-  assert.throws(() => formatCivilDate('2026-12-01T00:00:00.000Z', undefined), /account time zone/)
+  assert.throws(() => formatCivilPeriod('2026-11-01T00:00:00.000Z', '2026-12-01T00:00:00.000Z', undefined), /account time zone/)
 })
 
 // Locks MANUAL_TEST FLOW I1 "drill-down covers a cancel invoice's last day":

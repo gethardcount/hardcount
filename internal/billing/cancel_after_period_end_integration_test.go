@@ -72,7 +72,6 @@ func newCancelRig(t *testing.T, name string) *cancelRig {
 	f.engine.SetInvoiceVoider(invoice.NewService(f.invStore, clock.Real(), f.settings))
 	f.engine.SetCreditNoteAdjuster(creditNoteSvc)
 	f.engine.SetCreditHeadroomReader(creditNoteSvc)
-	f.engine.SetScheduledCancelExecutor(f.subSvc)
 	f.subSvc.SetBiller(f.engine)
 	f.subSvc.SetDueBiller(f.engine)
 	return r
@@ -598,10 +597,8 @@ func TestImmediateCancel_ExactlyAtPeriodEnd(t *testing.T) {
 }
 
 // TestImmediateCancel_AlreadyCanceled_StillRefused: a second cancel, after
-// the period end, of a subscription canceled mid-period. It answers the same
-// "already terminated" error as before. The pre-step's return of an
-// already-canceled row is only for a cancel that found the subscription
-// active.
+// the period end, of a subscription canceled mid-period. It answers "already
+// terminated", not unbilled_period, and changes nothing.
 func TestImmediateCancel_AlreadyCanceled_StillRefused(t *testing.T) {
 	r := newCancelRig(t, "991 cancel twice")
 	first := r.f.cycleStart.Add(15 * 24 * time.Hour)
@@ -622,40 +619,4 @@ func TestImmediateCancel_AlreadyCanceled_StillRefused(t *testing.T) {
 	if len(before) != 1 || len(after) != 1 || after[0].ID != before[0].ID || after[0].SubtotalCents != before[0].SubtotalCents {
 		t.Errorf("invoices before=%d after=%d, want the one final invoice unchanged", len(before), len(after))
 	}
-}
-
-// TestImmediateCancel_AtPeriodEndFlag_AfterBoundary_ReturnsCanceledRow: the
-// subscription was already scheduled to cancel at the period end, the
-// boundary has passed, and the operator cancels immediately. The pre-step's
-// close fires the scheduled cancel at the boundary. The immediate cancel then
-// finds the subscription canceled; it was active when the call started, so
-// the call answers that row, not "already terminated".
-//
-// Mutation seam: remove the canceled-row return after the pre-step → this
-// answers "already terminated".
-func TestImmediateCancel_AtPeriodEndFlag_AfterBoundary_ReturnsCanceledRow(t *testing.T) {
-	r := newCancelRig(t, "991 cancel after a scheduled boundary")
-	p0, p1 := r.f.cycleStart, r.f.cycleEnd
-	if _, err := r.f.subSvc.ScheduleCancel(r.at(p0.Add(24*time.Hour)), r.f.tenantID, r.f.subID, subscription.ScheduleCancelInput{AtPeriodEnd: true}); err != nil {
-		t.Fatalf("schedule cancel at period end: %v", err)
-	}
-
-	canceled, credited, err := r.f.subSvc.Cancel(r.at(p1.Add(time.Hour)), r.f.tenantID, r.f.subID)
-	if err != nil {
-		t.Fatalf("cancel: %v", err)
-	}
-	if canceled.Status != domain.SubscriptionCanceled || canceled.CanceledAt == nil || !canceled.CanceledAt.Equal(p1) || credited != 0 {
-		t.Fatalf("cancel: status=%s canceled_at=%v credited=%dc, want canceled at the scheduled boundary %v", canceled.Status, canceled.CanceledAt, credited, p1)
-	}
-	r.runWritesNothing(t, p1.Add(2*time.Hour))
-
-	invs, lines := r.liveInvoices(t)
-	if len(invs) != 1 {
-		t.Fatalf("live invoices = %d, want exactly 1", len(invs))
-	}
-	inv := invoiceFor(t, invs, p0, p1)
-	if usage, base := sumLines(lines[inv.ID]); usage != 1000 || base != cancelFixtureBaseCents || inv.SubtotalCents != 1000+cancelFixtureBaseCents {
-		t.Errorf("usage=%dc base=%dc subtotal=%dc, want 1000 + %d", usage, base, inv.SubtotalCents, cancelFixtureBaseCents)
-	}
-	assertUsageBilledOnce(t, r.base)
 }

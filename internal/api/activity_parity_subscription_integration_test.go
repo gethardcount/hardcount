@@ -19,10 +19,10 @@ import (
 // with no Recorded time.
 //
 // The story: the plan changes now, a plan change is scheduled for renewal
-// and then canceled; a cancellation is scheduled and undone; collection is
-// paused and resumed; spend thresholds are set and removed; an item is
-// added, its quantity changed, and removed. The plans bill in arrears, so no
-// change makes a proration invoice and the story needs no payment method.
+// and then canceled; collection is paused and resumed; spend thresholds are
+// set and removed; an item is added, its quantity changed, and removed. The
+// plans bill in arrears, so no change makes a proration invoice and the
+// story needs no payment method.
 //
 // Each date inside a line is checked against the instant it names: the
 // current period's end.
@@ -68,8 +68,6 @@ func TestActivityParity_SubscriptionOperatorScenarios(t *testing.T) {
 	call("PATCH", base+"/items/"+itemID, flowReq{body: map[string]any{"new_plan_id": pro, "immediate": true}}).want(t, 200, "change plan now")
 	call("PATCH", base+"/items/"+itemID, flowReq{body: map[string]any{"new_plan_id": basic, "immediate": false}}).want(t, 200, "schedule plan change")
 	call("DELETE", base+"/items/"+itemID+"/pending-change", flowReq{}).want(t, 200, "cancel scheduled plan change")
-	call("POST", base+"/schedule-cancel", flowReq{body: map[string]any{"at_period_end": true}}).want(t, 200, "schedule cancel")
-	call("DELETE", base+"/scheduled-cancel", flowReq{}).want(t, 200, "undo scheduled cancel")
 	call("PUT", base+"/pause-collection", flowReq{body: map[string]any{"behavior": "keep_as_draft"}}).want(t, 200, "pause collection")
 	call("DELETE", base+"/pause-collection", flowReq{}).want(t, 200, "resume collection")
 	call("PUT", base+"/billing-thresholds", flowReq{body: map[string]any{"amount_gte": 50000}}).want(t, 200, "set spend thresholds")
@@ -95,8 +93,6 @@ func TestActivityParity_SubscriptionOperatorScenarios(t *testing.T) {
 		"Plan changed | Parity Starter → Parity Pro · by API key",
 		"Plan change scheduled | Parity Pro → Parity Basic at renewal on <period end> · by API key",
 		"Scheduled plan change canceled | by API key",
-		"Cancellation scheduled | At the end of the current period (<period end>) · by API key",
-		"Scheduled cancellation cleared | by API key",
 		"Collection paused | Invoices are created but not charged until collection resumes · by API key",
 		"Collection resumed | by API key",
 		"Spend thresholds set | $500.00 usage total · by API key",

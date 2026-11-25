@@ -95,7 +95,6 @@
   ],
   "subscription": {
     "billing_time": "calendar",
-    "cancel_at_period_end": false,
     "code": "starts-now",
     "created_at": "2026-04-10T14:30:00Z",
     "current_billing_period_display": "Apr 10, 2026 – Apr 30, 2026",

@@ -174,8 +174,6 @@ func TestStrictBodies_EveryJSONRouteRefusesAnUnknownKey(t *testing.T) {
 // TestStrictBodies_BodylessRoutesRefuseABody: a route whose spec operation
 // has no request body lists no field, so a body with any field is a 422
 // naming it, and nothing runs. An empty body, `{}` and `null` are fine.
-// Before, these handlers never read the body: `{"at_period_end": true}` to
-// /cancel answered 200 and canceled at once.
 func TestStrictBodies_BodylessRoutesRefuseABody(t *testing.T) {
 	r := newStrictRig(t)
 

@@ -50,8 +50,6 @@ func TestCountReleased(t *testing.T) {
 	labelled.Items = []domain.SubscriptionItem{{PlanID: "pln_labelled"}}
 	canceled := active
 	canceled.Status = domain.SubscriptionCanceled
-	ending := active
-	ending.CancelAtPeriodEnd = true
 
 	at := func(ts time.Time) ReleasedUsage { return ReleasedUsage{At: ts, MeterID: "mtr_tokens"} }
 	rows := []ReleasedUsage{
@@ -77,7 +75,6 @@ func TestCountReleased(t *testing.T) {
 		// these as "will be invoiced".
 		{"active, plan does not price the meter", []sub{{s: seatsOnly}}, rows, ReleaseResult{NotOnPlan: 3, InOpenPeriod: 1, OutsideOpenPeriod: 1}},
 		{"two subscriptions, one prices it", []sub{{s: seatsOnly}, {s: active}}, rows, ReleaseResult{InOpenPeriod: 4, OutsideOpenPeriod: 1}},
-		{"active, cancels at the period end", []sub{{s: ending}}, rows, ReleaseResult{InOpenPeriod: 3, OutsideOpenPeriod: 2}},
 		// Review finding 3 on #1350: the release ignored the watermark.
 		{"threshold invoice unpaid", []sub{{active, ThresholdWatermark{BilledThrough: &fire}}}, rows, ReleaseResult{InOpenPeriod: 2, PendingThresholdInvoice: 2, OutsideOpenPeriod: 1}},
 		{"threshold invoice paid", []sub{{active, ThresholdWatermark{BilledThrough: &fire, PaidThrough: &fire}}}, rows, ReleaseResult{InOpenPeriod: 2, OutsideOpenPeriod: 3}},

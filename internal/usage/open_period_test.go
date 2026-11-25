@@ -69,8 +69,6 @@ func TestClassify(t *testing.T) {
 	// Two fires, May 1 to 10 paid and May 10 to 20 not paid yet.
 	partPaid := watermark
 	partPaid.PaidThrough = opAt(opMay.AddDate(0, 0, 9))
-	ending := may
-	ending.Ends = opAt(opJun)
 	// Started at 11:00 on May 1: the first period starts at midnight. A threshold fire billed May 1 00:00 to 20:00.
 	firstDay := whole(opMay, opJun, opAt(opMay.Add(11*time.Hour)), "m")
 	firstDay.BilledThrough = opAt(opMay.Add(20 * time.Hour))
@@ -97,11 +95,6 @@ func TestClassify(t *testing.T) {
 	reachBack.Plans = map[string]PriceSet{"pln": modelA, "pln2": everyEvent("m")}
 	reachBack.Stretches = []Stretch{{PlanID: "pln", From: opMay, To: opMay.Add(time.Hour)}, {PlanID: "pln2", From: opMay, To: opJun}}
 	reachBack.Windows = map[string][]Window{"m": {{PlanID: "pln", From: opMay, To: opMay.Add(time.Hour)}, {PlanID: "pln2", From: opMay.Add(time.Hour), To: opJun}}}
-	// A cancel is scheduled for May 11.
-	canceling := may
-	canceling.Ends = opAt(opMay.AddDate(0, 0, 10))
-	cancelInGrace := may
-	cancelInGrace.Ends = opAt(opJun.Add(time.Hour))
 	// Another subscription stopped covering m at 10:00 on May 1.
 	covered := may
 	covered.Windows = map[string][]Window{"m": {{PlanID: "pln", From: opMay.Add(10 * time.Hour), To: opJun}}}
@@ -133,10 +126,6 @@ func TestClassify(t *testing.T) {
 		{"first-day reach-back: the earlier item's window", opMay.Add(time.Minute), "m", nil, []OpenPeriod{reachBack}, sum, NoPrice},
 		{"first-day reach-back: the earlier item's window, a price takes it", opMay.Add(time.Minute), "m", a, []OpenPeriod{reachBack}, sum, InOpen},
 		{"first-day reach-back: the added item's window", opMay.Add(2 * time.Hour), "m", nil, []OpenPeriod{reachBack}, sum, InOpen},
-		{"before a scheduled cancel", opMay.AddDate(0, 0, 9), "m", nil, []OpenPeriod{canceling}, sum, InOpen},
-		{"after a scheduled cancel", opMay.AddDate(0, 0, 10).Add(20 * time.Minute), "m", nil, []OpenPeriod{canceling}, sum, Outside},
-		{"grace: after a cancel scheduled in it", opJun.Add(2 * time.Hour), "m", nil, []OpenPeriod{cancelInGrace}, sum, Outside},
-		{"grace: before a cancel scheduled in it", opJun.Add(10 * time.Minute), "m", nil, []OpenPeriod{cancelInGrace}, sum, Later},
 		{"before another subscription's coverage end", opMay.Add(9 * time.Hour), "m", nil, []OpenPeriod{covered}, sum, Outside},
 		{"before another subscription's coverage end, meter not priced", opMay.Add(9 * time.Hour), "x", nil, []OpenPeriod{covered}, sum, NotOnPlan},
 		{"after another subscription's coverage end", opMay.Add(11 * time.Hour), "m", nil, []OpenPeriod{covered}, sum, InOpen},
@@ -174,7 +163,6 @@ func TestClassify(t *testing.T) {
 		// carries no status, even when another subscription would flag it
 		// (yearly does not price x). This is the stated rule, not a gap.
 		{"grace: not checked, not priced by another subscription", opJun.Add(10 * time.Minute), "x", nil, []OpenPeriod{may, yearly}, sum, Later},
-		{"grace: ends at the period end", opJun.Add(10 * time.Minute), "m", nil, []OpenPeriod{ending}, sum, Outside},
 		// Review round 3 on #1390: the first period starts at midnight of
 		// the first day, before the start instant, and the close's
 		// threshold watermark holds from there.
@@ -200,8 +188,7 @@ func TestClassify(t *testing.T) {
 // current period's end is billed by its own period's plans at that period's
 // pins. While the period's close has not run, ingest knows neither (the
 // close can be behind by more than one period), so it answers no status,
-// whatever the plans price at the period end. A scheduled cancel still
-// makes it outside_subscription.
+// whatever the plans price at the period end.
 func TestClassify_AfterThePeriodEndIsNotChecked(t *testing.T) {
 	modelA := PriceSet{ByMeter: map[string][]map[string]string{"m": {{"model": "a"}}}}
 	labelled := onPlans(opMay, opJun, opAt(opApr), map[string]PriceSet{"pln": modelA}, []Stretch{{PlanID: "pln", From: opMay, To: opJun}})
@@ -279,7 +266,7 @@ func TestTakes(t *testing.T) {
 }
 
 // TestOpenPeriodOf builds the period from a subscription: floor, the
-// stretches with their plans' prices, and where its billed time ends.
+// stretches with their plans' prices, and the threshold watermarks.
 func TestOpenPeriodOf(t *testing.T) {
 	plans := map[string]PriceSet{"pA": everyEvent("m"), "pB": everyEvent("n"), "pOld": everyEvent("o")}
 	base := domain.Subscription{
@@ -289,7 +276,7 @@ func TestOpenPeriodOf(t *testing.T) {
 	stretches := []Stretch{{PlanID: "pOld", From: opMay, To: opMay.AddDate(0, 0, 9)}, {PlanID: "pA", From: opMay.AddDate(0, 0, 9), To: opJun}}
 	windows := map[string][]Window{"o": {{PlanID: "pOld", From: opMay, To: opMay.AddDate(0, 0, 9)}}, "m": {{PlanID: "pA", From: opMay.AddDate(0, 0, 9), To: opJun}}}
 	p, ok := OpenPeriodOf(base, stretches, windows, plans, opAt(opApr), ThresholdWatermark{})
-	if !ok || p.Floor == nil || !p.Floor.Equal(opApr) || p.Ends != nil {
+	if !ok || p.Floor == nil || !p.Floor.Equal(opApr) || !p.Start.Equal(opMay) || !p.End.Equal(opJun) {
 		t.Fatalf("plain: %+v %v", p, ok)
 	}
 	if len(p.Stretches) != 2 || p.Stretches[0].PlanID != "pOld" || p.Plans["pOld"].ByMeter["o"] == nil || len(p.Windows["m"]) != 1 || p.Windows["m"][0].PlanID != "pA" {
@@ -306,17 +293,6 @@ func TestOpenPeriodOf(t *testing.T) {
 	}
 	if p, _ := OpenPeriodOf(midDay, stretches, windows, plans, nil, ThresholdWatermark{}); p.Floor != nil {
 		t.Errorf("no billing interval: floor %v, want nil", p.Floor)
-	}
-
-	atEnd := base
-	atEnd.CancelAtPeriodEnd = true
-	if p, _ := OpenPeriodOf(atEnd, stretches, windows, plans, opAt(opApr), ThresholdWatermark{}); p.Ends == nil || !p.Ends.Equal(opJun) {
-		t.Errorf("cancel at period end: ends %v, want the period end", p.Ends)
-	}
-	cancelAt := base
-	cancelAt.CancelAt = opAt(opJun)
-	if p, _ := OpenPeriodOf(cancelAt, stretches, windows, plans, opAt(opApr), ThresholdWatermark{}); p.Ends == nil || !p.Ends.Equal(opJun) {
-		t.Errorf("cancel_at at the end: ends %v, want the cancel", p.Ends)
 	}
 
 	wm := ThresholdWatermark{BilledThrough: opAt(opMay.AddDate(0, 0, 19)), PaidThrough: opAt(opMay.AddDate(0, 0, 9))}

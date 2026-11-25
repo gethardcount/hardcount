@@ -1,9 +1,11 @@
 # ADR-119: A billing failure is saved on the subscription, keyed to the due instant
 
 **Date:** 2026-10-12
-**Status:** Accepted
+**Status:** Accepted (amended 2026-11-25: the due instant is `next_billing_at` only, see the [amendment](#amendment-2026-11-25))
 
 ## Summary
+
+**Amended 2026-11-25:** scheduled cancel is removed, so the due instant is `next_billing_at`, the period end, and a record is keyed to it. The rest is in force.
 
 When the billing run fails to bill a subscription, the failure is now saved on
 the subscription row. The next attempts wait on a fixed ladder, and after eight
@@ -317,3 +319,13 @@ invoice.
   compare-and-swap that exactly-once billing rests on.
 - Migration `0176_subscription_billing_failure`.
 - Runbook: [14. Subscriptions whose billing is failing](../ops/runbook/billing-failing.md).
+
+## Amendment 2026-11-25
+
+Scheduled cancel is removed, so a subscription never owes the billing run a
+mid-period cancel. The due instant is `next_billing_at` alone
+(`domain.DueInstant`, `domain.SubscriptionDueInstantSQL`), and a record is
+live while `billing_failed_for` equals it. The `cancel_at` term of the key is
+gone. Alternative B was rejected only because of `cancel_at`, so B is now
+what the key is. The key still replaces every clear: a statement that moves
+`next_billing_at` voids the record.

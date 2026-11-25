@@ -216,7 +216,6 @@ import type {
   RotateCustomerCostDashboardToken200,
   RunBilling200,
   RunBilling206,
-  ScheduleSubscriptionCancelBody,
   SendCreditNote200,
   SendCreditNoteBody,
   SendCustomerPaymentSetupEmail202,
@@ -6282,9 +6281,7 @@ export const getCancelSubscriptionUrl = (id: string,) => {
  * the tax reversal happen (a failed issue is retried), and then the
  * final invoice is collected, so that credit reduces it.
  *
- * If a billing period has already ended, it is billed first. If a
- * scheduled cancel was already due, that cancel takes effect at its
- * scheduled time and the canceled subscription is returned. The
+ * If a billing period has already ended, it is billed first. The
  * canceled subscription keeps its last `current_billing_period_*`
  * and `next_billing_at`; nothing is billed at that time.
  *
@@ -6349,168 +6346,6 @@ export const useCancelSubscription = <TError = InvalidBodyResponse | Unauthorize
         TContext
       > => {
       return useMutation(getCancelSubscriptionMutationOptions(options), queryClient);
-    }
-
-export const getScheduleSubscriptionCancelUrl = (id: string,) => {
-
-
-
-
-  return `/v1/subscriptions/${id}/schedule-cancel`
-}
-
-/**
- * Schedules the subscription to cancel later. Set exactly one of
- * `at_period_end` or `cancel_at`. A new call replaces any earlier
- * schedule. If a billing period has ended and is not invoiced yet,
- * it is billed first, so "the current period" is the one running.
- *
- * `at_period_end` cancels at the end of the current period.
- * `cancel_at` must be on or after the end of the current period. A
- * date inside a later period is allowed, and that period is billed up
- * to the date.
- *
- * The response's `cancel_effective_at` says when the cancel takes
- * effect. Sends the `subscription.cancel_scheduled` webhook event.
- * @summary Schedule a cancel
- */
-export const scheduleSubscriptionCancel = async (id: string,
-    scheduleSubscriptionCancelBody: ScheduleSubscriptionCancelBody, options?: RequestInit): Promise<Subscription> => {
-
-  return orvalClient<Subscription>(getScheduleSubscriptionCancelUrl(id),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(scheduleSubscriptionCancelBody)
-  }
-);}
-
-
-
-
-
-export const getScheduleSubscriptionCancelMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, TError,{id: string;data: ScheduleSubscriptionCancelBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, TError,{id: string;data: ScheduleSubscriptionCancelBody}, TContext> => {
-
-const mutationKey = ['scheduleSubscriptionCancel'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, {id: string;data: ScheduleSubscriptionCancelBody}> = (props) => {
-          const {id,data} = props ?? {};
-
-          return  scheduleSubscriptionCancel(id,data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type ScheduleSubscriptionCancelMutationResult = NonNullable<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>>
-    export type ScheduleSubscriptionCancelMutationBody = ScheduleSubscriptionCancelBody
-    export type ScheduleSubscriptionCancelMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
-
-    /**
- * @summary Schedule a cancel
- */
-export const useScheduleSubscriptionCancel = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, TError,{id: string;data: ScheduleSubscriptionCancelBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof scheduleSubscriptionCancel>>,
-        TError,
-        {id: string;data: ScheduleSubscriptionCancelBody},
-        TContext
-      > => {
-      return useMutation(getScheduleSubscriptionCancelMutationOptions(options), queryClient);
-    }
-
-export const getClearSubscriptionScheduledCancelUrl = (id: string,) => {
-
-
-
-
-  return `/v1/subscriptions/${id}/scheduled-cancel`
-}
-
-/**
- * Removes a scheduled cancel and sends the
- * `subscription.cancel_cleared` webhook event. Calling it on a
- * subscription with no schedule returns the subscription unchanged
- * and sends no event.
- *
- * If the scheduled date has already passed, the cancel has taken
- * effect and the request answers 409.
- * @summary Clear a scheduled cancel
- */
-export const clearSubscriptionScheduledCancel = async (id: string, options?: RequestInit): Promise<Subscription> => {
-
-  return orvalClient<Subscription>(getClearSubscriptionScheduledCancelUrl(id),
-  {
-    ...options,
-    method: 'DELETE'
-
-
-  }
-);}
-
-
-
-
-
-export const getClearSubscriptionScheduledCancelMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearSubscriptionScheduledCancel>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof clearSubscriptionScheduledCancel>>, TError,{id: string}, TContext> => {
-
-const mutationKey = ['clearSubscriptionScheduledCancel'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof clearSubscriptionScheduledCancel>>, {id: string}> = (props) => {
-          const {id} = props ?? {};
-
-          return  clearSubscriptionScheduledCancel(id,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type ClearSubscriptionScheduledCancelMutationResult = NonNullable<Awaited<ReturnType<typeof clearSubscriptionScheduledCancel>>>
-
-    export type ClearSubscriptionScheduledCancelMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
-
-    /**
- * @summary Clear a scheduled cancel
- */
-export const useClearSubscriptionScheduledCancel = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearSubscriptionScheduledCancel>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof clearSubscriptionScheduledCancel>>,
-        TError,
-        {id: string},
-        TContext
-      > => {
-      return useMutation(getClearSubscriptionScheduledCancelMutationOptions(options), queryClient);
     }
 
 export const getPauseSubscriptionCollectionUrl = (id: string,) => {

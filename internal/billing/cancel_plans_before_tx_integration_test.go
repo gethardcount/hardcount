@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,8 +23,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
-	"github.com/gethardcount/hardcount/internal/platform/leader"
-	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
@@ -37,14 +34,14 @@ import (
 	"github.com/gethardcount/hardcount/internal/webhook"
 )
 
-// P1-23 (ADR-139), on real Postgres: an immediate cancel, a scheduled
-// mid-period cancel and dunning's cancel price their final invoice (usage
-// reads and the tax call, a network call for a Stripe Tax tenant) and plan
-// their relief BEFORE their transaction. The transaction's first statement is
-// a compare-and-set on the period the plan was priced from; then the items and
-// the billing-interval rows are compared with the ones planned, and the
-// threshold watermark is read again. Anything that moved answers
-// ErrWatermarkMoved with nothing written, and the cancel plans once more.
+// P1-23 (ADR-139), on real Postgres: an immediate cancel and dunning's
+// cancel price their final invoice (usage reads and the tax call, a network
+// call for a Stripe Tax tenant) and plan their relief BEFORE their
+// transaction. The transaction's first statement is a compare-and-set on the
+// period the plan was priced from; then the items and the billing-interval
+// rows are compared with the ones planned, and the threshold watermark is
+// read again. Anything that moved answers ErrWatermarkMoved with nothing
+// written, and the cancel plans once more.
 //
 // Before, the pricing ran after the cancel's UPDATE: a slow tax call held the
 // subscription row and a pool connection for its whole length, and about 20
@@ -60,7 +57,6 @@ type calcProbe struct {
 
 	mu    sync.Mutex
 	calls int
-	reqs  []tax.Request
 }
 
 func newCalcProbe(probe func(ctx context.Context, call int)) *calcProbe {
@@ -81,12 +77,6 @@ func (p *calcProbe) count() int {
 	return p.calls
 }
 
-func (p *calcProbe) requests() []tax.Request {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return append([]tax.Request(nil), p.reqs...)
-}
-
 type calcProbeProvider struct {
 	tax.Provider
 	p *calcProbe
@@ -96,7 +86,6 @@ func (c calcProbeProvider) Calculate(ctx context.Context, req tax.Request) (*tax
 	c.p.mu.Lock()
 	c.p.calls++
 	n := c.p.calls
-	c.p.reqs = append(c.p.reqs, req)
 	probe := c.p.probe
 	c.p.mu.Unlock()
 	if probe != nil {
@@ -184,54 +173,44 @@ func TestCancel_TaxCallHoldsNoLockAndNoTransaction(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	admin := testutil.AdminPool(t)
 
-	for _, c := range []struct {
-		name string
-		run  func(*reliefCancelRig, *testing.T)
-	}{
-		{"immediate cancel", (*reliefCancelRig).cancelImmediately},
-		{"scheduled cancel", (*reliefCancelRig).fireScheduledCancel},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			r := newReliefCancelRig(t, db, "P1-23 tax call holds nothing "+c.name, reliefRigOpts{usageUnits: 3000})
-			type seen struct {
-				rowErr   error
-				idleInTx int
-			}
-			var got []seen
-			probe := newCalcProbe(func(context.Context, int) {
-				var s seen
-				tx, err := admin.BeginTx(r.ctx, nil)
-				if err != nil {
-					t.Errorf("probe: begin: %v", err)
-					return
-				}
-				_, s.rowErr = tx.ExecContext(r.ctx, `SELECT 1 FROM subscriptions WHERE id = $1 FOR NO KEY UPDATE NOWAIT`, r.subID)
-				_ = tx.Rollback() // the probe only asked for the lock
-				if err := admin.QueryRowContext(r.ctx, `
-					SELECT count(*) FROM pg_stat_activity
-					WHERE datname = current_database() AND usename <> current_user
-					  AND state LIKE 'idle in transaction%'`).Scan(&s.idleInTx); err != nil {
-					t.Errorf("probe: read pg_stat_activity: %v", err)
-				}
-				got = append(got, s)
-			})
-			r.engine.SetTaxProviderResolver(probe)
+	r := newReliefCancelRig(t, db, "P1-23 tax call holds nothing", reliefRigOpts{usageUnits: 3000})
+	type seen struct {
+		rowErr   error
+		idleInTx int
+	}
+	var got []seen
+	probe := newCalcProbe(func(context.Context, int) {
+		var s seen
+		tx, err := admin.BeginTx(r.ctx, nil)
+		if err != nil {
+			t.Errorf("probe: begin: %v", err)
+			return
+		}
+		_, s.rowErr = tx.ExecContext(r.ctx, `SELECT 1 FROM subscriptions WHERE id = $1 FOR NO KEY UPDATE NOWAIT`, r.subID)
+		_ = tx.Rollback() // the probe only asked for the lock
+		if err := admin.QueryRowContext(r.ctx, `
+			SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND usename <> current_user
+			  AND state LIKE 'idle in transaction%'`).Scan(&s.idleInTx); err != nil {
+			t.Errorf("probe: read pg_stat_activity: %v", err)
+		}
+		got = append(got, s)
+	})
+	r.engine.SetTaxProviderResolver(probe)
 
-			c.run(r, t)
+	r.cancelImmediately(t)
 
-			if len(got) != 1 {
-				t.Fatalf("tax calculations during the cancel = %d, want 1 (the final invoice's)", len(got))
-			}
-			if got[0].rowErr != nil {
-				t.Errorf("during the tax call the subscription row was held: %v", got[0].rowErr)
-			}
-			if got[0].idleInTx != 0 {
-				t.Errorf("during the tax call %d app sessions were idle in a transaction, want 0", got[0].idleInTx)
-			}
-			if r.finalInvoice(t).TotalAmountCents != 3000 {
-				t.Error("the final invoice is not the 3000c of usage")
-			}
-		})
+	if len(got) != 1 {
+		t.Fatalf("tax calculations during the cancel = %d, want 1 (the final invoice's)", len(got))
+	}
+	if got[0].rowErr != nil {
+		t.Errorf("during the tax call the subscription row was held: %v", got[0].rowErr)
+	}
+	if got[0].idleInTx != 0 {
+		t.Errorf("during the tax call %d app sessions were idle in a transaction, want 0", got[0].idleInTx)
+	}
+	if r.finalInvoice(t).TotalAmountCents != 3000 {
+		t.Error("the final invoice is not the 3000c of usage")
 	}
 }
 
@@ -299,10 +278,6 @@ func TestCancel_TransactionReadsOnlyItsOwnConnection(t *testing.T) {
 			if _, _, err := r.cancel(0); err != nil {
 				t.Fatalf("cancel: %v", err)
 			}
-		}},
-		{"scheduled cancel, paid prebill", func(t *testing.T, db *postgres.DB) {
-			r := newReliefCancelRig(t, db, "P1-23 traced scheduled", reliefRigOpts{usageUnits: 3000})
-			r.fireScheduledCancel(t)
 		}},
 	}
 	for _, c := range cases {
@@ -819,135 +794,6 @@ func TestCancel_SnapshotMoved_ReplansOnce_ThresholdFire(t *testing.T) {
 		t.Errorf("final invoice usage = %dc, want 100c: only [t1, tc), after the fire's window", billed)
 	}
 	assertUsageBilledOnce(t, r.base)
-}
-
-// A scheduled cancel fired by the billing run, whose subscription changes
-// while it is priced: the fire answers ErrWatermarkMoved with nothing
-// written, billSubscription reads the row again and fires again, and the
-// subscription is canceled in the same run with no billing failure saved.
-//
-// Item writers refuse a subscription whose scheduled cancel is due (it is
-// due for billing), so the writers that can race the fire are the ones that
-// do not change items: a void of the period's threshold invoice, and a
-// period writer. The period-move case leaves the lines unchanged, and the
-// cancel instant is the contracted one, so its second tax call sends the
-// same request: the same Stripe Tax key.
-//
-// Mutations: drop the ErrWatermarkMoved branch at the cancel arm of
-// billSubscription (M9) → the run saves a billing failure and the
-// subscription stays active; drop the period predicates from the scheduled
-// compare-and-set (M16) → the period-move case prices once.
-func TestScheduledCancel_SnapshotMoved_BillingRunReplans(t *testing.T) {
-	// requireCanceledInTheRun checks the run's outcome for one subscription.
-	requireCanceledInTheRun := func(t *testing.T, ctx context.Context, store *subscription.PostgresStore, tenantID, subID string, errs []error) {
-		t.Helper()
-		if len(errs) != 0 {
-			t.Errorf("billing run: %v", errs)
-		}
-		sub, err := store.Get(ctx, tenantID, subID)
-		if err != nil {
-			t.Fatalf("read subscription: %v", err)
-		}
-		if sub.Status != domain.SubscriptionCanceled {
-			t.Fatalf("subscription is %s after the run, want canceled in the same run", sub.Status)
-		}
-		if sub.BillingFailure != nil {
-			t.Errorf("billing failure saved: %+v, want none: a moved snapshot is not a failure", sub.BillingFailure)
-		}
-	}
-
-	t.Run("threshold invoice voided", func(t *testing.T) {
-		r := newS1Rig(t, "P1-23 scheduled replan: void", 200)
-		admin := testutil.AdminPool(t)
-		if fired := r.runFire(t); fired != 1 {
-			t.Fatalf("fire reported %d, want 1", fired)
-		}
-		_, threshold, _ := r.liveInvoices(t)
-		if len(threshold) != 1 {
-			t.Fatalf("%d threshold invoices after the fire, want 1", len(threshold))
-		}
-		if err := r.f.db.WithTenantTx(r.base, r.f.tenantID, func(tx *sql.Tx) error {
-			_, err := tx.ExecContext(r.base, `UPDATE subscriptions SET cancel_at = $1 WHERE id = $2`, r.tc, r.f.subID)
-			return err
-		}); err != nil {
-			t.Fatalf("schedule cancel: %v", err)
-		}
-		svc := subscription.NewService(r.f.subStore, nil)
-		svc.SetBiller(r.closer.engine)
-		r.closer.engine.SetScheduledCancelExecutor(svc)
-		invSvc := invoice.NewService(r.f.invStore, clock.Real(), r.f.settings)
-		var pe probeErrs
-		p := newCalcProbe(func(_ context.Context, call int) {
-			if call != 1 {
-				return
-			}
-			ctx, cancel := context.WithTimeout(r.at(r.tc), raceTimeout)
-			defer cancel()
-			if _, err := invSvc.Void(ctx, r.f.tenantID, threshold[0].ID); err != nil {
-				pe.add("void of the threshold invoice while the scheduled cancel was priced: %v (it waited on the cancel's key share)", err)
-			}
-		})
-		r.closer.engine.SetTaxProviderResolver(p)
-
-		runCtx := leadertest.Token(t, admin, r.at(r.tc.Add(time.Hour)), leader.RoleBilling)
-		_, errs := r.closer.engine.RunCycle(runCtx, 50, nil)
-		pe.check(t)
-		requireCanceledInTheRun(t, r.base, r.f.subStore, r.f.tenantID, r.f.subID, errs)
-		if n := p.count(); n != 2 {
-			t.Errorf("tax calculations = %d, want 2: the run must fire the cancel again", n)
-		}
-		_, _, other := r.liveInvoices(t)
-		if len(other) != 1 {
-			t.Fatalf("final invoices = %d, want 1", len(other))
-		}
-		var billed int64
-		for _, l := range r.usageLines(t, other[0].ID) {
-			billed += l.AmountCents
-		}
-		if billed != 400 {
-			t.Errorf("final invoice usage = %dc, want 400c: the fire was voided first, so [P0, tc) is billed here", billed)
-		}
-	})
-
-	t.Run("period moved", func(t *testing.T) {
-		db := testutil.SetupTestDB(t)
-		admin := testutil.AdminPool(t)
-		r := newReliefCancelRig(t, db, "P1-23 scheduled replan: period", reliefRigOpts{usageUnits: 3000})
-		r.scheduleCancel(t)
-		r.engine.SetScheduledCancelExecutor(r.subSvc)
-		var pe probeErrs
-		p := newCalcProbe(func(ctx context.Context, call int) {
-			if call != 1 {
-				return
-			}
-			cctx, cancel := context.WithTimeout(ctx, raceTimeout)
-			defer cancel()
-			// A period writer re-stamps the period: next_billing_at moves by
-			// an hour, the start and the lines stay.
-			if err := r.db.WithTenantTx(cctx, r.tenantID, func(tx *sql.Tx) error {
-				_, err := tx.ExecContext(cctx, `UPDATE subscriptions SET next_billing_at = next_billing_at + interval '1 hour' WHERE id = $1`, r.subID)
-				return err
-			}); err != nil {
-				pe.add("period write while the scheduled cancel was priced: %v (it waited on the cancel's lock)", err)
-			}
-		})
-		r.engine.SetTaxProviderResolver(p)
-
-		runCtx := leadertest.Token(t, admin, clock.WithEffectiveNow(r.ctx, r.cancelAt.Add(time.Hour)), leader.RoleBilling)
-		_, errs := r.engine.RunCycle(runCtx, 50, nil)
-		pe.check(t)
-		requireCanceledInTheRun(t, r.ctx, subscription.NewPostgresStore(r.db), r.tenantID, r.subID, errs)
-		reqs := p.requests()
-		if len(reqs) != 2 {
-			t.Fatalf("tax calculations = %d, want 2: the run must fire the cancel again", len(reqs))
-		}
-		if !reflect.DeepEqual(reqs[0], reqs[1]) {
-			t.Errorf("the second tax request differs from the first:\n first %+v\nsecond %+v\nwant the same request (the same Stripe Tax key: the scope is the contracted cancel_at)", reqs[0], reqs[1])
-		}
-		if final := r.finalInvoice(t); final.TotalAmountCents != 3000 {
-			t.Errorf("final invoice = %dc, want the 3000c of usage", final.TotalAmountCents)
-		}
-	})
 }
 
 // An immediate cancel of an in-arrears subscription on a tenant with a 10%

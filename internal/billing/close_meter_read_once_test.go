@@ -85,7 +85,7 @@ func TestCloser_ReadsEachMeterOnce(t *testing.T) {
 		},
 		"cycle close": func(e *Engine, sub domain.Subscription, plans map[string]domain.Plan) error {
 			ps, pe := *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd
-			_, _, _, err := e.buildLineItems(context.Background(), sub, pe, ps, pe, plans, "USD", time.UTC, unpricedUsage{}, netNegativeUsage{})
+			_, _, _, err := e.buildLineItems(context.Background(), sub, ps, pe, plans, "USD", time.UTC, unpricedUsage{}, netNegativeUsage{})
 			return err
 		},
 	} {

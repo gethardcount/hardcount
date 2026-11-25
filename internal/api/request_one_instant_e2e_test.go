@@ -197,19 +197,24 @@ func TestBillingRun_EachSubscriptionIsBilledOnItsOwnTime(t *testing.T) {
 
 // A subscription write closes an ended period first, then plans from the new
 // one. A subscription's route runs on one instant, and the close and the
-// schedule both read it: one read of the server's clock, in both modes. The
-// ended period's invoice is dated at its boundary.
-func TestScheduleCancel_TheCloseAndTheScheduleShareOneInstant(t *testing.T) {
+// cancel both read it: one read of the server's clock, in both modes. The
+// ended period's invoice is dated at its boundary, and the subscription is
+// canceled at the request's instant.
+func TestCancel_TheCloseAndTheCancelShareOneInstant(t *testing.T) {
 	for _, live := range []bool{false, true} {
 		t.Run(map[bool]string{false: "test mode", true: "live"}[live], func(t *testing.T) {
 			r := newInstantRig(t, live)
-			subID := r.subscribe("sched")
-			r.clk.stepFrom(lagB.Add(time.Hour))
-			r.must(http.MethodPost, "/v1/subscriptions/"+subID+"/schedule-cancel", time.Time{}, map[string]any{"at_period_end": true}, http.StatusOK)
+			subID := r.subscribe("cancel")
+			start := lagB.Add(time.Hour)
+			r.clk.stepFrom(start)
+			sub := r.must(http.MethodPost, "/v1/subscriptions/"+subID+"/cancel", time.Time{}, nil, http.StatusOK)
 			_, reads := r.clk.count()
 			invs := r.cycleInvoices()
-			if reads != 1 || len(invs) != 1 || !invs[0][0].Equal(lagB) {
-				t.Errorf("%d server reads, closing invoices %v; want one read and the ended period's invoice at its boundary %v", reads, invs, lagB)
+			want := start.Add(time.Second) // the request's read
+			canceledAt, _ := time.Parse(time.RFC3339Nano, flowStr(sub, "canceled_at"))
+			if reads != 1 || len(invs) != 1 || !invs[0][0].Equal(lagB) || !canceledAt.Equal(want) {
+				t.Errorf("%d server reads, closing invoices %v, canceled at %v; want one read, the ended period's invoice at its boundary %v and the cancel at %v",
+					reads, invs, canceledAt, lagB, want)
 			}
 		})
 	}

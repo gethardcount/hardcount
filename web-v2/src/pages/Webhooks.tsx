@@ -382,8 +382,6 @@ const EVENT_GROUPS: { label: string; events: { type: string; description: string
     events: [
       { type: 'subscription.created', description: 'Subscription created' },
       { type: 'subscription.canceled', description: 'Subscription canceled' },
-      { type: 'subscription.cancel_scheduled', description: 'Cancellation scheduled for the period end' },
-      { type: 'subscription.cancel_cleared', description: 'A scheduled cancellation was cleared' },
       { type: 'subscription.collection_paused', description: 'Collection paused — invoices draft only' },
       { type: 'subscription.collection_resumed', description: 'Collection resumed' },
       { type: 'subscription.threshold_crossed', description: 'A usage billing threshold was crossed' },

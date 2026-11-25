@@ -40,8 +40,8 @@ func TestMustValidate_NamesEveryNilCollaborator(t *testing.T) {
 }
 
 // TestMustValidate_CoversEveryCollaborator is the drift guard: every
-// interface-typed field on Engine participates in validation, so adding a
-// 26th collaborator cannot silently escape the boot check. It asserts the
+// interface-typed field on Engine participates in validation, so a new
+// collaborator cannot silently escape the boot check. It asserts the
 // interface-field count matches the panic's nil list on a zero engine
 // (everything nil except what NewEngine defaults).
 func TestMustValidate_CoversEveryCollaborator(t *testing.T) {
@@ -57,7 +57,7 @@ func TestMustValidate_CoversEveryCollaborator(t *testing.T) {
 		// maintainer would, in lockstep with the struct: a change means a
 		// collaborator was added or removed, so update the wiring in wire.go
 		// and this count deliberately.
-		const collaborators = 25
+		const collaborators = 24
 		if nilCount != collaborators {
 			t.Errorf("zero engine names %d nil collaborators, expected %d — Engine's dep set changed; update router wiring + this count deliberately", nilCount, collaborators)
 		}

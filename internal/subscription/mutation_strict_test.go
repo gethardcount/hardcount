@@ -27,7 +27,6 @@ func TestMutationRoutes_UnknownFieldRefused(t *testing.T) {
 		{http.MethodPost, "/sub_1/items", `{"plan_id":"plan_2","qty":3}`, "qty"},
 		{http.MethodPut, "/sub_1/billing-thresholds", `{"amount_gte":5000,"reset_billing_cycles":false}`, "reset_billing_cycles"},
 		{http.MethodPut, "/sub_1/billing-thresholds", `{"item_thresholds":[{"subscription_item_id":"item_1","usage":"10"}]}`, "usage"},
-		{http.MethodPost, "/sub_1/schedule-cancel", `{"at_period_end":true,"cancel_at_period_end":true}`, "cancel_at_period_end"},
 		{http.MethodPut, "/sub_1/pause-collection", `{"behavior":"keep_as_draft","resume_at":"2027-01-01T00:00:00Z"}`, "resume_at"},
 	}
 	runUnknownFieldCases(t, srv, cases)

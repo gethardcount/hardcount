@@ -135,7 +135,7 @@ func TestCycleDays_WorkedCases_InAdvanceClose(t *testing.T) {
 	// days, 1/31 = 323. Now one month from the 31st, clamped: 1/28.
 	sub := domain.Subscription{TenantID: "t1", BillingTime: domain.BillingTimeAnniversary, BillingAnchorDay: 1,
 		Items: []domain.SubscriptionItem{{ID: "it1", PlanID: "pln", Quantity: 1}}}
-	lines, err := closeBaseFeeLines(sub, nil, plans, utcAt(2027, 1, 1, 0, 0), utcAt(2027, 1, 31, 18, 30), "USD", time.UTC, false, false)
+	lines, err := closeBaseFeeLines(sub, nil, plans, utcAt(2027, 1, 1, 0, 0), utcAt(2027, 1, 31, 18, 30), "USD", time.UTC, false)
 	if err != nil {
 		t.Fatalf("closeBaseFeeLines: %v", err)
 	}

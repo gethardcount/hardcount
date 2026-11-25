@@ -79,7 +79,7 @@ A row has up to three lines, and its time sits on the right:
    - A row is dated at the instant the event happened. The dashboard shows
      it in the account's time zone.
    - An automatic event happened at the instant it was due (a renewal, a
-     scheduled cancel, a retry slot).
+     plan change at the period end, a retry slot).
 7. **Four tones, one meaning each.** The words carry the meaning; the dot only
    repeats it.
 

@@ -86,9 +86,8 @@ type SubscriptionCurrency struct {
 // (Store.WithCustomerRulesLock). Subscription creates hold the same lock, so
 // the answer counts every one that committed first.
 type SubscriptionChecker interface {
-	// NonTerminalForCustomer returns the subscriptions that still bill:
-	// active ones, including one with a scheduled cancel (it bills until the
-	// boundary).
+	// NonTerminalForCustomer returns the subscriptions that still bill: the
+	// active ones.
 	NonTerminalForCustomer(ctx context.Context, tenantID, customerID string) ([]NonTerminalSubscription, error)
 	// PlanCurrencies returns the plan currencies of every active
 	// subscription of the customer, however many, a pending plan

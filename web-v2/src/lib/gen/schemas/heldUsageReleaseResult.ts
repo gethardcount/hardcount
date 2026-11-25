@@ -70,7 +70,7 @@ export interface HeldUsageReleaseResult {
   pending_threshold_invoice: number;
   /**
      * Released rows outside every subscription's time (before it
-     * started, after it ended or after its scheduled cancel, or in another, ended subscription's time), and rows in a
+     * started, after it ended, or in another, ended subscription's time), and rows in a
      * period already invoiced. Also rows of a sum or count meter
      * stamped before the end of this period's paid spend-threshold
      * invoice. Bill them with a one-off invoice if they should be

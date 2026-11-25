@@ -248,13 +248,10 @@ func (m *memStore) ListItemIntervalsTx(context.Context, *sql.Tx, string) ([]doma
 }
 
 // retireLiveOnlyState mirrors the store's retireLiveOnlyStateTx: the last
-// write of every cancel writer clears the schedule and the items' pending
-// plan changes, and keeps the pause.
+// write of the cancel clears the items' pending plan changes, and keeps the
+// pause.
 func (m *memStore) retireLiveOnlyState(id string) domain.Subscription {
 	s := m.subs[id]
-	s.CancelAt = nil
-	s.CancelAtPeriodEnd = false
-	m.subs[id] = s
 	for itemID, it := range m.items {
 		if it.SubscriptionID == id && it.PendingPlanID != "" {
 			it.PendingPlanID = ""
@@ -281,77 +278,6 @@ func (m *memStore) CancelAtomicWithBill(_ context.Context, tenantID, id string, 
 			return domain.Subscription{}, err
 		}
 	}
-	return m.retireLiveOnlyState(id), nil
-}
-
-func (m *memStore) ScheduleCancellation(ctx context.Context, tenantID, id string, cancelAt *time.Time, cancelAtPeriodEnd bool, observedStatus domain.SubscriptionStatus) (domain.Subscription, error) {
-	s, ok := m.subs[id]
-	if !ok || s.TenantID != tenantID {
-		return domain.Subscription{}, errs.ErrNotFound
-	}
-	if s.Status == domain.SubscriptionCanceled {
-		return domain.Subscription{}, fmt.Errorf("A %s subscription can't be scheduled to cancel.", s.Status)
-	}
-	// Mirror the store's status CAS.
-	if s.Status != observedStatus {
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf(
-			"subscription changed from %s to %s while scheduling — re-read and retry (the cancel's meaning depends on status)",
-			observedStatus, s.Status))
-	}
-	s.CancelAt = cancelAt
-	s.CancelAtPeriodEnd = cancelAtPeriodEnd
-	s.UpdatedAt = clock.Now(ctx)
-	m.subs[id] = s
-	s.Items = m.hydrateItems(id)
-	return s, nil
-}
-
-func (m *memStore) ClearScheduledCancellation(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
-	s, ok := m.subs[id]
-	if !ok || s.TenantID != tenantID {
-		return domain.Subscription{}, errs.ErrNotFound
-	}
-	if s.CancelAt == nil && !s.CancelAtPeriodEnd {
-		return domain.Subscription{}, ErrNoScheduledCancel // mirrors the real store's CAS
-	}
-	s.CancelAt = nil
-	s.CancelAtPeriodEnd = false
-	s.UpdatedAt = clock.Now(ctx)
-	m.subs[id] = s
-	s.Items = m.hydrateItems(id)
-	return s, nil
-}
-
-func (m *memStore) FireScheduledCancellationWithBill(ctx context.Context, tenantID, id string, expected PeriodSnapshot, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
-	s, ok := m.subs[id]
-	if !ok || s.TenantID != tenantID {
-		return domain.Subscription{}, errs.ErrNotFound
-	}
-	// Mirror the real CAS: status AND cancel_at equality (ADR-097), then the
-	// period (ADR-139).
-	if s.Status != domain.SubscriptionActive {
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("scheduled cancel cannot fire on %s subscription", s.Status)).WithCode(ScheduledCancelSuperseded)
-	}
-	if s.CancelAt == nil || !s.CancelAt.Equal(at) {
-		return domain.Subscription{}, errs.InvalidState("scheduled cancel no longer current (unscheduled or re-scheduled concurrently)").WithCode(ScheduledCancelSuperseded)
-	}
-	expected.Status = domain.SubscriptionActive
-	if !snapshotMatches(s, expected) {
-		return domain.Subscription{}, ErrWatermarkMoved
-	}
-	s.Status = domain.SubscriptionCanceled
-	s.CanceledAt = &at
-	s.CancelAt = nil
-	s.CancelAtPeriodEnd = false
-	s.UpdatedAt = clock.Now(ctx)
-	s.Items = m.hydrateItems(id)
-	if billFn != nil {
-		if err := billFn(nil, s); err != nil {
-			// Real store rolls the flip back on billFn error.
-			return domain.Subscription{}, err
-		}
-	}
-	m.subs[id] = s
 	return m.retireLiveOnlyState(id), nil
 }
 
@@ -1432,133 +1358,6 @@ func TestAddRemoveItem(t *testing.T) {
 		}
 		if err := svc.RemoveItem(ctx, "t1", two.ID, two.Items[0].ID); !errors.Is(err, errs.ErrInvalidState) {
 			t.Fatalf("removing an item from a canceled subscription: got %v, want ErrInvalidState", err)
-		}
-	})
-}
-
-// TestScheduleCancel covers the v1 service-layer validation rules for the
-// soft-cancel surface: the at_period_end / cancel_at mutual exclusion, the
-// "must be in the future" guard, the "must land on a clean cycle boundary"
-// guard, the round-trip schedule → clear path, and toggling between modes.
-func TestScheduleCancel(t *testing.T) {
-	now := time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC)
-	periodStart := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-	periodEnd := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-
-	mkSvc := func() (*Service, domain.Subscription) {
-		svc := NewService(newMemStore(), clock.NewFake(now))
-		sub, _ := svc.Create(context.Background(), "t1", CreateInput{
-			Code: "sub-sched", DisplayName: "Test", CustomerID: "c",
-			Items: []CreateItemInput{{PlanID: "p"}},
-		})
-		// Stamp a billing period so cancel_at validation has something to compare against.
-		stored, _ := svc.Get(context.Background(), "t1", sub.ID)
-		stored.CurrentBillingPeriodStart = &periodStart
-		stored.CurrentBillingPeriodEnd = &periodEnd
-		_, _ = svc.store.(*memStore).Update(context.Background(), "t1", stored)
-		return svc, stored
-	}
-
-	t.Run("at_period_end sets the flag", func(t *testing.T) {
-		svc, sub := mkSvc()
-		out, err := svc.ScheduleCancel(context.Background(), "t1", sub.ID, ScheduleCancelInput{AtPeriodEnd: true})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !out.CancelAtPeriodEnd {
-			t.Error("cancel_at_period_end should be true")
-		}
-		if out.CancelAt != nil {
-			t.Error("cancel_at should remain nil when scheduling at_period_end")
-		}
-	})
-
-	t.Run("cancel_at on or after period end accepted", func(t *testing.T) {
-		svc, sub := mkSvc()
-		ts := periodEnd
-		out, err := svc.ScheduleCancel(context.Background(), "t1", sub.ID, ScheduleCancelInput{CancelAt: &ts})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if out.CancelAt == nil || !out.CancelAt.Equal(periodEnd) {
-			t.Errorf("cancel_at: got %v, want %v", out.CancelAt, periodEnd)
-		}
-		if out.CancelAtPeriodEnd {
-			t.Error("at_period_end flag should remain false on timestamp schedule")
-		}
-	})
-
-	t.Run("rejects empty input", func(t *testing.T) {
-		svc, sub := mkSvc()
-		_, err := svc.ScheduleCancel(context.Background(), "t1", sub.ID, ScheduleCancelInput{})
-		if err == nil {
-			t.Fatal("expected error when neither field is set")
-		}
-	})
-
-	t.Run("rejects both fields together", func(t *testing.T) {
-		svc, sub := mkSvc()
-		ts := periodEnd
-		_, err := svc.ScheduleCancel(context.Background(), "t1", sub.ID, ScheduleCancelInput{AtPeriodEnd: true, CancelAt: &ts})
-		if err == nil {
-			t.Fatal("expected error when both fields are set")
-		}
-	})
-
-	t.Run("rejects past timestamp", func(t *testing.T) {
-		svc, sub := mkSvc()
-		past := now.Add(-time.Hour)
-		_, err := svc.ScheduleCancel(context.Background(), "t1", sub.ID, ScheduleCancelInput{CancelAt: &past})
-		if err == nil {
-			t.Fatal("expected error for past cancel_at")
-		}
-	})
-
-	t.Run("rejects mid-period timestamp", func(t *testing.T) {
-		svc, sub := mkSvc()
-		mid := periodEnd.Add(-24 * time.Hour)
-		_, err := svc.ScheduleCancel(context.Background(), "t1", sub.ID, ScheduleCancelInput{CancelAt: &mid})
-		if err == nil {
-			t.Fatal("expected error for cancel_at before current_billing_period_end")
-		}
-	})
-
-	t.Run("clear undoes any prior schedule", func(t *testing.T) {
-		svc, sub := mkSvc()
-		_, err := svc.ScheduleCancel(context.Background(), "t1", sub.ID, ScheduleCancelInput{AtPeriodEnd: true})
-		if err != nil {
-			t.Fatalf("schedule: %v", err)
-		}
-		out, cleared, err := svc.ClearScheduledCancel(context.Background(), "t1", sub.ID)
-		if err != nil {
-			t.Fatalf("clear: %v", err)
-		}
-		if !cleared {
-			t.Error("cleared = false, want true: a schedule was removed")
-		}
-		if out.CancelAtPeriodEnd {
-			t.Error("cancel_at_period_end should be false after clear")
-		}
-		if out.CancelAt != nil {
-			t.Error("cancel_at should be nil after clear")
-		}
-	})
-
-	t.Run("toggle from at_period_end to cancel_at replaces schedule", func(t *testing.T) {
-		svc, sub := mkSvc()
-		if _, err := svc.ScheduleCancel(context.Background(), "t1", sub.ID, ScheduleCancelInput{AtPeriodEnd: true}); err != nil {
-			t.Fatalf("first schedule: %v", err)
-		}
-		ts := periodEnd
-		out, err := svc.ScheduleCancel(context.Background(), "t1", sub.ID, ScheduleCancelInput{CancelAt: &ts})
-		if err != nil {
-			t.Fatalf("second schedule: %v", err)
-		}
-		if out.CancelAtPeriodEnd {
-			t.Error("at_period_end flag should be cleared by full replacement")
-		}
-		if out.CancelAt == nil {
-			t.Error("cancel_at should be set after toggle")
 		}
 	})
 }

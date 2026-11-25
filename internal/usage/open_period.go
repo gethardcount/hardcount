@@ -34,9 +34,9 @@ import (
 //   - not_on_plan: a subscription held its time, but its plan does not price
 //     the meter.
 //   - outside_subscription: no active subscription billed its time: the
-//     customer has none, or the time is before one started, after one ends
-//     or after its scheduled cancel, or the meter's time belonged to another
-//     subscription that has since ended.
+//     customer has none, or the time is before one started or after one
+//     ended, or the meter's time belonged to another subscription that has
+//     since ended.
 //
 // Inside a current period an event is placed by the windows the close bills
 // the meter over (billing.PeriodPlan.UsageWindows), not by the period: a
@@ -47,10 +47,9 @@ import (
 // is after_close.
 //
 // Time at or after the current period's end is not checked (Later, no
-// billing_status), unless a scheduled cancel makes the event
-// outside_subscription: its own period's plans and pins are not known while
-// the current period's close has not run, and the close can be behind by
-// more than one period.
+// billing_status): its own period's plans and pins are not known while the
+// current period's close has not run, and the close can be behind by more
+// than one period.
 //
 // If such an event's plan prices the meter but no price takes it, the close
 // logs its unpriced-usage WARN. One subscription's unchecked time wins over
@@ -245,11 +244,6 @@ type OpenPeriod struct {
 	// the instant it started. Nil when unknown: nothing before Start is then
 	// after_close.
 	Floor *time.Time
-	// Ends is where the subscription's scheduled cancel takes effect
-	// (Subscription.CancelEffectiveAt): cancel_at, or the period end for a
-	// cancel at period end. No invoice bills its usage from it on. Nil when
-	// no cancel is scheduled.
-	Ends *time.Time
 	// Plans holds, by plan id, each plan's prices at its pin of the period.
 	Plans map[string]PriceSet
 	// Stretches are the period's plan stretches, the ones the close bills
@@ -308,14 +302,10 @@ func OpenPeriodOf(sub domain.Subscription, stretches []Stretch, windows map[stri
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return OpenPeriod{}, false
 	}
-	// Derived here from the schedule fields, as the store's scan derives
-	// it, so the rule does not depend on how sub was read.
-	sub.DeriveCancelEffectiveAt()
 	return OpenPeriod{
 		Start:              *sub.CurrentBillingPeriodStart,
 		End:                *sub.CurrentBillingPeriodEnd,
 		Floor:              billedFrom,
-		Ends:               sub.CancelEffectiveAt,
 		Plans:              atPin,
 		Stretches:          stretches,
 		Windows:            windows,
@@ -334,8 +324,6 @@ func BucketsOf(meter domain.Meter) MeterBuckets {
 // meter.
 //
 // For each period:
-//   - at or after Ends (a scheduled cancel): Outside. The final invoice
-//     bills usage only to the cancel.
 //   - at >= End (the grace before End's invoice, or a close running late):
 //     Later, not checked. Never AfterClose: a later close bills it.
 //   - Start <= at < End: inPeriod. When InOpen and the meter is additive:
@@ -366,7 +354,6 @@ func classify(at time.Time, meterID string, labels map[string]any, periods []Ope
 	for _, p := range periods {
 		c := Outside
 		switch {
-		case p.Ends != nil && !at.Before(*p.Ends):
 		case !at.Before(p.End):
 			c = Later
 		case !at.Before(p.Start):

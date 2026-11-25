@@ -16,8 +16,8 @@ import type { Subscription } from './subscription';
 export type RetrySubscriptionBilling200 = {
   subscription: Subscription;
   /**
-     * Period-close invoices this call created. The final
-     * invoice of a scheduled cancel is not counted, so 0
+     * Period-close invoices this call created. A period
+     * with nothing to bill closes with no invoice, so 0
      * does not mean the retry failed. Read success from
      * `subscription.billing_failure` and `still_due`.
      */

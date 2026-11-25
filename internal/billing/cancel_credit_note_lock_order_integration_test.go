@@ -104,25 +104,12 @@ func operatorCreditNote(ctx context.Context, cn *creditnote.Service, tenantID, i
 // day-1's credit-note lock and numbers a note).
 //
 // Mutations: in writePlanned, write the relief after the final invoice, or
-// number the final invoice before the relief → all four
-// cases abort one writer with 40P01.
+// number the final invoice before the relief → both cases abort one writer
+// with 40P01.
 func TestCancel_ConcurrentCreditNoteOnFundingInvoice_BothCommit(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	admin := testutil.AdminPool(t)
 
-	cancels := []struct {
-		name string
-		// prepare does what comes before the cancel and returns the cancel.
-		prepare func(*reliefCancelRig, *testing.T) func() error
-	}{
-		{"immediate cancel", func(r *reliefCancelRig, _ *testing.T) func() error {
-			return func() error { _, _, err := r.cancel(); return err }
-		}},
-		{"scheduled cancel", func(r *reliefCancelRig, t *testing.T) func() error {
-			r.scheduleCancel(t)
-			return r.fire
-		}},
-	}
 	writers := []struct {
 		name string
 		// prepare wires what the writer needs and returns it. The writer
@@ -145,52 +132,50 @@ func TestCancel_ConcurrentCreditNoteOnFundingInvoice_BothCommit(t *testing.T) {
 		}},
 	}
 
-	for _, c := range cancels {
-		for _, w := range writers {
-			t.Run(c.name+"/"+w.name, func(t *testing.T) {
-				const usageCents = 3000
-				r := newReliefCancelRig(t, db, "P1-08 "+c.name+" "+w.name, reliefRigOpts{usageUnits: usageCents})
-				cancel, write := c.prepare(r, t), w.prepare(r)
+	for _, w := range writers {
+		t.Run(w.name, func(t *testing.T) {
+			const usageCents = 3000
+			r := newReliefCancelRig(t, db, "P1-08 "+w.name, reliefRigOpts{usageUnits: usageCents})
+			write := w.prepare(r)
 
-				gate := holdNumberRow(t, r.ctx, r.db, r.tenantID)
-				cancelErr := make(chan error, 1)
-				go func() { cancelErr <- cancel() }()
-				testutil.WaitForLockWaiter(t, r.ctx, admin, "tenant_settings")
+			gate := holdNumberRow(t, r.ctx, r.db, r.tenantID)
+			cancelErr := make(chan error, 1)
+			go func() { _, _, err := r.cancel(); cancelErr <- err }()
+			testutil.WaitForLockWaiter(t, r.ctx, admin, "tenant_settings")
 
-				var noteID string
-				writeErr := make(chan error, 1)
-				go func() {
-					id, err := write()
-					noteID = id
-					writeErr <- err
-				}()
-				testutil.WaitForLockWaiters(t, r.ctx, admin, "", 2)
-				postgres.Rollback(gate)
+			var noteID string
+			writeErr := make(chan error, 1)
+			go func() {
+				id, err := write()
+				noteID = id
+				writeErr <- err
+			}()
+			testutil.WaitForLockWaiters(t, r.ctx, admin, "", 2)
+			postgres.Rollback(gate)
 
-				requireBothCommitted(t, map[string]error{"the cancel": <-cancelErr, "the " + w.name: <-writeErr})
+			requireBothCommitted(t, map[string]error{"the cancel": <-cancelErr, "the " + w.name: <-writeErr})
 
-				if noteID == "" {
-					t.Fatalf("the %s made no credit note: it never asked for the number row, so this case proves nothing", w.name)
-				}
-				sub, err := subscription.NewPostgresStore(db).Get(r.ctx, r.tenantID, r.subID)
-				if err != nil || sub.Status != domain.SubscriptionCanceled {
-					t.Fatalf("subscription: %v status=%s, want canceled", err, sub.Status)
-				}
-				final := r.finalInvoice(t)
-				if final.TotalAmountCents != usageCents || final.CreditsAppliedCents != reliefCents {
-					t.Errorf("final invoice total=%dc credits_applied=%dc, want %dc reduced by the %dc relief",
-						final.TotalAmountCents, final.CreditsAppliedCents, usageCents, reliefCents)
-				}
-				var totals []int64
-				for _, n := range creditNotesOn(t, r.ctx, db, r.tenantID, r.day1ID) {
-					totals = append(totals, n.TotalCents)
-				}
-				slices.Sort(totals)
-				if !slices.Equal(totals, []int64{lockOrderNoteCents, reliefCents}) {
-					t.Errorf("credit notes on day-1 = %v, want the %dc note and the %dc relief", totals, lockOrderNoteCents, reliefCents)
-				}
-			})
-		}
+			if noteID == "" {
+				t.Fatalf("the %s made no credit note: it never asked for the number row, so this case proves nothing", w.name)
+			}
+			sub, err := subscription.NewPostgresStore(db).Get(r.ctx, r.tenantID, r.subID)
+			if err != nil || sub.Status != domain.SubscriptionCanceled {
+				t.Fatalf("subscription: %v status=%s, want canceled", err, sub.Status)
+			}
+			final := r.finalInvoice(t)
+			if final.TotalAmountCents != usageCents || final.CreditsAppliedCents != reliefCents {
+				t.Errorf("final invoice total=%dc credits_applied=%dc, want %dc reduced by the %dc relief",
+					final.TotalAmountCents, final.CreditsAppliedCents, usageCents, reliefCents)
+			}
+			var totals []int64
+			for _, n := range creditNotesOn(t, r.ctx, db, r.tenantID, r.day1ID) {
+				totals = append(totals, n.TotalCents)
+			}
+			slices.Sort(totals)
+			if !slices.Equal(totals, []int64{lockOrderNoteCents, reliefCents}) {
+				t.Errorf("credit notes on day-1 = %v, want the %dc note and the %dc relief", totals, lockOrderNoteCents, reliefCents)
+			}
+		})
 	}
 }
 

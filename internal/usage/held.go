@@ -189,8 +189,8 @@ type ReleaseResult struct {
 	// plan does not price.
 	NotOnPlan int `json:"not_on_plan"`
 	// OutsideOpenPeriod counts released rows outside every subscription's
-	// time (before it started, after it ends or after its scheduled cancel,
-	// or in another, ended subscription's time), and rows in a period whose
+	// time (before it started, after it ended, or in another, ended
+	// subscription's time), and rows in a period whose
 	// invoice is already built. It also counts rows of a
 	// sum or count meter stamped before the time a paid threshold invoice of
 	// the current period billed through. Bill them with a one-off invoice if

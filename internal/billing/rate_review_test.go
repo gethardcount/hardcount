@@ -27,7 +27,7 @@ func TestCloser_FailureNamesTheSameMeterEveryRun(t *testing.T) {
 	sub := subs.subs["sub_1"]
 	ps, pe := *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd
 	for i := 0; i < 16; i++ {
-		_, _, _, err := engine.buildLineItems(context.Background(), sub, pe, ps, pe, clonePlans(pricing.plans), "USD", time.UTC, unpricedUsage{}, netNegativeUsage{})
+		_, _, _, err := engine.buildLineItems(context.Background(), sub, ps, pe, clonePlans(pricing.plans), "USD", time.UTC, unpricedUsage{}, netNegativeUsage{})
 		if err == nil || !strings.Contains(err.Error(), "for meter mtr_api price prc_api:") {
 			t.Fatalf("run %d: close err = %v, want the first meter by id (mtr_api) named", i, err)
 		}

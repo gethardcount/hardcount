@@ -18,8 +18,6 @@ import type { Subscription, CustomerPaymentMethod } from '@/lib/api'
 
 export type AutoChargeFields = Pick<Subscription, 'status' | 'pause_collection'>
 
-// A scheduled cancel does not stop the warning: the period before it is
-// still billed.
 export function subscriptionWillAutoCharge(sub: AutoChargeFields): boolean {
   switch (sub.status) {
     // A paused-collection subscription won't attempt a charge — no warning.

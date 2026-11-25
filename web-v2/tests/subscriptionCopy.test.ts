@@ -3,24 +3,15 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
-  CANCEL_IMMEDIATELY_SENTENCE,
+  CANCEL_NOW_SENTENCE,
   changePlanNowHelper,
   changeQuantityText,
   PAUSE_DIALOG_SENTENCE,
   pauseCollectionToast,
   planChangeToast,
   removeItemText,
-  scheduleCancelToast,
 } from '../src/lib/subscriptionCopy.ts'
 import { cardLabel, removeCardSentence } from '../src/lib/paymentMethodCopy.ts'
-
-test('schedule cancel toast names the end of the current period', () => {
-  assert.deepEqual(scheduleCancelToast('Nov 1, 2026'), {
-    title: 'Cancellation scheduled',
-    description: 'Cancels at the end of the current period, Nov 1, 2026.',
-  })
-  assert.equal(scheduleCancelToast(undefined).description, 'Cancels at the end of the current period.')
-})
 
 test('pause toast names the resume date only when one was saved', () => {
   assert.equal(pauseCollectionToast('Nov 1, 2026').description, 'New invoices are saved as drafts until Nov 1, 2026.')
@@ -67,9 +58,9 @@ test('item change words follow the plan bill timing', () => {
   assert.equal(removeItemText(undefined), '')
 })
 
-test('cancel immediately names the final invoice', () => {
-  assert.match(CANCEL_IMMEDIATELY_SENTENCE, /final invoice/)
-  assert.doesNotMatch(CANCEL_IMMEDIATELY_SENTENCE, /Stops billing right now/)
+test('cancel now names the final invoice', () => {
+  assert.match(CANCEL_NOW_SENTENCE, /final invoice/)
+  assert.doesNotMatch(CANCEL_NOW_SENTENCE, /Stops billing right now/)
 })
 
 test('plan change toast: scheduled vs changed now', () => {

@@ -54,9 +54,9 @@ func subscriptionAuditActions() []string {
 // audit row is written with.
 func subscriptionAuditSubActions() []string {
 	return []string{
-		domain.SubAuditCancelScheduled, domain.SubAuditCancelCleared, domain.SubAuditCollectionPaused, domain.SubAuditCollectionResumed,
-		domain.SubAuditBillingRetried, domain.SubAuditThresholdsSet, domain.SubAuditThresholdsCleared, domain.SubAuditItemAdded,
-		domain.SubAuditItemRemoved, domain.SubAuditPendingPlanChangeCanceled, domain.SubAuditItemPlanChanged, domain.SubAuditItemQuantityChanged,
+		domain.SubAuditCollectionPaused, domain.SubAuditCollectionResumed, domain.SubAuditBillingRetried, domain.SubAuditThresholdsSet,
+		domain.SubAuditThresholdsCleared, domain.SubAuditItemAdded, domain.SubAuditItemRemoved, domain.SubAuditPendingPlanChangeCanceled,
+		domain.SubAuditItemPlanChanged, domain.SubAuditItemQuantityChanged,
 	}
 }
 
@@ -370,7 +370,7 @@ func goldenActionCases(t *testing.T) []actionCase {
 		case domain.AuditActionCreate, domain.AuditActionActivate:
 			add(action, action, map[string]any{"customer_id": "cus_1"})
 		case domain.AuditActionCancel:
-			for _, by := range []string{"operator", "customer", "schedule", "dunning", "system", ""} {
+			for _, by := range []string{"operator", "customer", "dunning", "system", ""} {
 				add("cancel/canceled_by="+by, action, map[string]any{"canceled_by": by})
 				add("cancel/canceled_by="+by+"/credit", action, map[string]any{"canceled_by": by, "prorated_credit_cents": float64(1200), "currency": "CAD"})
 			}
@@ -413,11 +413,6 @@ func goldenActionCases(t *testing.T) []actionCase {
 		name := parent + "/" + sub
 		m := func(extra map[string]any) map[string]any { return with(map[string]any{"action": sub}, extra) }
 		switch sub {
-		case domain.SubAuditCancelScheduled:
-			add(name+"/at period end", parent, m(map[string]any{"cancel_at_period_end": true, "cancel_effective_at": at(30)}))
-			add(name+"/at period end legacy", parent, m(map[string]any{"cancel_at_period_end": true}))
-			add(name+"/on a date", parent, m(map[string]any{"cancel_at_period_end": false, "cancel_at": at(45), "cancel_effective_at": at(45)}))
-			add(name+"/no date", parent, m(map[string]any{}))
 		case domain.SubAuditCollectionPaused:
 			add(name+"/by dunning", parent, m(map[string]any{"triggered_by": "dunning", "behavior": "keep_as_draft"}))
 			add(name+"/until a date", parent, m(map[string]any{"triggered_by": "operator", "behavior": "keep_as_draft", "resumes_at": at(30)}))
@@ -598,6 +593,18 @@ func TestDescribeUpdate_TrialRowsOfEarlierReleasesStillRead(t *testing.T) {
 	}
 }
 
+// TestDescribeUpdate_CancelScheduleRowsOfEarlierReleasesStillRead: no release
+// schedules a cancel any more, but a database upgraded from one that did still
+// holds its rows, and its history must name them.
+func TestDescribeUpdate_CancelScheduleRowsOfEarlierReleasesStillRead(t *testing.T) {
+	for action, title := range map[string]string{"cancel_scheduled": "Cancellation scheduled", "cancel_cleared": "Scheduled cancellation cleared"} {
+		meta := map[string]any{"action": action, "cancel_at_period_end": true}
+		if l := describeUpdate(meta, lineLabels{}); l.Title != title || l.Kind != kindChanged || len(l.Detail) != 0 {
+			t.Errorf("update row %q reads %q (kind %q, %d detail lines), want %q with no detail", action, l.Title, l.Kind, len(l.Detail), title)
+		}
+	}
+}
+
 // TestLegacyDetail pins how a line's meta reaches the older detail and
 // detail_timestamp fields the card reads today.
 func TestLegacyDetail(t *testing.T) {
@@ -610,7 +617,6 @@ func TestLegacyDetail(t *testing.T) {
 		{"no meta", nil, "", ""},
 		{"text and money", []activity.Segment{activity.Text("Starter → Pro"), {activity.T("Credit "), activity.M(1980, "EUR")}}, "Starter → Pro · Credit €19.80", ""},
 		{"trailing time", []activity.Segment{{activity.T("Resumes "), activity.At(at)}}, "Resumes", at.Format(time.RFC3339)},
-		{"time in brackets", []activity.Segment{{activity.T("At the end of the current period ("), activity.At(at), activity.T(")")}}, "At the end of the current period", at.Format(time.RFC3339)},
 		{"text then time", []activity.Segment{activity.Text("Seat"), {activity.T("Resumes "), activity.At(at)}}, "Seat · Resumes", at.Format(time.RFC3339)},
 		{"a link", []activity.Segment{{activity.T("Invoice "), activity.L(activity.LinkInvoice, "hc_inv_1", "HC-000123"), activity.T(" issued early")}}, "Invoice HC-000123 issued early", ""},
 	} {

@@ -341,10 +341,7 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 		}
 	}
 
-	// The close runs at periodEnd; a scheduled cancel firing there skips
-	// the upcoming in_advance base.
-	terminal := shouldFireScheduledCancel(sub, periodEnd, periodEnd)
-	baseLines, err := closeBaseFeeLines(sub, segsByItem, plans, periodStart, periodEnd, currency, loc, terminal, wm.billedBase())
+	baseLines, err := closeBaseFeeLines(sub, segsByItem, plans, periodStart, periodEnd, currency, loc, wm.billedBase())
 	if err != nil {
 		return PreviewResult{}, fmt.Errorf("preview: %w", err)
 	}

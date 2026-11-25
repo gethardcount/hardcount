@@ -82,7 +82,6 @@ type Engine struct {
 	invoiceEmailer  InvoiceEmailer
 	dunningStarter  DunningStarter
 	dunningResolver DunningResolver
-	cancelExecutor  ScheduledCancelExecutor
 	auditLogger     AuditWriter
 	// invoiceGrace is INVOICE_GRACE_PERIOD (ADR-120): how long after a period
 	// ends the billing runs wait before they close it. See SetInvoiceGrace.
@@ -114,8 +113,8 @@ type AuditWriter interface {
 }
 
 // SetAuditLogger wires the audit logger used by the engine to record
-// background-fired lifecycle events (scheduled cancellation, engine-
-// finalized invoices). Without this, those auto-fires
+// background-fired events (engine-finalized invoices, applied plan changes,
+// threshold fires). Without this, those auto-fires
 // only show in outbound webhooks and slog — the operator Activity feed
 // and the audit log miss them.
 func (e *Engine) SetAuditLogger(a AuditWriter) {
@@ -296,23 +295,6 @@ type DunningResolver interface {
 	ResolveByInvoice(ctx context.Context, tenantID, invoiceID string, resolution domain.DunningResolution) error
 }
 
-// ScheduledCancelExecutor executes a scheduled cancel whose cancel_at fell
-// strictly INSIDE a billing period (ADR-097). The engine's cycle scans
-// detect due-ness (the cancel arm of the due queries); the subscription
-// domain owns the transition — one tx composing the CAS flip
-// (canceled_at = at), the final partial-period invoice, and the
-// prepaid-relief credit drafts, then the post-commit finalize/issue legs.
-// Implemented by subscription.Service.FireDueScheduledCancel; wired in
-// wire.go via SetScheduledCancelExecutor.
-//
-// REQUIRED — like DunningStarter, boot fails closed if unwired: a due
-// mid-period cancel the loop cannot execute would otherwise re-fetch on
-// every scan pass forever (the 2026-05-31 spin-bug shape), and the sub
-// would keep renewing past its own cancellation (the ADR-097 money bug).
-type ScheduledCancelExecutor interface {
-	FireDueScheduledCancel(ctx context.Context, tenantID, id string, at time.Time) error
-}
-
 // CreditApplier applies customer credits to an invoice before charging.
 // ApplyToInvoiceAt stamps the ledger usage entry and the invoice's
 // updated_at with at, the collection's instant the engine passes.
@@ -421,9 +403,9 @@ type SubscriptionReader interface {
 	RecordBillingFailure(ctx context.Context, tenantID, id string, f subscription.BillingFailureWrite) (bool, error)
 	// WithTenantTx opens a period closer's transaction (ADR-115). The store
 	// that owns the period state machine owns the coordinator tx: the engine
-	// runs ClosePeriodTx / FireScheduledCancellationTx as the FIRST statement,
-	// then the invoice-number allocation and the invoice insert on the same
-	// tx, so a CAS miss rolls back before any invoice exists.
+	// runs ClosePeriodTx as the FIRST statement, then the invoice-number
+	// allocation and the invoice insert on the same tx, so a CAS miss rolls
+	// back before any invoice exists.
 	WithTenantTx(ctx context.Context, tenantID string, fn func(tx *sql.Tx) error) error
 	// ClosePeriodTx is THE period writer: one UPDATE that row-locks the
 	// subscription and proves `expected` (status, period start, watermark),
@@ -448,16 +430,6 @@ type SubscriptionReader interface {
 	// threshold fire queues subscription.threshold_crossed with it on the
 	// fire's transaction, so the event commits with the fire.
 	EnqueueEventTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID, eventType string, extra map[string]any) error
-
-	// FireScheduledCancellationTx is the terminal cycle close (ADR-115): on
-	// the closer's tx it flips a sub with a due cancel_at / cancel_at_period_end
-	// intent to canceled, CAS-ing on `expected` as well as status='active',
-	// seals its intervals and enqueues subscription.canceled; the final
-	// invoice is inserted on the same tx. The `at` argument is the close's
-	// instant, written as canceled_at. subscription.ErrWatermarkMoved covers
-	// both "period moved" and "already terminated" — the closer's snapshot is
-	// stale either way.
-	FireScheduledCancellationTx(ctx context.Context, tx *sql.Tx, tenantID, id string, expected subscription.PeriodSnapshot, at time.Time) (domain.Subscription, error)
 
 	// ListWithThresholds returns active subscriptions in the given
 	// livemode partition that have at least one billing threshold configured
@@ -907,18 +879,11 @@ func (e *Engine) SetDunningResolver(d DunningResolver) {
 	e.dunningResolver = d
 }
 
-// SetScheduledCancelExecutor wires the ADR-097 mid-period scheduled-cancel
-// executor. See the ScheduledCancelExecutor doc-comment.
-func (e *Engine) SetScheduledCancelExecutor(x ScheduledCancelExecutor) {
-	e.cancelExecutor = x
-}
-
 // SetInvoiceGrace sets INVOICE_GRACE_PERIOD (ADR-120). Usage reaches Hardcount
 // some time after it happens, so the two billing runs (the
 // scheduler's RunCycle and the operator's POST /v1/billing/run) close a
-// period only once the grace has passed after its end, or after a
-// mid-period cancel_at. Usage stamped inside the period that arrives within
-// the grace is then on the invoice.
+// period only once the grace has passed after its end. Usage stamped inside
+// the period that arrives within the grace is then on the invoice.
 //
 // The other closers do not wait. An operator acting on one subscription
 // (immediate cancel, retry-billing, the pre-close of every other
@@ -942,30 +907,6 @@ func (e *Engine) resolveDunningRecovered(ctx context.Context, tenantID, invoiceI
 		slog.WarnContext(ctx, "failed to resolve dunning after background credit settle",
 			"invoice_id", invoiceID, "error", err)
 	}
-}
-
-// shouldFireScheduledCancel reports whether a sub's soft-cancel intent has
-// caught up with the current cycle tick. Two trigger conditions, OR'd:
-//
-//   - cancel_at_period_end=true and the period we just billed has ended
-//     (periodEnd <= now) — by construction this is true at every invocation
-//     since billSubscription is only entered when next_billing_at <= now,
-//     but we keep the guard explicit so the helper doesn't depend on
-//     caller invariants.
-//
-//   - cancel_at <= now — a specific timestamp the cycle has crossed.
-//
-// The check is intentionally placed after invoice generation so the just-
-// ended period bills normally before the sub transitions to canceled
-// (matching Stripe: the final invoice goes out, then the sub ends).
-func shouldFireScheduledCancel(sub domain.Subscription, periodEnd, now time.Time) bool {
-	if sub.CancelAtPeriodEnd && !periodEnd.After(now) {
-		return true
-	}
-	if sub.CancelAt != nil && !sub.CancelAt.After(now) {
-		return true
-	}
-	return false
 }
 
 // baseSegment is one [start, end] slice of a period during which an
@@ -1286,21 +1227,14 @@ func emitBaseSegmentLine(seg baseSegment, plan domain.Plan, period domain.CycleP
 // to the next fetch.
 var errPeriodMoved = errors.New("billing: period moved under this close — nothing written")
 
-// periodCloseOutcome is what commitPeriodClose committed.
-type periodCloseOutcome struct {
-	inv      domain.Invoice       // zero when no invoice was inserted (empty close)
-	canceled *domain.Subscription // set when the scheduled-cancel arm fired
-}
-
-// commitPeriodClose is the ONE place a cycle close commits (ADR-115). Order
-// inside the tx:
+// commitPeriodClose is the ONE place a cycle close commits (ADR-115). It
+// returns the invoice it inserted, zero for an empty close. Order inside the
+// tx:
 //
-//  1. row lock + snapshot proof — FireScheduledCancellationTx when the
-//     schedule says this boundary terminates the sub, ClosePeriodTx
-//     otherwise. The CAS is the FIRST statement, so a closer planning from a
-//     stale snapshot fails here and never reaches an insert; a closer that
-//     blocks on another closer's lock re-evaluates the CAS against the row
-//     that closer committed.
+//  1. row lock + snapshot proof — ClosePeriodTx. The CAS is the FIRST
+//     statement, so a closer planning from a stale snapshot fails here and
+//     never reaches an insert; a closer that blocks on another closer's lock
+//     re-evaluates the CAS against the row that closer committed.
 //  2. threshold-watermark re-read on this tx: the fire the lines were built
 //     against (builtAgainst) must still be the newest fire for the period —
 //     nil vs nil, or the same instant. A reset=false fire that committed
@@ -1321,17 +1255,11 @@ type periodCloseOutcome struct {
 // → errPeriodMoved (nothing written); anything else, a unique violation
 // included, is an error and nothing is written.
 func (e *Engine) commitPeriodClose(ctx context.Context, sub domain.Subscription, expected subscription.PeriodSnapshot,
-	periodStart, periodEnd, nextStart, nextEnd, now time.Time, builtAgainst *time.Time,
-	inv domain.Invoice, lines []domain.InvoiceLineItem, belowZero netNegativeUsage) (periodCloseOutcome, error) {
-	var out periodCloseOutcome
+	periodStart, periodEnd, nextStart, nextEnd time.Time, builtAgainst *time.Time,
+	inv domain.Invoice, lines []domain.InvoiceLineItem, belowZero netNegativeUsage) (domain.Invoice, error) {
+	var out domain.Invoice
 	err := e.subs.WithTenantTx(ctx, sub.TenantID, func(tx *sql.Tx) error {
-		if shouldFireScheduledCancel(sub, periodEnd, now) {
-			canceled, err := e.subs.FireScheduledCancellationTx(ctx, tx, sub.TenantID, sub.ID, expected, now)
-			if err != nil {
-				return err
-			}
-			out.canceled = &canceled
-		} else if err := e.subs.ClosePeriodTx(ctx, tx, sub.TenantID, sub.ID, expected, nextStart, nextEnd, nextEnd, sub.BillingAnchorDay); err != nil {
+		if err := e.subs.ClosePeriodTx(ctx, tx, sub.TenantID, sub.ID, expected, nextStart, nextEnd, nextEnd, sub.BillingAnchorDay); err != nil {
 			return err
 		}
 
@@ -1372,14 +1300,14 @@ func (e *Engine) commitPeriodClose(ctx context.Context, sub domain.Subscription,
 		if err := e.noteNetNegativeTx(ctx, tx, sub, belowZero, domain.BillingReasonSubscriptionCycle, periodStart, periodEnd, created); err != nil {
 			return err
 		}
-		out.inv = created
+		out = created
 		return nil
 	})
 	if errors.Is(err, subscription.ErrWatermarkMoved) {
 		slog.InfoContext(ctx, "billing period moved under this close — nothing written; re-reading",
 			"subscription_id", sub.ID, "tenant_id", sub.TenantID,
 			"period_start", periodStart, "period_end", periodEnd)
-		return periodCloseOutcome{}, errPeriodMoved
+		return domain.Invoice{}, errPeriodMoved
 	}
 	return out, err
 }
@@ -1390,29 +1318,6 @@ func sameInstant(a, b *time.Time) bool {
 		return a == nil && b == nil
 	}
 	return a.Equal(*b)
-}
-
-// afterScheduledCancel runs the post-commit legs of the terminal close: the
-// operator log line and the AuditActionCancel row. Operator-side cancel +
-// portal-side cancel both write AuditActionCancel; this is the third path
-// (auto-fire at period end) that previously skipped audit, leaving the
-// subscription Activity timeline showing "Cancellation scheduled" with no
-// terminal event. The canceled_by='schedule' field matches the outbound-
-// webhook shape so a CS rep reading both surfaces sees the same vocabulary.
-// subscription.canceled (canceled_by=schedule) itself was enqueued IN the
-// closer tx by FireScheduledCancellationTx.
-func (e *Engine) afterScheduledCancel(ctx context.Context, sub, canceled domain.Subscription, now time.Time) {
-	slog.Info("scheduled cancel fired",
-		"subscription_id", sub.ID,
-		"tenant_id", sub.TenantID,
-		"canceled_at", now.UTC(),
-	)
-	if e.auditLogger != nil {
-		_ = e.auditLogger.Log(ctx, sub.TenantID, domain.AuditActionCancel, "subscription", canceled.ID, canceled.Code, map[string]any{
-			"canceled_by": "schedule",
-			"customer_id": canceled.CustomerID,
-		})
-	}
 }
 
 // TaxApplication is the invoice-level tax summary returned by
@@ -1853,9 +1758,8 @@ func (e *Engine) applyTax(ctx context.Context, ts domain.TenantSettings, inclusi
 // errStillDue marks a subscription that was billed without error in this run
 // and came back due on a later page. billSubscription returns cleanly while the
 // sub is still due only when a concurrent change raced it: another closer won
-// its period twice in a row (errPeriodMoved), or a cancel was rescheduled
-// while it fired. The drain does not bill a sub twice in one run,
-// so it reports the sub.
+// its period twice in a row (errPeriodMoved). The drain does not bill a sub
+// twice in one run, so it reports the sub.
 //
 // It is saved as a counted failure (ADR-119), so the retry comes after the
 // first wait, not on the next run. A real race costs that one 15 minute wait,
@@ -2046,9 +1950,9 @@ func (e *Engine) RunCycleForTenant(ctx context.Context, tenantID string, batchSi
 // hardcount_billing_failing_subscriptions, not attempted here.
 //
 // "Due" also waits for the invoice grace (ADR-120): a period is closed once
-// INVOICE_GRACE_PERIOD has passed after its end (or after a mid-period
-// cancel_at), so usage that arrives in that time is on its invoice. The
-// billing-failure wait above keeps the real now.
+// INVOICE_GRACE_PERIOD has passed after its end, so usage that arrives in
+// that time is on its invoice. The billing-failure wait above keeps the real
+// now.
 //
 // onPage runs after each page; the scheduler passes its liveness stamp.
 // Returns the invoices generated and the per-sub errors.
@@ -2103,10 +2007,10 @@ const maxPeriodsPerSubPerCall = 10000
 // billed, even when this returns an error or panics.
 //
 // grace is the invoice grace of the run (ADR-120; 0 for the operator's
-// one-subscription close). A due instant (next_billing_at,
-// or a mid-period cancel_at) counts only once grace has passed after it, so a
-// catch-up after downtime bills the older periods at once and the newest
-// after its grace. The due scans admit with the same rule, both arms.
+// one-subscription close). A period end (next_billing_at) counts only once
+// grace has passed after it, so a catch-up after downtime bills the older
+// periods at once and the newest after its grace. The due scans admit with
+// the same rule.
 //
 // ADR-028.
 func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, grace time.Duration, progress *billProgress) (int, error) {
@@ -2147,49 +2051,8 @@ func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, 
 		// after it, less the run's invoice grace (ADR-120), means there's
 		// nothing more to bill in this call. It decides only whether a due
 		// instant has come; the close itself still runs at the due instant
-		// (billOnePeriod anchors on next_billing_at, the cancel on cancel_at).
+		// (billOnePeriod anchors on next_billing_at).
 		dueBy := e.clock.Now(ctx).Add(-grace)
-
-		// ADR-097: a cancel_at strictly INSIDE the current period fires
-		// here, BEFORE the caught-up early-return — the motivating bug's
-		// sub has next_billing_at months in the future, so any code below
-		// that return never sees it. Strict Before on next_billing_at:
-		// cancel_at == next_billing_at is the boundary path's tie
-		// (shouldFireScheduledCancel fires at equality after billing the
-		// full period); the two paths must never both claim an instant.
-		// The due scans admit these subs via their cancel arm (gated
-		// status='active' in SQL — the same predicate as this branch, so
-		// every admitted row makes progress and the fetch loop can't
-		// livelock on a clean decline).
-		if sub.Status == domain.SubscriptionActive &&
-			sub.CancelAt != nil && !sub.CancelAt.After(dueBy) &&
-			(sub.NextBillingAt == nil || sub.CancelAt.Before(*sub.NextBillingAt)) {
-			if e.cancelExecutor == nil {
-				// Fail loud: an unexecutable due cancel would re-fetch on
-				// every scan pass forever and keep renewing past its own
-				// cancellation. The producer always wires the executor.
-				return count, fmt.Errorf("due mid-period cancel_at on %s but no ScheduledCancelExecutor wired", sub.ID)
-			}
-			err := e.cancelExecutor.FireDueScheduledCancel(ctx, sub.TenantID, sub.ID, *sub.CancelAt)
-			if errors.Is(err, subscription.ErrWatermarkMoved) {
-				// The subscription changed while the cancel was priced, before
-				// its transaction (ADR-139); nothing was written. Re-read once
-				// and fire again, as for a period close below. A second miss
-				// leaves it due for the next fetch (errStillDue).
-				if movedRetry {
-					return count, nil
-				}
-				movedRetry = true
-				continue
-			}
-			if err != nil {
-				return count, fmt.Errorf("fire due mid-period cancel %s: %w", sub.ID, err)
-			}
-			// Terminal: the sub is canceled (or a benign race already
-			// resolved it) — either way it drops out of the due scans.
-			return count, nil
-		}
-
 		if sub.NextBillingAt == nil || sub.NextBillingAt.After(dueBy) {
 			return count, nil
 		}
@@ -2443,32 +2306,16 @@ func nominalRate(price domain.PlanPrice) *decimal.Decimal {
 // buildLineItems computes the invoice line items and subtotal for one
 // billing period: per-item base-fee segments (change-log aware) plus
 // per-meter usage charges (priced by the one rater, rate.go),
-// honoring thresholds already billed this cycle and scheduled-cancel
-// terminal-cycle skips. Extracted whole from
+// honoring thresholds already billed this cycle. Extracted whole from
 // billOnePeriod (behavior-preserving) to separate the pricing
 // computation from the billing-cycle orchestration; it remains large
 // and is the next candidate for further decomposition. Usage left
 // unpriced is added to unpriced, which the caller records once the close
 // commits. Usage below zero bills 0 and is added to belowZero, which the
 // caller writes on the closer tx (net_negative.go).
-func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, now, periodStart, periodEnd time.Time, plans map[string]domain.Plan, invoiceCurrency string, billingLoc *time.Location, unpriced unpricedUsage, belowZero netNegativeUsage) ([]domain.InvoiceLineItem, int64, *time.Time, error) {
+func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, periodStart, periodEnd time.Time, plans map[string]domain.Plan, invoiceCurrency string, billingLoc *time.Location, unpriced unpricedUsage, belowZero netNegativeUsage) ([]domain.InvoiceLineItem, int64, *time.Time, error) {
 	var lineItems []domain.InvoiceLineItem
 	subtotal := int64(0)
-
-	// At cycle close, check whether the scheduled cancel will fire at
-	// this boundary. If yes, in_advance base lines for the UPCOMING
-	// period MUST be skipped — the sub is about to terminate, the
-	// customer won't consume the upcoming period, and emitting the
-	// line would overcharge by one full prepayment. The cycle-close
-	// invoice still bills usage from the just-elapsed period
-	// (in-arrears for usage is always correct) and any in_arrears
-	// base for the just-elapsed period. commitPeriodClose then fires the
-	// scheduled cancel in the same tx as this invoice (ADR-115).
-	// (audit finding flagged during the 2026-05-18 cancel-flow walk
-	// through; same bug class would re-appear if hard-pause is ever
-	// re-added — paused subs at pause-activation should likewise
-	// skip the next-period in_advance base line.)
-	terminalCycleClose := shouldFireScheduledCancel(sub, periodEnd, now)
 
 	// Threshold-fired invoice for THIS cycle: when fireThreshold ran
 	// mid-cycle (the period keeps its anchor), that invoice already billed
@@ -2529,7 +2376,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	// Base-fee lines: segment-aware for in_arrears, one upcoming-period
 	// line for in_advance. closeBaseFeeLines is shared with the operator
 	// preview (previewCycle) so the estimate and the invoice cannot drift.
-	baseLines, err := closeBaseFeeLines(sub, segsByItem, plans, periodStart, periodEnd, invoiceCurrency, billingLoc, terminalCycleClose, wm.billedBase())
+	baseLines, err := closeBaseFeeLines(sub, segsByItem, plans, periodStart, periodEnd, invoiceCurrency, billingLoc, wm.billedBase())
 	if err != nil {
 		return nil, 0, nil, err
 	}
@@ -2620,8 +2467,8 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	//   - The pause is read at the cycle close: the period ending May 1
 	//     stays a draft when the pause resumes May 5, even when the
 	//     close runs May 20.
-	//   - Cancel-at-period-end / scheduled-change applications stamp
-	//     their `canceled_at` / `applied_at` at the cycle boundary.
+	//   - Scheduled plan-change applications stamp their `applied_at` at
+	//     the cycle boundary.
 	//   - Tax calculation date matches the cycle, so the tax rate
 	//     applicable at the cycle close is used.
 	//   - MarkPaid for zero-amount auto-paid invoices stamps PaidAt at
@@ -2680,7 +2527,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	// against; commitPeriodClose re-reads it on the closer tx.
 	unpriced := unpricedUsage{}
 	belowZero := netNegativeUsage{}
-	lineItems, subtotal, thresholdBilledThrough, err := e.buildLineItems(ctx, sub, now, periodStart, periodEnd, plans, invoiceCurrency, billingLoc, unpriced, belowZero)
+	lineItems, subtotal, thresholdBilledThrough, err := e.buildLineItems(ctx, sub, periodStart, periodEnd, plans, invoiceCurrency, billingLoc, unpriced, belowZero)
 	if err != nil {
 		return false, err
 	}
@@ -2695,22 +2542,16 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	// Skip empty cycle-close invoices — matches BillOnCreate's and
 	// priceFinalOnCancel's existing zero-subtotal guards and
 	// the Stripe / Lago / Chargebee / Orb convention of NOT emitting
-	// a $0 invoice when there's literally nothing to bill. Common
-	// triggers in practice:
+	// a $0 invoice when there's literally nothing to bill. A common
+	// trigger in practice: an in_arrears item removed mid-period. The
+	// pre-remove segment emits, but post-remove there's no current item,
+	// so the next cycle's invoice may have zero base lines.
 	//
-	//   - in_advance plan + scheduled cancel-at-period-end (PR-9):
-	//     upcoming-period base line is skipped because the customer
-	//     won't use the period; if there's no usage to bill for the
-	//     just-elapsed period either, the result is zero line items.
-	//   - in_arrears item removed mid-period: pre-remove segment
-	//     emits, but post-remove there's no current item, so the
-	//     next cycle's invoice may have zero base lines.
-	//
-	// Still advance the cycle (or fire the scheduled cancel) so the period
-	// anchor moves forward — the absence of an invoice doesn't mean the
-	// period didn't pass. No invoice number is consumed.
+	// Still advance the cycle so the period anchor moves forward — the
+	// absence of an invoice doesn't mean the period didn't pass. No invoice
+	// number is consumed.
 	if subtotal == 0 && len(lineItems) == 0 {
-		out, err := e.commitPeriodClose(ctx, sub, expected, periodStart, periodEnd, nextPeriodStart, nextPeriodEnd, now, thresholdBilledThrough, domain.Invoice{}, nil, belowZero)
+		_, err := e.commitPeriodClose(ctx, sub, expected, periodStart, periodEnd, nextPeriodStart, nextPeriodEnd, thresholdBilledThrough, domain.Invoice{}, nil, belowZero)
 		if errors.Is(err, errPeriodMoved) {
 			return false, err
 		}
@@ -2720,9 +2561,6 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 		// The period closed with no invoice; any unpriced usage in it is
 		// now billed nowhere, so it counts here, after the commit.
 		unpriced.record(live)
-		if out.canceled != nil {
-			e.afterScheduledCancel(ctx, sub, *out.canceled, now)
-		}
 		slog.Info("cycle close skipped — no billable lines",
 			"subscription_id", sub.ID,
 			"period_start", periodStart,
@@ -2827,7 +2665,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 		NetPaymentTermDays: netDays,
 		BillingReason:      domain.BillingReasonSubscriptionCycle,
 	}
-	out, err := e.commitPeriodClose(ctx, sub, expected, periodStart, periodEnd, nextPeriodStart, nextPeriodEnd, now, thresholdBilledThrough, invoiceRow, lineItems, belowZero)
+	inv, err := e.commitPeriodClose(ctx, sub, expected, periodStart, periodEnd, nextPeriodStart, nextPeriodEnd, thresholdBilledThrough, invoiceRow, lineItems, belowZero)
 	if errors.Is(err, errPeriodMoved) {
 		return false, err
 	}
@@ -2842,18 +2680,13 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 		// ADR-115.)
 		return false, fmt.Errorf("create invoice: %w", err)
 	}
-	inv := out.inv
 	// Counted after the commit: a close that lost its CAS or rolled back
 	// counted nothing, and the retry that wins counts once.
 	unpriced.record(live)
-	// The period is closed (or the sub terminated). Every leg from here runs
-	// after the commit. The closer tx above already holds the invoice's
-	// finalize audit row (emitFinalizeAuditTx, ADR-090) and its
-	// invoice.finalized event (the invoice store), so a crash from here on
-	// loses neither.
-	if out.canceled != nil {
-		e.afterScheduledCancel(ctx, sub, *out.canceled, now)
-	}
+	// The period is closed. Every leg from here runs after the commit. The
+	// closer tx above already holds the invoice's finalize audit row
+	// (emitFinalizeAuditTx, ADR-090) and its invoice.finalized event (the
+	// invoice store), so a crash from here on loses neither.
 
 	// Stripe Tax: once the invoice is durably persisted, commit the
 	// tax_calculation into a tax_transaction so Stripe can report the
@@ -3891,9 +3724,8 @@ func (e *Engine) prepareCancelCredit(ctx context.Context, sub domain.Subscriptio
 
 	// At or after period end there is no unused portion to relieve (and the
 	// final-invoice step has already refused the cancel unless nothing was
-	// owed). cancel_at == period_start is a REAL zero-
-	// consumption case (ADR-097: a schedule landing between the loop's
-	// refresh and the boundary's cycle advance cancels a fully-prepaid,
+	// owed). canceled_at == period_start is a REAL zero-consumption case (a
+	// cancel at the instant its period opened cancels a fully-prepaid,
 	// zero-used period) — relieve the whole period rather than keep it;
 	// only strictly-before-period-start stays defensive-rejected.
 	if !cancelAt.Before(periodEnd) || cancelAt.Before(periodStart) {
@@ -4040,7 +3872,7 @@ type reliefPlan struct {
 // funding source sent the whole relief to a post-commit path whose failure was
 // only logged — the cancel or swap stood and the customer's relief was lost,
 // with no retry. Any error now rolls the change back; callers retry (dunning
-// and the scheduled-cancel scan do it on their own).
+// does it on its own).
 //
 // What the plan read is proved under the locks writeReliefTx takes: a void
 // requires the invoice unchanged (VoidUnchangedTx), and each draft re-checks

@@ -104,10 +104,7 @@ func TestListCustomerMeterCoverageEnds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if err := store.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
-		_, err := store.FireScheduledCancellationTx(ctx, tx, tenantID, zw.ID, SnapshotOf(fresh), day(8))
-		return err
-	}); err != nil {
+	if _, err := store.CancelAtomicWithBill(ctx, tenantID, zw.ID, SnapshotOf(fresh), day(8), nil); err != nil {
 		t.Fatalf("backdated cancel: %v", err)
 	}
 

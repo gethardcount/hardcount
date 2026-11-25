@@ -91,8 +91,7 @@ func (s *PostgresStore) ListItemIntervalsTx(ctx context.Context, tx *sql.Tx, sub
 // The source is billing_intervals of the other subscriptions that ended in
 // the window, with a plan's meters every meter it has ever priced, as in
 // FindMeterConflicts. Zero-width rows are left out (they covered nothing).
-// This covers an immediate or scheduled cancel, an item removal and a plan
-// swap away.
+// This covers a cancel, an item removal and a plan swap away.
 func (s *PostgresStore) ListCustomerMeterCoverageEnds(ctx context.Context, tenantID, customerID, excludeSubID string, from, to time.Time) ([]domain.MeterCoverageEnd, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {

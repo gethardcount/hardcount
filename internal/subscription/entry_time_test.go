@@ -115,25 +115,6 @@ func subEntries() []subEntry {
 			}
 			return *out.CanceledAt
 		}},
-		{"ScheduleCancel", func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
-			at := base.Add(35 * 24 * time.Hour)
-			out, err := svc.ScheduleCancel(ctx, "t1", sub.ID, ScheduleCancelInput{CancelAt: &at})
-			if err != nil {
-				t.Fatalf("ScheduleCancel: %v", err)
-			}
-			return out.UpdatedAt
-		}},
-		{"ClearScheduledCancel", func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
-			at := base.Add(35 * 24 * time.Hour)
-			if _, err := svc.ScheduleCancel(clock.WithEffectiveNow(ctx, base.Add(-time.Hour)), "t1", sub.ID, ScheduleCancelInput{CancelAt: &at}); err != nil {
-				t.Fatalf("seed the schedule: %v", err)
-			}
-			out, _, err := svc.ClearScheduledCancel(ctx, "t1", sub.ID)
-			if err != nil {
-				t.Fatalf("ClearScheduledCancel: %v", err)
-			}
-			return out.UpdatedAt
-		}},
 		{"UpdateItem (seat change)", func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
 			q := int64(3)
 			res, err := svc.UpdateItem(ctx, "t1", sub.ID, sub.Items[0].ID, UpdateItemInput{Quantity: &q})
@@ -279,17 +260,6 @@ func reliefEntries() []reliefEntry {
 				t.Fatalf("CancelForDunning: %v", err)
 			}
 		}},
-		{"FireDueScheduledCancel (the billing run)", func(t *testing.T, ctx context.Context, svc *Service, store *writeSpyStore, sub domain.Subscription, base time.Time) {
-			cancelAt := base.Add(-time.Hour)
-			due := store.subs[sub.ID]
-			due.CancelAt = &cancelAt
-			due.BillingTime = domain.BillingTimeCalendar
-			due.NextBillingAt = due.CurrentBillingPeriodEnd
-			store.subs[sub.ID] = due
-			if err := svc.FireDueScheduledCancel(ctx, "t1", sub.ID, cancelAt); err != nil {
-				t.Fatalf("FireDueScheduledCancel: %v", err)
-			}
-		}},
 	}
 }
 
@@ -303,8 +273,8 @@ func withReliefBiller(svc *Service) *reliefTimeBiller {
 }
 
 // A cancel's relief credit note is issued on the time its caller bound: the
-// cancel route's (its request's), dunning's final action's (its run) or the
-// billing run's. The server's clock is not read.
+// cancel route's (its request's) or dunning's final action's (its run). The
+// server's clock is not read.
 func TestSubscriptionRelief_IsIssuedOnTheDecidedTime(t *testing.T) {
 	for _, e := range reliefEntries() {
 		t.Run(e.name, func(t *testing.T) {

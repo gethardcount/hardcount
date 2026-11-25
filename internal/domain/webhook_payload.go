@@ -92,8 +92,6 @@ var webhookEventExtras = map[string][]string{
 
 	EventSubscriptionCreated:                {},
 	EventSubscriptionCanceled:               {"canceled_by"},
-	EventSubscriptionCancelScheduled:        {},
-	EventSubscriptionCancelCleared:          {},
 	EventSubscriptionCollectionPaused:       {"triggered_by"},
 	EventSubscriptionCollectionResumed:      {"triggered_by", "resumed_at"},
 	EventSubscriptionItemAdded:              {"item_id"},

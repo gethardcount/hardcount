@@ -280,7 +280,7 @@ func TestNoBody_TakesNothingButAnEmptyBody(t *testing.T) {
 		{name: "no body", body: ``, wantOK: true},
 		{name: "empty object", body: `{}`, wantOK: true},
 		{name: "null", body: `null`, wantOK: true},
-		{name: "a field", body: `{"at_period_end":true}`, wantStatus: http.StatusUnprocessableEntity, wantParam: "at_period_end"},
+		{name: "a field", body: `{"prorate":true}`, wantStatus: http.StatusUnprocessableEntity, wantParam: "prorate"},
 		{name: "an array", body: `[]`, wantStatus: http.StatusBadRequest},
 		{name: "malformed", body: `{`, wantStatus: http.StatusBadRequest},
 	}

@@ -46,13 +46,12 @@ type Config struct {
 	// (cmd/hardcount/main.go), so the worst case is this delay plus 60s.
 	ShutdownDrainDelay time.Duration
 
-	// InvoiceGracePeriod is how long after a billing period ends (or after a
-	// mid-period scheduled cancel) the billing runs wait before they build
-	// its invoice. Usage that arrives late but is stamped inside the period
-	// is then billed (ADR-120). It delays every subscription's period-end
-	// invoice, flat-fee ones included. Env INVOICE_GRACE_PERIOD (a Go
-	// duration): the default is 1h and the range is 0 to 72h. 0 closes a
-	// period as soon as it is due.
+	// InvoiceGracePeriod is how long after a billing period ends the billing
+	// runs wait before they build its invoice. Usage that arrives late but is
+	// stamped inside the period is then billed (ADR-120). It delays every
+	// subscription's period-end invoice, flat-fee ones included. Env
+	// INVOICE_GRACE_PERIOD (a Go duration): the default is 1h and the range is
+	// 0 to 72h. 0 closes a period as soon as it is due.
 	InvoiceGracePeriod time.Duration
 
 	// RateLimits are the HARDCOUNT_RATE_LIMIT_* request limits (internal/api).

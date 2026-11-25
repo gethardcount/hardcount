@@ -251,6 +251,60 @@ WHERE i.status = 'paid' AND (i.billing_reason IS NULL OR i.billing_reason = 'man
 
 **You see:** one row for each, or `(0 rows)`.
 
+### Migration 00252: scheduled cancels are removed
+
+The release with migration `00252_remove_scheduled_cancel` removes the
+scheduled cancel: a subscription ends when it is canceled, at once. A cancel
+needs Hardcount itself, for its final invoice and its credit for the unused
+part of a base fee billed in advance, so the migration cannot cancel
+anything. It does three things:
+
+- It removes every scheduled cancel, at period end or on a date. The
+  subscription stays active and goes on billing.
+- It deletes a webhook endpoint that listened only to
+  `subscription.cancel_scheduled` or `subscription.cancel_cleared`.
+- It removes those two events from every other endpoint's event list.
+
+Before you upgrade, on the release you run now, cancel each subscription
+that has a scheduled cancel:
+
+1. List them in the database shell
+   (`docker compose exec postgres psql -U hardcount -d hardcount` on one
+   VM). The dashboard shows the same rows with a **Cancels on** notice on
+   the subscription's page, one account and mode at a time.
+
+   ```sql
+   SET app.bypass_rls = 'on';
+   SELECT id, tenant_id, livemode, code, cancel_at, cancel_at_period_end, current_billing_period_end FROM subscriptions WHERE status = 'active' AND (cancel_at IS NOT NULL OR cancel_at_period_end);
+   ```
+
+   **You see:** one row for each subscription with a scheduled cancel, or
+   `(0 rows)`. The cancel is due at `cancel_at`, or, with
+   `cancel_at_period_end` true, at `current_billing_period_end`.
+2. Cancel each one now: **Cancel** on the subscription's page, or
+   `POST /v1/subscriptions/{id}/cancel` with an API key of its account and
+   mode. This bills the period up to now. Or wait until the day it should
+   end: the release you run now cancels it then, and you upgrade after that.
+   A row whose cancel is already due but that is still `active` is one the
+   billing run has not canceled yet, often because its billing is failing:
+   cancel it now.
+
+   **You see:** step 1's list shows `(0 rows)`.
+3. Let the server run for one minute after the last cancel, so that its
+   `subscription.canceled` webhook goes out. Then take the backup (step 2
+   of [Before you upgrade](#before-you-upgrade)) and upgrade as the rest of
+   this page says.
+
+The upgrade keeps a subscription whose scheduled cancel you left: it stays
+active and bills its next periods like any other subscription, a base fee
+billed in advance included. To end it, cancel it on the new release. A
+saved billing failure on its scheduled cancel no longer shows, and the
+billing run bills its period end as usual.
+
+Run one version at a time for this upgrade. A copy of the previous version
+that keeps running fails on every subscription it reads: the migration drops
+`cancel_at` and `cancel_at_period_end`, which it reads.
+
 ### Coming from Velox
 
 Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it

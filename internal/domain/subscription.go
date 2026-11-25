@@ -507,23 +507,6 @@ type Subscription struct {
 	BillingTime SubscriptionBillingTime `json:"billing_time"`
 	StartedAt   *time.Time              `json:"started_at,omitempty"`
 	CanceledAt  *time.Time              `json:"canceled_at,omitempty"`
-	// CancelAt is a future timestamp at which the billing cycle should
-	// transition the subscription to canceled. Distinct from CanceledAt
-	// (past-tense, set only when the cancel has fired). Nil means no
-	// timestamp-based schedule.
-	CancelAt *time.Time `json:"cancel_at,omitempty"`
-	// CancelAtPeriodEnd is the soft-cancel flag. When true and the cycle
-	// scan's instant is at or after CurrentBillingPeriodEnd, the engine
-	// transitions the sub to canceled and skips the next invoice. Setting
-	// false before the boundary fires undoes the schedule.
-	CancelAtPeriodEnd bool `json:"cancel_at_period_end"`
-	// CancelEffectiveAt is the derived, read-only answer to "when does this
-	// subscription cancel?", so no consumer re-derives the date from the
-	// schedule fields. Populated at scan time from one choke point; never
-	// persisted:
-	//   explicit cancel_at → cancel_at
-	//   at_period_end      → current_billing_period_end
-	CancelEffectiveAt *time.Time `json:"cancel_effective_at,omitempty"`
 	// PauseCollection holds the Stripe-parity collection-pause state. When
 	// non-nil, the cycle still advances but the engine generates the
 	// invoice as draft and skips finalize/charge/dunning. It is the only
@@ -589,19 +572,4 @@ func (s Subscription) PlanJoinedAt(itemCreatedAt, from time.Time) time.Time {
 		at = itemCreatedAt
 	}
 	return at
-}
-
-// DeriveCancelEffectiveAt computes CancelEffectiveAt from the schedule
-// fields. Called from the subscription store's row scan — the one choke
-// point every read path flows through.
-func (s *Subscription) DeriveCancelEffectiveAt() {
-	s.CancelEffectiveAt = nil
-	switch {
-	case s.CancelAt != nil:
-		t := *s.CancelAt
-		s.CancelEffectiveAt = &t
-	case s.CancelAtPeriodEnd && s.CurrentBillingPeriodEnd != nil:
-		t := *s.CurrentBillingPeriodEnd
-		s.CancelEffectiveAt = &t
-	}
 }

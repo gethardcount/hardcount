@@ -175,25 +175,16 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	// double-billing across the boundary. The same-tick natural cycle scan
 	// (scheduler step order: thresholds before cycle close, one goroutine)
 	// bills the whole elapsed period through the full-fidelity path instead
-	// (prorated segments, item changes, terminal-cancel handling — fireThreshold
-	// has none of those). Correctness no longer rests on that ordering: every
+	// (prorated segments, item changes — fireThreshold has neither).
+	// Correctness no longer rests on that ordering: every
 	// fire and every close proves its period snapshot under the row lock
 	// (ADR-115); the skip is an optimization that keeps boundary crossings on
 	// the full-fidelity path. We deliberately do NOT clamp-and-fire: money-correct,
-	// but it would bill exactly the mid-period-swap/scheduled-cancel subs
+	// but it would bill exactly the mid-period-swap subs
 	// through the crude path. Accepted semantic: no subscription.threshold_
 	// crossed event for a boundary-observed crossing — the cycle invoice is the
 	// operator-visible artifact (see ADR-065).
 	if !now.Before(*sub.CurrentBillingPeriodEnd) {
-		return false, nil
-	}
-	// A due cancel_at ends the period early, so it gets the same skip. The
-	// billing run's cancel arm bills [period_start, cancel_at) at the
-	// contracted instant (ADR-097), but the scheduler runs this scan first in
-	// its tick: a fire here would bill [period_start, now), usage stamped after
-	// the subscription ended included, and the
-	// cancel's final invoice would then find the window already billed.
-	if sub.CancelAt != nil && !now.Before(*sub.CancelAt) {
 		return false, nil
 	}
 

@@ -119,7 +119,6 @@ period. To close a period is to make its invoice. These actions are:
 - an immediate cancel;
 - a plan, quantity or item change;
 - a pause or resume of collection;
-- a scheduled cancel, or its removal;
 - a call to `POST /v1/subscriptions/{id}/retry-billing`, which retries a
   subscription whose billing failed.
 

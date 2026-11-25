@@ -103,51 +103,6 @@ func TestInvoiceGrace_ZeroKeepsTheOldTiming(t *testing.T) {
 	}
 }
 
-// TestInvoiceGrace_MidPeriodCancelAtWaitsTheGrace: a cancel scheduled for
-// May 16 (inside May) is a due instant like a period end, so its final
-// invoice also waits the grace and carries usage that arrives inside it. The
-// subscription is still canceled at the contracted instant. While it waits,
-// no run saves a billing failure: the cancel arm of the due scan and the
-// engine's own check agree.
-//
-// Mutation check: drop the grace from the cancel arm of
-// GetDueBillingForTenant only → the run at C+30m admits the subscription, the
-// engine declines it, and the drain saves errStillDue as a failure.
-func TestInvoiceGrace_MidPeriodCancelAtWaitsTheGrace(t *testing.T) {
-	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
-	// A cancel_at must lie past the period in progress (April), so May's
-	// middle is the earliest mid-period instant.
-	cancelAt := lagB.AddDate(0, 0, 15)
-	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", lagP0.AddDate(0, 0, 5),
-		map[string]any{"cancel_at": cancelAt.Format(time.RFC3339)}, http.StatusOK)
-	if n := r.run(lagB.Add(2 * time.Hour)); n != 1 {
-		t.Fatalf("run at B+2h generated %d invoices, want April's", n)
-	}
-	r.ingest(lagB.AddDate(0, 0, 9), 100)
-	r.ingestAt(cancelAt.Add(-5*time.Minute), cancelAt.Add(20*time.Minute), 7)
-
-	if n := r.run(cancelAt.Add(30 * time.Minute)); n != 0 {
-		t.Fatalf("run at cancel_at+30m generated %d invoices, want 0: the cancel is inside its grace", n)
-	}
-	if s := r.sub(); s.Status != domain.SubscriptionActive || s.BillingFailure != nil {
-		t.Fatalf("inside the grace: status=%s failure=%+v, want active with no failure", s.Status, s.BillingFailure)
-	}
-
-	r.run(cancelAt.Add(e2eGrace + 5*time.Minute))
-	s := r.sub()
-	if s.Status != domain.SubscriptionCanceled || s.CanceledAt == nil || !s.CanceledAt.Equal(cancelAt) {
-		t.Fatalf("after the grace: status=%s canceled_at=%v, want canceled at %v", s.Status, s.CanceledAt, cancelAt)
-	}
-	if s.BillingFailure != nil {
-		t.Errorf("billing failure = %+v, want none", s.BillingFailure)
-	}
-	invs := r.invoices()
-	if got := usageBilled(invs); got != 107 {
-		r.logInvoices(invs)
-		t.Errorf("usage billed = %dc, want 107c: the 7 calls that arrived inside the grace belong on the final invoice", got)
-	}
-}
-
 // TestInvoiceGrace_ImmediateCancelClosesTheEndedPeriodNow: an immediate
 // cancel inside the grace does not wait and is not refused. It closes April
 // first, as the operator acted on the subscription now.

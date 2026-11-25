@@ -48,9 +48,8 @@ import (
 // by the shared-fate tests. This is the shrinking set doing its
 // job: one entry removed, proven, gone.
 var residualOwnTxAuditWriters = map[string]int{
-	// Engine-driven subscription lifecycle: the scheduled cancel the billing run
-	// fires, and a scheduled plan change it applies.
-	"cancel":                              1,
+	// Engine-driven subscription lifecycle: a scheduled plan change the
+	// billing run applies.
 	"subscription.pending_change_applied": 1,
 
 	// Usage-threshold scanning. Neither mutates money directly — they record that a

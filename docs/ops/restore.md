@@ -332,7 +332,7 @@ Each line names a refund made after the backup, of a payment the restored databa
    ```
 
    **You see:** `t`.
-2. **Wait for its first run to end.** It runs at once if its last run in the backup is older than its interval ([When invoices are made](../api/timing-and-limits.md#when-invoices-are-made)), and otherwise when the interval ends. Then count the live subscriptions still past their billing date or their cancel date:
+2. **Wait for its first run to end.** It runs at once if its last run in the backup is older than its interval ([When invoices are made](../api/timing-and-limits.md#when-invoices-are-made)), and otherwise when the interval ends. Then count the live subscriptions still past their billing date:
 
    ```sql
    SET app.bypass_rls = 'on';
@@ -340,8 +340,7 @@ Each line names a refund made after the backup, of a payment the restored databa
    SELECT count(*) AS due, min(next_billing_at) AS oldest
    FROM subscriptions
    WHERE livemode AND status = 'active'
-     AND (next_billing_at <= now() - interval '1 hour'
-          OR cancel_at <= now() - interval '1 hour');
+     AND next_billing_at <= now() - interval '1 hour';
    ```
 
    **You see:** `last_tick_age_s` starts again from a few seconds when the run ends, and `due` falls to 0. `1 hour` is the default invoice grace, `INVOICE_GRACE_PERIOD`: use your value if you set one. A subscription whose billing fails stays counted: see [Subscriptions whose billing is failing](runbook/billing-failing.md). If nothing changes, see [A background job is stuck](runbook/background-job-stuck.md).

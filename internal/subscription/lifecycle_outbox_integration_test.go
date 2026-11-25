@@ -127,20 +127,14 @@ func TestLifecycleEvents_EnqueuedInTransitionTx(t *testing.T) {
 		t.Fatalf("canceled(operator): got n=%d payload=%v", n, p)
 	}
 
-	// (3) canceled (schedule) — FireScheduledCancellation on an active sub.
-	subB := newSub("lc-sched")
-	freshB, err := store.Get(ctx, tenantID, subB.ID)
-	if err != nil {
-		t.Fatalf("get subB: %v", err)
+	// (3) canceled (dunning) — the origin stamp of the machinery that
+	// decided the cancel wins over the request identity.
+	subB := newSub("lc-dunning")
+	if _, err := subscriptiontest.Cancel(subscription.WithCancelOrigin(opCtx, "dunning"), store, tenantID, subB.ID); err != nil {
+		t.Fatalf("dunning cancel: %v", err)
 	}
-	if err := store.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
-		_, err := store.FireScheduledCancellationTx(ctx, tx, tenantID, subB.ID, subscription.SnapshotOf(freshB), time.Now().UTC())
-		return err
-	}); err != nil {
-		t.Fatalf("fire scheduled cancel: %v", err)
-	}
-	if n, p := events(domain.EventSubscriptionCanceled); n != 2 || p["canceled_by"] != "schedule" {
-		t.Fatalf("canceled(schedule): got n=%d payload=%v", n, p)
+	if n, p := events(domain.EventSubscriptionCanceled); n != 2 || p["canceled_by"] != "dunning" {
+		t.Fatalf("canceled(dunning): got n=%d payload=%v", n, p)
 	}
 
 	// (4) Atomicity: a failing billFn inside CancelAtomicWithBill rolls the

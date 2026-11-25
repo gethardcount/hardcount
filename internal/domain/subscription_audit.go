@@ -43,8 +43,6 @@ const (
 // AuditActionUpdate, AuditActionCancel or AuditActionSubscriptionItemUpdated
 // row did.
 const (
-	SubAuditCancelScheduled           = "cancel_scheduled"
-	SubAuditCancelCleared             = "cancel_cleared"
 	SubAuditCollectionPaused          = "collection_paused"
 	SubAuditCollectionResumed         = "collection_resumed"
 	SubAuditBillingRetried            = "billing_retried"

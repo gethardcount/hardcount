@@ -34,9 +34,6 @@ All the routes are under `/v1/subscriptions`. Each change sends a
 |---|---|---|---|
 | (new) | `POST /` | `subscription.created` | `active` |
 | `active` | `POST /{id}/cancel` | `subscription.canceled` | `canceled` |
-| `active` | `POST /{id}/schedule-cancel` | `subscription.cancel_scheduled` | no change yet |
-| `active` | Hardcount, when the scheduled cancel is due | `subscription.canceled` | `canceled` |
-| `active` | `DELETE /{id}/scheduled-cancel` | `subscription.cancel_cleared` | no change |
 | `active` | Hardcount, when the payment retries for an unpaid invoice (dunning) run out and the dunning policy says cancel | `subscription.canceled` | `canceled` |
 
 A subscription bills whether or not the customer has saved a card. Its
@@ -144,20 +141,14 @@ $50.00 of base fee.
 
 ## Cancel
 
-- **Now:** `POST /v1/subscriptions/{id}/cancel`. Hardcount makes a final
-  invoice for the part of the period so far: usage, and a base fee billed
-  in arrears for those days. For a base fee billed in advance, the days
-  left are given back. The share already paid goes to the customer's
-  credit balance. The share not paid yet lowers what the open invoice asks
-  for.
-- **Later:** `POST /v1/subscriptions/{id}/schedule-cancel`, with
-  `{"at_period_end": true}` or `{"cancel_at": "2026-09-30T00:00:00Z"}`.
-  Until then the subscription bills as usual.
-  - `cancel_at` must be in the future, and on or after the end of the
-    current period: the period in progress cannot be shortened.
-  - A `cancel_at` inside a later period is accepted. That period is billed
-    up to it, prorated.
-  - Any other date is refused with `422`.
+`POST /v1/subscriptions/{id}/cancel` ends the subscription now. Hardcount
+makes a final invoice for the part of the period so far: usage, and a base
+fee billed in arrears for those days. For a base fee billed in advance, the
+days left are given back. The share already paid goes to the customer's
+credit balance. The share not paid yet lowers what the open invoice asks
+for.
+
+To end a subscription on a later day, cancel it on that day.
 
 ## Pause collection
 

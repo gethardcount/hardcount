@@ -36,7 +36,7 @@ full access ([Roadmap](roadmap.md#later)).
 
 | Feature | What it does for you | Learn more |
 |---|---|---|
-| Subscriptions | Pausing collection (invoices stay drafts), cancelling at period end, and plan changes with proration: the customer pays only for the part of the period each price was active. | [The Hardcount API](api-surface.md#customers-and-subscriptions) |
+| Subscriptions | Pausing collection (invoices stay drafts), cancelling with a final invoice for the period so far, and plan changes with proration: the customer pays only for the part of the period each price was active. | [The Hardcount API](api-surface.md#customers-and-subscriptions) |
 | Discounts | A different price for one customer (a price override), or credit. There are no coupons: they were cut before launch, and credit and price overrides do the job. | [The Hardcount API](api-surface.md#credits-and-refunds) |
 | Invoices | PDF invoices, a hosted invoice page the customer opens from a secure link, and emails with your branding. | [How Hardcount works](how-hardcount-works.md) |
 | Invoice preview | See the next invoice before it is made. The preview shows the subtotal only, without tax or credits. | [The Hardcount API](api-surface.md#invoices-and-billing) |

@@ -108,11 +108,9 @@ Notes on three rows:
 
 - `hardcount_billing_cycles_total`: billing passes run (a cycle runs two: live, then test)
 - `hardcount_invoices_generated_total`: invoices built by the scheduled
-  billing run's period closes, both modes, including a close that ends a
-  subscription canceled at its period end. Not counted: the final invoice
-  of a cancel scheduled inside a period, spend-threshold invoices, cancels
-  that take effect at once, `POST /v1/billing/run` and invoices created
-  through the API
+  billing run's period closes, both modes. Not counted: spend-threshold
+  invoices, a cancel's final invoice, `POST /v1/billing/run` and invoices
+  created through the API
 - `hardcount_http_requests_in_flight`: requests this replica is answering now
 - `hardcount_dunning_active_runs`: active dunning runs across every account
   and both modes (−1 = the count query failed)

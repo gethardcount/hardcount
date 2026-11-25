@@ -433,10 +433,6 @@ export const api = {
     apiRequest<Subscription>('POST', `/subscriptions/${id}/cancel`),
   retrySubscriptionBilling: (id: string) =>
     apiRequest<{ subscription: Subscription; invoices_generated: number; still_due?: boolean }>('POST', `/subscriptions/${id}/retry-billing`),
-  scheduleSubscriptionCancel: (id: string, body: { at_period_end: true } | { cancel_at: string }) =>
-    apiRequest<Subscription>('POST', `/subscriptions/${id}/schedule-cancel`, body),
-  clearScheduledSubscriptionCancel: (id: string) =>
-    apiRequest<Subscription>('DELETE', `/subscriptions/${id}/scheduled-cancel`),
   pauseSubscriptionCollection: (id: string, body: { behavior: 'keep_as_draft'; resumes_at?: string }) =>
     apiRequest<Subscription>('PUT', `/subscriptions/${id}/pause-collection`, body),
   resumeSubscriptionCollection: (id: string) =>
@@ -775,12 +771,6 @@ export interface Subscription {
   // labels can pass undefined to formatCivil* and fall back to the tenant TZ.
   current_billing_period_display?: string
   next_billing_at?: string
-  cancel_at_period_end?: boolean
-  // Derived, read-only: the backend's authoritative "when does it actually
-  // cancel" (cancel_at when set; otherwise, with the flag, the period end).
-  // Consumers must not re-derive from the flag.
-  cancel_effective_at?: string
-  cancel_at?: string
   canceled_at?: string
   pause_collection?: {
     behavior: 'keep_as_draft'

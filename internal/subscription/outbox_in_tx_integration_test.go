@@ -256,22 +256,14 @@ func itemOn(t *testing.T, sub domain.Subscription, planID string) string {
 }
 
 // TestLifecycleEvents_ContextEndsAfterCommit_EventIsQueued: the operator's
-// schedule and clear of a cancel, and pause and resume of collection. Each
-// request's context ends right after its change commits, and
-// the event is saved. A clear or resume that changes nothing sends none.
+// pause and resume of collection. Each request's context ends right after its
+// change commits, and the event is saved. A resume that changes nothing sends
+// none.
 func TestLifecycleEvents_ContextEndsAfterCommit_EventIsQueued(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	r := newEventRig(t, db, "Outbox Lifecycle Ends", true)
 	sub := []string{"id", r.subID}
 	operator := map[string]any{"triggered_by": "operator"}
-
-	checkStatus(t, "schedule cancel", r.call(t, proNow, (*Handler).scheduleCancel, map[string]any{"at_period_end": true}, sub...), http.StatusOK)
-	r.checkOneEvent(t, domain.EventSubscriptionCancelScheduled, r.subID, nil)
-
-	checkStatus(t, "clear scheduled cancel", r.call(t, proNow, (*Handler).clearScheduledCancel, nil, sub...), http.StatusOK)
-	r.checkOneEvent(t, domain.EventSubscriptionCancelCleared, r.subID, nil)
-	checkStatus(t, "clear again", r.call(t, proNow, (*Handler).clearScheduledCancel, nil, sub...), http.StatusOK)
-	r.checkOneEvent(t, domain.EventSubscriptionCancelCleared, r.subID, nil)
 
 	checkStatus(t, "pause collection", r.call(t, proNow, (*Handler).pauseCollection, map[string]any{"behavior": "keep_as_draft"}, sub...), http.StatusOK)
 	r.checkOneEvent(t, domain.EventSubscriptionCollectionPaused, r.subID, operator)

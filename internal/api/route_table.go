@@ -416,8 +416,6 @@ var routeTable = map[routeKey]routeDecl{
 	{"PUT", "/v1/subscriptions/{id}/pause-collection"}:                 needs(subscriptionWrite).withAudit(explicit("subscription.Service.PauseCollection (Log)")),
 	{"DELETE", "/v1/subscriptions/{id}/pause-collection"}:              needs(subscriptionWrite).withAudit(explicit("subscription.Service.ResumeCollection (Log)")),
 	{"POST", "/v1/subscriptions/{id}/retry-billing"}:                   needs(subscriptionWrite).withAudit(explicit("subscription.Service.RetryBilling (LogInTx)")),
-	{"POST", "/v1/subscriptions/{id}/schedule-cancel"}:                 needs(subscriptionWrite).withAudit(explicit("subscription.Handler.scheduleCancel (Log)")),
-	{"DELETE", "/v1/subscriptions/{id}/scheduled-cancel"}:              needs(subscriptionWrite).withAudit(explicit("subscription.Handler.clearScheduledCancel (Log)")),
 	{"GET", "/v1/subscriptions/{id}/timeline"}:                         needs(subscriptionRead),
 
 	// --- usage --------------------------------------------------------------

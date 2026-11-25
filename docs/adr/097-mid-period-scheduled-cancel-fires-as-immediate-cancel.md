@@ -1,9 +1,11 @@
 # ADR-097: A due mid-period `cancel_at` fires as an immediate cancel at that instant
 
-**Status**: Accepted 2026-07-18. Amended by [ADR-118](118-cancel-and-swap-relief-in-the-change-transaction.md) on 2026-10-12 and 2026-11-09, by [ADR-120](120-invoice-grace-period-for-late-usage.md) on 2026-10-14, and by [ADR-139](139-cancel-prices-before-its-transaction.md) on 2026-11-10.
+**Status:** Deprecated (2026-11-25: scheduled cancel is removed, so no `cancel_at` falls due; see the amendment at the end)
 **Context**: FLOW TC8 walkthrough live-find; fixes the stranded-cancel money bug.
 
 ## Summary
+
+**Not in force since 2026-11-25:** scheduled cancel is removed, so nothing below is in the code. It is kept as the record of what was decided.
 
 A scheduled cancel whose `cancel_at` falls inside a billing period fires as an immediate cancel at that instant. Before this, the billing scans looked only at period ends, so such a subscription renewed past its own cancel date. One transaction cancels it, bills usage and any in-arrears base fee up to `cancel_at`, and writes relief for the unused prepaid part, never as a cash refund. `canceled_at` and the final invoice's period end are the `cancel_at` instant, even when the fire runs late. Status: active, amended: all relief is written in the cancel transaction ([ADR-118](118-cancel-and-swap-relief-in-the-change-transaction.md)), wall-clock runs fire after the invoice grace period ([ADR-120](120-invoice-grace-period-for-late-usage.md)), and the fire is priced before its transaction ([ADR-139](139-cancel-prices-before-its-transaction.md)).
 
@@ -137,3 +139,15 @@ period); the mid-period branch requires `cancel_at` strictly before
 - **Bill-then-flip ("fire last")**: both billers hard-require a canceled
   sub (`Status == canceled`, `CanceledAt` set) and no-op silently
   otherwise; synthetic-snapshot workarounds would fork the money path.
+
+## Amendment 2026-11-25
+
+Scheduled cancel is removed, and this decision with it. A subscription ends
+by a cancel that takes effect now: `POST /v1/subscriptions/{id}/cancel`, or
+dunning's final cancel. No subscription has a `cancel_at`, so nothing is
+left to fire. Gone: the `cancel_at` arm of the due scans,
+`FireScheduledCancellationWithBill` and its compare-and-set on `cancel_at`,
+`canceled_by: schedule`, and the threshold scan's skip for a due
+`cancel_at`. The immediate-cancel machinery this decision reused is
+unchanged. On upgrade, the migration removes any schedule still saved, and
+that subscription keeps billing.

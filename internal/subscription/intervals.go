@@ -281,13 +281,10 @@ func intervalCloseForRemove(ctx context.Context, tx *sql.Tx, itemID, subscriptio
 }
 
 // intervalCloseAllForCancel seals every open interval under the sub at
-// LEAST(canceledAt, current period end): an immediate cancel closes at
-// the cancel instant; a boundary/backdated fire (cancel_at_period_end,
-// or an ADR-097 contracted instant months past) closes no later than the
-// period the final invoice covers. GREATEST(starts_at, …) is the
-// contracted-retroactive floor: a cancel instant predating an interval's
-// open (the remediation-cohort shape) zero-widths that interval rather
-// than minting a negative range — the earlier, already-billed intervals
+// LEAST(canceledAt, current period end): the cancel instant, never past the
+// period the final invoice covers. GREATEST(starts_at, …) is the floor: a
+// cancel instant before an interval's open zero-widths that interval rather
+// than minting a negative range, and the earlier, already-billed intervals
 // keep their history.
 func intervalCloseAllForCancel(ctx context.Context, tx *sql.Tx, sub domain.Subscription, canceledAt time.Time) error {
 	closeAt := canceledAt

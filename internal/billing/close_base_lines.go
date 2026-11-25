@@ -25,12 +25,11 @@ type closeBaseLine struct {
 // (M-SUB-1, 2026-10-16 — the preview used to show the full base fee).
 //
 // segsByItem is windowSegments over the period; plans must already hold
-// every plan a segment references. terminalCycleClose skips the upcoming
-// in_advance base when a scheduled cancel fires at this boundary;
-// thresholdBilled skips the in_arrears base when this cycle's threshold
-// invoice carries one (thresholdWatermark.billedBase): only a fire made before
-// fires stopped billing the base.
-func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegment, plans map[string]domain.Plan, periodStart, periodEnd time.Time, invoiceCurrency string, billingLoc *time.Location, terminalCycleClose, thresholdBilled bool) ([]closeBaseLine, error) {
+// every plan a segment references. thresholdBilled skips the in_arrears base
+// when this cycle's threshold invoice carries one
+// (thresholdWatermark.billedBase): only a fire made before fires stopped
+// billing the base.
+func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegment, plans map[string]domain.Plan, periodStart, periodEnd time.Time, invoiceCurrency string, billingLoc *time.Location, thresholdBilled bool) ([]closeBaseLine, error) {
 	var out []closeBaseLine
 
 	emitSeg := func(seg baseSegment, plan domain.Plan) error {
@@ -69,12 +68,6 @@ func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegm
 		isAdvance := plan.BaseBillTiming == domain.BillInAdvance
 
 		if isAdvance {
-			if terminalCycleClose {
-				// Sub cancels at this boundary — don't pre-pay a period
-				// that won't be used. Usage on this invoice still
-				// captures the just-elapsed consumption.
-				continue
-			}
 			if plan.BaseAmountCents <= 0 {
 				continue
 			}

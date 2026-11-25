@@ -44,11 +44,6 @@ var ErrNotPaused = errors.New("subscription: collection is not paused")
 // resumed nothing, so the operator's resume announces nothing.
 var ErrPauseLifted = errors.New("subscription: the pause had already lifted")
 
-// ErrNoScheduledCancel is returned by ClearScheduledCancellation when the row
-// exists but has no cancel scheduled: the clear changed nothing, so
-// subscription.cancel_cleared must not be sent.
-var ErrNoScheduledCancel = errors.New("subscription: no cancel is scheduled")
-
 // ErrNoPendingChange is returned by ClearItemPendingPlan when the item has
 // no plan change scheduled under the subscription row lock: another cancel
 // cleared it, or the boundary apply made it the item's plan. The clear
@@ -169,11 +164,9 @@ type Store interface {
 	// status moved; nothing was written and the caller plans again). It then
 	// seals every open billing interval at `at` before billFn runs.
 	//
-	// Every cancel writer (this and both
-	// FireScheduledCancellation methods) stores and returns the canceled row
-	// with no cancel schedule and no pending plan change on its items
-	// (retireLiveOnlyStateTx). The collection pause stays: it still holds the
-	// subscription's unpaid invoices.
+	// It stores and returns the canceled row with no pending plan change on
+	// its items (retireLiveOnlyStateTx). The collection pause stays: it still
+	// holds the subscription's unpaid invoices.
 	CancelAtomicWithBill(ctx context.Context, tenantID, id string, expected PeriodSnapshot, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error)
 
 	// ListItemIntervals reads the subscription's full billing-interval
@@ -182,30 +175,6 @@ type Store interface {
 	// transaction, and requires the same rows (ADR-139).
 	ListItemIntervals(ctx context.Context, tenantID, subscriptionID string) ([]domain.ItemInterval, error)
 	ListItemIntervalsTx(ctx context.Context, tx *sql.Tx, subscriptionID string) ([]domain.ItemInterval, error)
-
-	// ScheduleCancellation persists a future cancel intent. cancelAt is a
-	// nullable timestamp; cancelAtPeriodEnd is the soft-cancel flag. Both
-	// may be set in the same call (the boundary that fires first wins);
-	// the service layer rejects "schedule both at once" so callers don't
-	// pass them together in practice.
-	// ScheduleCancellation writes the cancel schedule, CAS-ing on the status
-	// the caller validated the intent under. Status-changed conflicts return
-	// InvalidState (409).
-	ScheduleCancellation(ctx context.Context, tenantID, id string, cancelAt *time.Time, cancelAtPeriodEnd bool, observedStatus domain.SubscriptionStatus) (domain.Subscription, error)
-
-	// ClearScheduledCancellation clears cancel_at and cancel_at_period_end.
-	// A row with neither set returns ErrNoScheduledCancel and is not written.
-	ClearScheduledCancellation(ctx context.Context, tenantID, id string) (domain.Subscription, error)
-
-	// FireScheduledCancellationWithBill is the ADR-097 mid-period variant:
-	// flip + billFn (final partial invoice + relief drafts, planned before
-	// this call) in ONE tx, CAS on status='active', cancel_at = at AND the
-	// period of `expected`, so a concurrent unschedule or re-schedule defeats
-	// the fire, and a period that moved since the plan answers
-	// ErrWatermarkMoved (ADR-139). errs.InvalidState with code
-	// ScheduledCancelSuperseded covers both benign race outcomes (already
-	// terminated; schedule changed).
-	FireScheduledCancellationWithBill(ctx context.Context, tenantID, id string, expected PeriodSnapshot, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error)
 
 	// SetPauseCollection writes the (behavior, resumes_at) pair onto the row.
 	// The hard pause (Service.Pause/PauseAtomic) was removed in PR-8 /

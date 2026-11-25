@@ -293,8 +293,6 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/", h.list)
 	r.Get("/{id}", h.get)
 	r.Post("/{id}/cancel", h.cancel)
-	r.Post("/{id}/schedule-cancel", h.scheduleCancel)
-	r.Delete("/{id}/scheduled-cancel", h.clearScheduledCancel)
 	r.Put("/{id}/pause-collection", h.pauseCollection)
 	r.Delete("/{id}/pause-collection", h.resumeCollection)
 	r.Post("/{id}/retry-billing", h.retryBilling)
@@ -470,50 +468,6 @@ func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
 
 	// subscription.canceled is enqueued IN the cancel tx (store-level
 	// DispatchTx subset) — do not also fire it here.
-
-	h.respondSub(w, r, http.StatusOK, sub)
-}
-
-// scheduleCancel records a soft-cancel intent. Body must set exactly one of
-// {at_period_end:true, cancel_at:<RFC3339>}. The current period is
-// unaffected and the billing engine flips the sub to canceled at the
-// boundary; the response's derived cancel_effective_at states when the
-// cancel lands. Re-calling
-// replaces any prior schedule (so a caller can switch modes with a new
-// request); a 409 means the sub's status changed mid-flight — re-read.
-func (h *Handler) scheduleCancel(w http.ResponseWriter, r *http.Request) {
-	tenantID := auth.TenantID(r.Context())
-	id := chi.URLParam(r, "id")
-
-	var input ScheduleCancelInput
-	if !respond.DecodeStrict(w, r, &input) {
-		return
-	}
-
-	sub, err := h.svc.ScheduleCancel(r.Context(), tenantID, id, input)
-	if err != nil {
-		respond.FromError(w, r, err, "subscription")
-		return
-	}
-
-	if h.auditLogger != nil {
-		meta := map[string]any{
-			"action":               domain.SubAuditCancelScheduled,
-			"customer_id":          sub.CustomerID,
-			"cancel_at_period_end": sub.CancelAtPeriodEnd,
-		}
-		if sub.CancelAt != nil {
-			meta["cancel_at"] = sub.CancelAt.UTC()
-		}
-		// When it lands; the activity line shows it.
-		if sub.CancelEffectiveAt != nil {
-			meta["cancel_effective_at"] = sub.CancelEffectiveAt.UTC()
-		}
-		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, meta)
-	}
-
-	// subscription.cancel_scheduled is queued in the schedule's transaction
-	// (PostgresStore.ScheduleCancellation).
 
 	h.respondSub(w, r, http.StatusOK, sub)
 }
@@ -721,42 +675,6 @@ func (h *Handler) clearBillingThresholds(w http.ResponseWriter, r *http.Request)
 			"customer_id": sub.CustomerID,
 		})
 	}
-
-	h.respondSub(w, r, http.StatusOK, sub)
-}
-
-// clearScheduledCancel removes any prior schedule. The store queues
-// subscription.cancel_cleared in the clear's transaction. Idempotent:
-// clearing a row that has no pending cancel answers 200 with the unchanged
-// subscription, and nothing is audited or queued, since nothing changed.
-// Returns 404 only when the subscription itself doesn't exist.
-func (h *Handler) clearScheduledCancel(w http.ResponseWriter, r *http.Request) {
-	if !respond.NoBody(w, r) {
-		return
-	}
-	tenantID := auth.TenantID(r.Context())
-	id := chi.URLParam(r, "id")
-
-	sub, cleared, err := h.svc.ClearScheduledCancel(r.Context(), tenantID, id)
-	if err != nil {
-		respond.FromError(w, r, err, "subscription")
-		return
-	}
-	if !cleared {
-		audit.MarkSkip(r.Context())
-		h.respondSub(w, r, http.StatusOK, sub)
-		return
-	}
-
-	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
-			"action":      domain.SubAuditCancelCleared,
-			"customer_id": sub.CustomerID,
-		})
-	}
-
-	// subscription.cancel_cleared is queued in the clear's transaction
-	// (PostgresStore.ClearScheduledCancellation).
 
 	h.respondSub(w, r, http.StatusOK, sub)
 }

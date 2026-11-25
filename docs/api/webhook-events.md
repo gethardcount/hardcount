@@ -1142,9 +1142,8 @@ A customer's payment method was set up or replaced through Stripe Checkout.
 `data.subscription` is the subscription with its items, as
 `GET /v1/subscriptions/{id}` returns it, without
 `current_billing_period_display` (a date range the API writes out when you
-read it). A cancel's time is the subscription's `canceled_at`. A scheduled
-cancel's time is its `cancel_at` and `cancel_effective_at`. These fields
-and `pause_collection` are left out when they are not set. The example
+read it). A cancel's time is the subscription's `canceled_at`. It and
+`pause_collection` are left out when they are not set. The example
 subscription has no cancel or pause, so its examples do not show them.
 
 ### `subscription.created`
@@ -1166,7 +1165,6 @@ A subscription was created.
         "item_thresholds": []
       },
       "billing_time": "calendar",
-      "cancel_at_period_end": false,
       "code": "acme-pro",
       "created_at": "2026-09-01T12:00:00Z",
       "current_billing_period_end": "2026-11-01T12:00:00Z",
@@ -1204,9 +1202,8 @@ A subscription was created.
 ### `subscription.canceled`
 
 A subscription was canceled. `canceled_by` says who canceled it:
-`operator` (a dashboard user or an API key), `customer`, `schedule` (a
-cancel set for later), `dunning` (Hardcount's automatic payment retries ran
-out) or `system` (Hardcount itself). A cancel by dunning says `dunning`.
+`operator` (a dashboard user or an API key) or `dunning` (Hardcount's
+automatic payment retries ran out).
 
 **Also in `data`:** `canceled_by`.
 
@@ -1217,14 +1214,13 @@ out) or `system` (Hardcount itself). A cancel by dunning says `dunning`.
 {
   "created_at": "2026-10-01T12:00:00Z",
   "data": {
-    "canceled_by": "schedule",
+    "canceled_by": "operator",
     "subscription": {
       "billing_thresholds": {
         "amount_gte": 50000,
         "item_thresholds": []
       },
       "billing_time": "calendar",
-      "cancel_at_period_end": false,
       "code": "acme-pro",
       "created_at": "2026-09-01T12:00:00Z",
       "current_billing_period_end": "2026-11-01T12:00:00Z",
@@ -1259,115 +1255,6 @@ out) or `system` (Hardcount itself). A cancel by dunning says `dunning`.
 
 </details>
 
-### `subscription.cancel_scheduled`
-
-A cancel at period end was scheduled.
-
-**Also in `data`:** nothing.
-
-<details>
-<summary>Example message</summary>
-
-```json
-{
-  "created_at": "2026-10-01T12:00:00Z",
-  "data": {
-    "subscription": {
-      "billing_thresholds": {
-        "amount_gte": 50000,
-        "item_thresholds": []
-      },
-      "billing_time": "calendar",
-      "cancel_at_period_end": false,
-      "code": "acme-pro",
-      "created_at": "2026-09-01T12:00:00Z",
-      "current_billing_period_end": "2026-11-01T12:00:00Z",
-      "current_billing_period_start": "2026-10-01T12:00:00Z",
-      "customer_id": "hc_cus_golden",
-      "display_name": "Acme Pro",
-      "id": "hc_sub_golden",
-      "items": [
-        {
-          "created_at": "2026-09-01T12:00:00Z",
-          "id": "hc_si_golden",
-          "pending_plan_effective_at": "2026-11-01T12:00:00Z",
-          "pending_plan_id": "hc_pln_team",
-          "plan_id": "hc_pln_pro",
-          "quantity": 3,
-          "subscription_id": "hc_sub_golden",
-          "tenant_id": "hc_ten_golden",
-          "updated_at": "2026-10-01T12:00:00Z"
-        }
-      ],
-      "next_billing_at": "2026-11-01T12:00:00Z",
-      "started_at": "2026-09-01T12:00:00Z",
-      "status": "active",
-      "tenant_id": "hc_ten_golden",
-      "updated_at": "2026-10-01T12:00:00Z"
-    }
-  },
-  "event_type": "subscription.cancel_scheduled",
-  "id": "hc_whevt_golden"
-}
-```
-
-</details>
-
-### `subscription.cancel_cleared`
-
-A scheduled cancel was removed. Clearing when no cancel is scheduled sends
-nothing.
-
-**Also in `data`:** nothing.
-
-<details>
-<summary>Example message</summary>
-
-```json
-{
-  "created_at": "2026-10-01T12:00:00Z",
-  "data": {
-    "subscription": {
-      "billing_thresholds": {
-        "amount_gte": 50000,
-        "item_thresholds": []
-      },
-      "billing_time": "calendar",
-      "cancel_at_period_end": false,
-      "code": "acme-pro",
-      "created_at": "2026-09-01T12:00:00Z",
-      "current_billing_period_end": "2026-11-01T12:00:00Z",
-      "current_billing_period_start": "2026-10-01T12:00:00Z",
-      "customer_id": "hc_cus_golden",
-      "display_name": "Acme Pro",
-      "id": "hc_sub_golden",
-      "items": [
-        {
-          "created_at": "2026-09-01T12:00:00Z",
-          "id": "hc_si_golden",
-          "pending_plan_effective_at": "2026-11-01T12:00:00Z",
-          "pending_plan_id": "hc_pln_team",
-          "plan_id": "hc_pln_pro",
-          "quantity": 3,
-          "subscription_id": "hc_sub_golden",
-          "tenant_id": "hc_ten_golden",
-          "updated_at": "2026-10-01T12:00:00Z"
-        }
-      ],
-      "next_billing_at": "2026-11-01T12:00:00Z",
-      "started_at": "2026-09-01T12:00:00Z",
-      "status": "active",
-      "tenant_id": "hc_ten_golden",
-      "updated_at": "2026-10-01T12:00:00Z"
-    }
-  },
-  "event_type": "subscription.cancel_cleared",
-  "id": "hc_whevt_golden"
-}
-```
-
-</details>
-
 ### `subscription.collection_paused`
 
 Collection was paused: invoices stay drafts. The subscription's
@@ -1394,7 +1281,6 @@ the pause; resume it yourself.
         "item_thresholds": []
       },
       "billing_time": "calendar",
-      "cancel_at_period_end": false,
       "code": "acme-pro",
       "created_at": "2026-09-01T12:00:00Z",
       "current_billing_period_end": "2026-11-01T12:00:00Z",
@@ -1463,7 +1349,6 @@ nothing. `triggered_by` is `operator`, `schedule` (its resume date came) or
         "item_thresholds": []
       },
       "billing_time": "calendar",
-      "cancel_at_period_end": false,
       "code": "acme-pro",
       "created_at": "2026-09-01T12:00:00Z",
       "current_billing_period_end": "2026-11-01T12:00:00Z",
@@ -1519,7 +1404,6 @@ A plan was added to the subscription. `item_id` names the new item.
         "item_thresholds": []
       },
       "billing_time": "calendar",
-      "cancel_at_period_end": false,
       "code": "acme-pro",
       "created_at": "2026-09-01T12:00:00Z",
       "current_billing_period_end": "2026-11-01T12:00:00Z",
@@ -1574,7 +1458,6 @@ An item's plan or quantity changed. `item_id` names the item.
         "item_thresholds": []
       },
       "billing_time": "calendar",
-      "cancel_at_period_end": false,
       "code": "acme-pro",
       "created_at": "2026-09-01T12:00:00Z",
       "current_billing_period_end": "2026-11-01T12:00:00Z",
@@ -1629,7 +1512,6 @@ An item was removed. `item_id` names it; it is no longer in `items`.
         "item_thresholds": []
       },
       "billing_time": "calendar",
-      "cancel_at_period_end": false,
       "code": "acme-pro",
       "created_at": "2026-09-01T12:00:00Z",
       "current_billing_period_end": "2026-11-01T12:00:00Z",
@@ -1685,7 +1567,6 @@ A plan change for the next billing period was scheduled. The item's
         "item_thresholds": []
       },
       "billing_time": "calendar",
-      "cancel_at_period_end": false,
       "code": "acme-pro",
       "created_at": "2026-09-01T12:00:00Z",
       "current_billing_period_end": "2026-11-01T12:00:00Z",
@@ -1743,7 +1624,6 @@ before the cancel reached it, the call answers 409 and sends nothing:
         "item_thresholds": []
       },
       "billing_time": "calendar",
-      "cancel_at_period_end": false,
       "code": "acme-pro",
       "created_at": "2026-09-01T12:00:00Z",
       "current_billing_period_end": "2026-11-01T12:00:00Z",
@@ -1803,7 +1683,6 @@ means Hardcount builds its invoice and starts the next period.
         "item_thresholds": []
       },
       "billing_time": "calendar",
-      "cancel_at_period_end": false,
       "code": "acme-pro",
       "created_at": "2026-09-01T12:00:00Z",
       "current_billing_period_end": "2026-11-01T12:00:00Z",
@@ -1871,7 +1750,6 @@ the period's usage so far, or a usage count on one item. "So far" ends one
         "item_thresholds": []
       },
       "billing_time": "calendar",
-      "cancel_at_period_end": false,
       "code": "acme-pro",
       "created_at": "2026-09-01T12:00:00Z",
       "current_billing_period_end": "2026-11-01T12:00:00Z",

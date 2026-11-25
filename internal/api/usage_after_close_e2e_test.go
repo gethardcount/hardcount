@@ -495,20 +495,6 @@ func TestUsageAfterClose_HeldReleaseInTheGrace(t *testing.T) {
 	}
 }
 
-// TestUsageAfterClose_HeldReleaseInTheGrace_CancelAtPeriodEnd: the same, on a
-// subscription that cancels at April's end. May is not billed: outside.
-//
-// Mutation check: drop the cancel-at-period-end exclusion → in_open_period.
-func TestUsageAfterClose_HeldReleaseInTheGrace_CancelAtPeriodEnd(t *testing.T) {
-	r, planT := newTokensRig(t)
-	r.newSub("held", planT, lagP0)
-	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", lagP0.AddDate(0, 0, 9), map[string]any{"at_period_end": true}, http.StatusOK)
-	out := r.heldRelease(lagB.Add(10*time.Minute), lagB.Add(20*time.Minute))
-	if count(out, "released") != 2 || count(out, "outside_open_period") != 2 || count(out, "in_open_period") != 0 {
-		t.Errorf("release answer = %v, want released 2, outside_open_period 2", out)
-	}
-}
-
 // TestUsageAfterClose_HeldReleaseInTheGrace_PendingPlan: the subscription is
 // on a plan without the meter, with a change at April's end to plan T, which
 // prices it. Rows stamped in May are priced by plan T: in_open_period.

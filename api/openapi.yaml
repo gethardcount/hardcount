@@ -344,9 +344,9 @@ components:
             error:
               type: invalid_request_error
               code: validation_error
-              message: unknown field "at_period_end"
+              message: unknown field "prorate"
               request_id: req_dbjg652q3gpgqfoq5cd0
-              param: at_period_end
+              param: prorate
     InvalidBody:
       description: |
         The body is not one valid JSON value, it is not a JSON object, it
@@ -1109,7 +1109,7 @@ components:
         starts: the first one in the same transaction that creates the
         subscription, each later one on the invoice that closes the period
         before.
-      required: [id, code, display_name, customer_id, status, billing_time, cancel_at_period_end, created_at, updated_at]
+      required: [id, code, display_name, customer_id, status, billing_time, created_at, updated_at]
       properties:
         id:
           type: string
@@ -1175,26 +1175,6 @@ components:
           type: string
           format: date-time
           description: When the subscription was canceled. Absent until then.
-        cancel_at:
-          type: string
-          format: date-time
-          description: |
-            The instant a cancel is scheduled for, when it was scheduled
-            with `cancel_at`. Absent when none is set, and after the
-            subscription is canceled.
-        cancel_at_period_end:
-          type: boolean
-          description: |
-            True when the subscription cancels at the end of the current
-            period. False after the subscription is canceled.
-        cancel_effective_at:
-          type: string
-          format: date-time
-          description: |
-            When a scheduled cancel takes effect: `cancel_at` when set;
-            otherwise, with `cancel_at_period_end`,
-            `current_billing_period_end`. Absent when no cancel is
-            scheduled.
         pause_collection:
           $ref: "#/components/schemas/SubscriptionPauseCollection"
         billing_thresholds:
@@ -1264,7 +1244,6 @@ components:
         status: active
         billing_time: calendar
         started_at: "2026-10-01T09:12:44Z"
-        cancel_at_period_end: false
         current_billing_period_start: "2026-10-01T00:00:00Z"
         current_billing_period_end: "2026-11-01T00:00:00Z"
         current_billing_period_display: "Oct 1, 2026 – Oct 31, 2026"
@@ -1437,7 +1416,7 @@ components:
           time, but its plan has no price for this meter.
         - `outside_subscription`: no active subscription of the customer
           bills the event's time. For example, it has none, or the time is
-          before one starts, or after one ends or its scheduled cancel.
+          before one starts or after one ends.
         - `no_price`: the plan that bills the event's time prices this
           meter, but no price of that plan takes the event's `dimensions`.
           A price takes an event whose dimensions include all of the
@@ -1449,9 +1428,8 @@ components:
         promise that the event will be billed. Hardcount checks only the
         customer's current billing periods: time after a period end whose
         invoice is not built yet is not checked. A later change can change
-        the outcome either way: a subscription created or changed, a
-        scheduled cancel undone, or a price added. The invoice is the final
-        answer.
+        the outcome either way: a subscription created or changed, or a
+        price added. The invoice is the final answer.
 
         Two cases can make a present status wrong: a price change whose
         save began before a billing period started and finished after the
@@ -4535,7 +4513,6 @@ components:
             status: active
             billing_time: calendar
             started_at: "2026-10-01T00:00:00Z"
-            cancel_at_period_end: false
             current_billing_period_start: "2026-11-01T00:00:00Z"
             current_billing_period_end: "2026-12-01T00:00:00Z"
             next_billing_at: "2026-12-01T00:00:00Z"
@@ -7081,10 +7058,8 @@ components:
             already paused, the subscription is canceled, or the invoice
             was paid first. `cancel` cancels the subscription and sends
             `subscription.canceled` with `canceled_by: dunning`. It does
-            nothing if the subscription is already canceled. If a scheduled
-            cancel was already due, that cancel happens instead, and its
-            event says `canceled_by: schedule`. `none` leaves it alone. An
-            invoice with no subscription is not affected.
+            nothing if the subscription is already canceled. `none` leaves
+            it alone. An invoice with no subscription is not affected.
         final_invoice_action:
           type: string
           enum: [none, mark_uncollectible]
@@ -7551,7 +7526,7 @@ components:
           type: integer
           description: |
             Released rows outside every subscription's time (before it
-            started, after it ended or after its scheduled cancel, or in another, ended subscription's time), and rows in a
+            started, after it ended, or in another, ended subscription's time), and rows in a
             period already invoiced. Also rows of a sum or count meter
             stamped before the end of this period's paid spend-threshold
             invoice. Bill them with a one-off invoice if they should be
@@ -10572,7 +10547,6 @@ paths:
                     status: active
                     billing_time: calendar
                     started_at: "2026-10-01T00:00:00Z"
-                    cancel_at_period_end: false
                     current_billing_period_start: "2026-11-01T00:00:00Z"
                     current_billing_period_end: "2026-12-01T00:00:00Z"
                     next_billing_at: "2026-12-01T00:00:00Z"
@@ -15209,7 +15183,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                cancel_at_period_end: false
                 current_billing_period_start: "2026-10-01T00:00:00Z"
                 current_billing_period_end: "2026-11-01T00:00:00Z"
                 current_billing_period_display: "Oct 1, 2026 – Oct 31, 2026"
@@ -15393,7 +15366,6 @@ paths:
                     status: active
                     billing_time: calendar
                     started_at: "2026-10-01T09:12:44Z"
-                    cancel_at_period_end: false
                     current_billing_period_start: "2026-10-01T00:00:00Z"
                     current_billing_period_end: "2026-11-01T00:00:00Z"
                     current_billing_period_display: "Oct 1, 2026 – Oct 31, 2026"
@@ -15488,8 +15460,8 @@ paths:
                   invoices_generated:
                     type: integer
                     description: |
-                      Period-close invoices this call created. The final
-                      invoice of a scheduled cancel is not counted, so 0
+                      Period-close invoices this call created. A period
+                      with nothing to bill closes with no invoice, so 0
                       does not mean the retry failed. Read success from
                       `subscription.billing_failure` and `still_due`.
                   still_due:
@@ -15517,7 +15489,6 @@ paths:
                   status: active
                   billing_time: calendar
                   started_at: "2026-10-01T09:12:44Z"
-                  cancel_at_period_end: false
                   current_billing_period_start: "2026-11-01T00:00:00Z"
                   current_billing_period_end: "2026-12-01T00:00:00Z"
                   current_billing_period_display: "Nov 1, 2026 – Nov 30, 2026"
@@ -15616,7 +15587,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                cancel_at_period_end: false
                 current_billing_period_start: "2026-10-01T00:00:00Z"
                 current_billing_period_end: "2026-11-01T00:00:00Z"
                 current_billing_period_display: "Oct 1, 2026 – Oct 31, 2026"
@@ -15661,9 +15631,7 @@ paths:
         the tax reversal happen (a failed issue is retried), and then the
         final invoice is collected, so that credit reduces it.
 
-        If a billing period has already ended, it is billed first. If a
-        scheduled cancel was already due, that cancel takes effect at its
-        scheduled time and the canceled subscription is returned. The
+        If a billing period has already ended, it is billed first. The
         canceled subscription keeps its last `current_billing_period_*`
         and `next_billing_at`; nothing is billed at that time.
 
@@ -15701,7 +15669,6 @@ paths:
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
                 canceled_at: "2026-10-20T16:45:00Z"
-                cancel_at_period_end: false
                 current_billing_period_start: "2026-10-01T00:00:00Z"
                 current_billing_period_end: "2026-11-01T00:00:00Z"
                 current_billing_period_display: "Oct 1, 2026 – Oct 31, 2026"
@@ -15764,253 +15731,9 @@ paths:
                 error:
                   type: invalid_request_error
                   code: validation_error
-                  message: unknown field "at_period_end"
+                  message: unknown field "prorate"
                   request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: at_period_end
-        "429":
-          $ref: "#/components/responses/RateLimited"
-
-  /v1/subscriptions/{id}/schedule-cancel:
-    post:
-      tags: [Subscriptions]
-      summary: Schedule a cancel
-      operationId: scheduleSubscriptionCancel
-      description: |
-        Schedules the subscription to cancel later. Set exactly one of
-        `at_period_end` or `cancel_at`. A new call replaces any earlier
-        schedule. If a billing period has ended and is not invoiced yet,
-        it is billed first, so "the current period" is the one running.
-
-        `at_period_end` cancels at the end of the current period.
-        `cancel_at` must be on or after the end of the current period. A
-        date inside a later period is allowed, and that period is billed up
-        to the date.
-
-        The response's `cancel_effective_at` says when the cancel takes
-        effect. Sends the `subscription.cancel_scheduled` webhook event.
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - name: id
-          in: path
-          required: true
-          description: The subscription's ID (`hc_sub_…`).
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                at_period_end:
-                  type: boolean
-                  description: Cancel at the end of the current period.
-                cancel_at:
-                  type: string
-                  format: date-time
-                  description: Cancel at this instant. Must be in the future.
-            example:
-              at_period_end: true
-      responses:
-        "200":
-          description: The subscription with the schedule set.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Subscription"
-              example:
-                id: hc_sub_dauq502q3gpgqfoq5c2g
-                tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                code: acme-pro
-                display_name: Acme Pro
-                customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
-                items:
-                  - id: hc_si_3f9c0e2a1b4d5c6e7f8a9b0c
-                    tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                    subscription_id: hc_sub_dauq502q3gpgqfoq5c2g
-                    plan_id: hc_pln_dajr5o2q3gpgqfoq5c1g
-                    quantity: 1
-                    created_at: "2026-10-01T09:12:44Z"
-                    updated_at: "2026-10-01T09:12:44Z"
-                status: active
-                billing_time: calendar
-                started_at: "2026-10-01T09:12:44Z"
-                cancel_at_period_end: true
-                cancel_effective_at: "2026-11-01T00:00:00Z"
-                current_billing_period_start: "2026-10-01T00:00:00Z"
-                current_billing_period_end: "2026-11-01T00:00:00Z"
-                current_billing_period_display: "Oct 1, 2026 – Oct 31, 2026"
-                next_billing_at: "2026-11-01T00:00:00Z"
-                created_at: "2026-10-01T09:12:44Z"
-                updated_at: "2026-10-20T16:45:00Z"
-        "400":
-          description: The body is not valid JSON, a field has a value of the wrong JSON type, or `cancel_at` is not an RFC 3339 date-time.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: invalid_request
-                  message: invalid JSON body
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          description: No subscription with this ID in this account and mode.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: not_found
-                  message: subscription not found
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "409":
-          description: |
-            Code `invalid_state`: the subscription is `canceled`, or its
-            status changed while the request ran (read
-            it again and retry). Code `unbilled_period`: a billing period
-            ended and could not be invoiced; retry billing first.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: invalid_state
-                  message: A canceled subscription can't be scheduled to cancel.
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          description: |
-            Code `validation_error`: neither or both of `at_period_end` and
-            `cancel_at` are set (`param: body`), or `cancel_at` is in the
-            past or breaks the date rules above (`param: cancel_at`).
-            Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: validation_error
-                  message: one of at_period_end or cancel_at must be set
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: body
-        "429":
-          $ref: "#/components/responses/RateLimited"
-
-  /v1/subscriptions/{id}/scheduled-cancel:
-    delete:
-      tags: [Subscriptions]
-      summary: Clear a scheduled cancel
-      operationId: clearSubscriptionScheduledCancel
-      description: |
-        Removes a scheduled cancel and sends the
-        `subscription.cancel_cleared` webhook event. Calling it on a
-        subscription with no schedule returns the subscription unchanged
-        and sends no event.
-
-        If the scheduled date has already passed, the cancel has taken
-        effect and the request answers 409.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          description: The subscription's ID (`hc_sub_…`).
-          schema:
-            type: string
-      responses:
-        "200":
-          description: The subscription with no scheduled cancel.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Subscription"
-              example:
-                id: hc_sub_dauq502q3gpgqfoq5c2g
-                tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                code: acme-pro
-                display_name: Acme Pro
-                customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
-                items:
-                  - id: hc_si_3f9c0e2a1b4d5c6e7f8a9b0c
-                    tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                    subscription_id: hc_sub_dauq502q3gpgqfoq5c2g
-                    plan_id: hc_pln_dajr5o2q3gpgqfoq5c1g
-                    quantity: 1
-                    created_at: "2026-10-01T09:12:44Z"
-                    updated_at: "2026-10-01T09:12:44Z"
-                status: active
-                billing_time: calendar
-                started_at: "2026-10-01T09:12:44Z"
-                cancel_at_period_end: false
-                current_billing_period_start: "2026-10-01T00:00:00Z"
-                current_billing_period_end: "2026-11-01T00:00:00Z"
-                current_billing_period_display: "Oct 1, 2026 – Oct 31, 2026"
-                next_billing_at: "2026-11-01T00:00:00Z"
-                created_at: "2026-10-01T09:12:44Z"
-                updated_at: "2026-10-22T08:10:00Z"
-        "400":
-          $ref: "#/components/responses/InvalidBody"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          description: No subscription with this ID in this account and mode.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: not_found
-                  message: subscription not found
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "409":
-          description: |
-            Code `invalid_state`: the scheduled cancel already took effect
-            when the billing period ended. Code `unbilled_period`: a billing
-            period ended and could not be invoiced; retry billing first.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: invalid_state
-                  message: the scheduled cancel already took effect when the billing period ended; the subscription is canceled
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          description: |
-            The request has a body with a field (`param` names it). This
-            route takes no body: send none, `{}` or `null`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: validation_error
-                  message: unknown field "at_period_end"
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: at_period_end
+                  param: prorate
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -16094,7 +15817,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                cancel_at_period_end: false
                 pause_collection:
                   behavior: keep_as_draft
                   resumes_at: "2026-12-01T00:00:00Z"
@@ -16213,7 +15935,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                cancel_at_period_end: false
                 current_billing_period_start: "2026-10-01T00:00:00Z"
                 current_billing_period_end: "2026-11-01T00:00:00Z"
                 current_billing_period_display: "Oct 1, 2026 – Oct 31, 2026"
@@ -16367,7 +16088,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                cancel_at_period_end: false
                 billing_thresholds:
                   amount_gte: 50000
                   item_thresholds:
@@ -16480,7 +16200,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                cancel_at_period_end: false
                 current_billing_period_start: "2026-10-01T00:00:00Z"
                 current_billing_period_end: "2026-11-01T00:00:00Z"
                 current_billing_period_display: "Oct 1, 2026 – Oct 31, 2026"

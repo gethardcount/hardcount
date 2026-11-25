@@ -65,10 +65,6 @@ func (a *subStoreAdapter) EnqueueEventTx(ctx context.Context, tx *sql.Tx, tenant
 	return a.store.EnqueueEventTx(ctx, tx, tenantID, id, eventType, extra)
 }
 
-func (a *subStoreAdapter) FireScheduledCancellationTx(ctx context.Context, tx *sql.Tx, tenantID, id string, expected subscription.PeriodSnapshot, at time.Time) (domain.Subscription, error) {
-	return a.store.FireScheduledCancellationTx(ctx, tx, tenantID, id, expected, at)
-}
-
 func (a *subStoreAdapter) ClearPauseCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
 	return a.store.ClearPauseCollection(ctx, tenantID, id, nil)
 }

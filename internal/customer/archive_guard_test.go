@@ -41,25 +41,21 @@ func newArchiveTestSvc(t *testing.T, checker SubscriptionChecker) (*Service, dom
 }
 
 // TestArchive_BlockedWhileSubsBill locks ADR-067: archive is a 409-BLOCK
-// while ANY subscription still bills (active / active-with-scheduled-cancel),
-// never an auto-cancel. Mutation seam: remove the checker call in Update and
-// every blocked case silently archives.
+// while ANY subscription still bills (an active one), never an auto-cancel.
+// Mutation seam: remove the checker call in Update and the customer silently
+// archives.
 func TestArchive_BlockedWhileSubsBill(t *testing.T) {
-	for _, status := range []string{"active", "active(scheduled-cancel)"} {
-		t.Run(status, func(t *testing.T) {
-			svc, cust := newArchiveTestSvc(t, &fakeSubChecker{subs: []NonTerminalSubscription{{ID: "sub_1", Status: status}}})
-			_, err := svc.Update(context.Background(), "t1", cust.ID, UpdateInput{Status: "archived"})
-			if !errors.Is(err, errs.ErrInvalidState) {
-				t.Fatalf("archive with %s sub: err = %v, want InvalidState (409)", status, err)
-			}
-			if !strings.Contains(err.Error(), "sub_1") {
-				t.Errorf("409 message must name the blocking subscription: %q", err.Error())
-			}
-			got, _ := svc.Get(context.Background(), "t1", cust.ID)
-			if got.Status == domain.CustomerStatusArchived {
-				t.Fatal("customer archived despite billing subscriptions")
-			}
-		})
+	svc, cust := newArchiveTestSvc(t, &fakeSubChecker{subs: []NonTerminalSubscription{{ID: "sub_1", Status: "active"}}})
+	_, err := svc.Update(context.Background(), "t1", cust.ID, UpdateInput{Status: "archived"})
+	if !errors.Is(err, errs.ErrInvalidState) {
+		t.Fatalf("archive with an active sub: err = %v, want InvalidState (409)", err)
+	}
+	if !strings.Contains(err.Error(), "sub_1") {
+		t.Errorf("409 message must name the blocking subscription: %q", err.Error())
+	}
+	got, _ := svc.Get(context.Background(), "t1", cust.ID)
+	if got.Status == domain.CustomerStatusArchived {
+		t.Fatal("customer archived despite billing subscriptions")
 	}
 }
 

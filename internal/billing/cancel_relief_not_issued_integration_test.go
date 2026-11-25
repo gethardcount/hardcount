@@ -46,42 +46,32 @@ func (f *failingFirstIssue) Issue(ctx context.Context, tenantID, id string) (dom
 // invoice. Card on file.
 func TestCancel_ReliefNotIssued_FinalInvoiceWaitsForTheSweeps(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	for _, c := range []struct {
-		name string
-		run  func(*reliefCancelRig, *testing.T)
-	}{
-		{"immediate cancel", (*reliefCancelRig).cancelImmediately},
-		{"scheduled cancel", (*reliefCancelRig).fireScheduledCancel},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			const usageCents, wantDue = 3000, 3000 - reliefCents
-			r := newReliefCancelRig(t, db, "Relief Not Issued "+c.name, reliefRigOpts{card: true, usageUnits: usageCents})
-			r.engine.SetCreditNoteAdjuster(&failingFirstIssue{CreditNoteAdjuster: r.cn})
-			c.run(r, t)
+	const usageCents, wantDue = 3000, 3000 - reliefCents
+	r := newReliefCancelRig(t, db, "Relief Not Issued", reliefRigOpts{card: true, usageUnits: usageCents})
+	r.engine.SetCreditNoteAdjuster(&failingFirstIssue{CreditNoteAdjuster: r.cn})
+	r.cancelImmediately(t)
 
-			final := r.finalInvoice(t)
-			if charges := r.charger.charges(final.ID); len(charges) != 0 {
-				t.Fatalf("final invoice charged %v in the cancel's own call, want nothing: the relief was not issued, so the card would pay all %dc", charges, usageCents)
-			}
-			if final.AmountDueCents != usageCents || final.Status != domain.InvoiceFinalized {
-				t.Fatalf("after the cancel: final invoice %s with %dc due, want finalized with %dc due (not collected yet)", final.Status, final.AmountDueCents, usageCents)
-			}
+	final := r.finalInvoice(t)
+	if charges := r.charger.charges(final.ID); len(charges) != 0 {
+		t.Fatalf("final invoice charged %v in the cancel's own call, want nothing: the relief was not issued, so the card would pay all %dc", charges, usageCents)
+	}
+	if final.AmountDueCents != usageCents || final.Status != domain.InvoiceFinalized {
+		t.Fatalf("after the cancel: final invoice %s with %dc due, want finalized with %dc due (not collected yet)", final.Status, final.AmountDueCents, usageCents)
+	}
 
-			// One billing run, as the leader runs it.
-			s := billing.NewScheduler(r.engine, time.Hour, 50, nil, nil, clock.NewFake(r.cancelAt.Add(time.Hour)))
-			s.SetClawbackRetrier(r.cn)
-			billing.RunBillingHalf(s, r.ctx)
+	// One billing run, as the leader runs it.
+	s := billing.NewScheduler(r.engine, time.Hour, 50, nil, nil, clock.NewFake(r.cancelAt.Add(time.Hour)))
+	s.SetClawbackRetrier(r.cn)
+	billing.RunBillingHalf(s, r.ctx)
 
-			final = r.invoice(t, final.ID)
-			if final.CreditsAppliedCents != reliefCents {
-				t.Errorf("final invoice credits_applied = %dc, want %dc: the relief must reduce it", final.CreditsAppliedCents, reliefCents)
-			}
-			if charges := r.charger.charges(final.ID); len(charges) != 1 || charges[0] != wantDue {
-				t.Errorf("final invoice charges = %v, want one charge of %dc, net of the relief", charges, wantDue)
-			}
-			if bal := r.balance(t); bal != 0 {
-				t.Errorf("credit balance = %dc, want 0 (the relief was spent on the final invoice)", bal)
-			}
-		})
+	final = r.invoice(t, final.ID)
+	if final.CreditsAppliedCents != reliefCents {
+		t.Errorf("final invoice credits_applied = %dc, want %dc: the relief must reduce it", final.CreditsAppliedCents, reliefCents)
+	}
+	if charges := r.charger.charges(final.ID); len(charges) != 1 || charges[0] != wantDue {
+		t.Errorf("final invoice charges = %v, want one charge of %dc, net of the relief", charges, wantDue)
+	}
+	if bal := r.balance(t); bal != 0 {
+		t.Errorf("credit balance = %dc, want 0 (the relief was spent on the final invoice)", bal)
 	}
 }

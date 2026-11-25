@@ -14,8 +14,12 @@
 - 2026-11-09: in the cancel's transaction, the relief is written before the
   final invoice is numbered
   ([amendment](#amendment-2026-11-09-the-relief-is-written-before-the-final-invoice-is-numbered)).
+- 2026-11-25: scheduled cancel is removed, so its rules here are gone
+  ([amendment](#amendment-2026-11-25)).
 
 ## Summary
+
+**Amended 2026-11-25:** scheduled cancel is removed. The cancels that write relief are the immediate cancel and dunning's cancel. The rest is in force.
 
 A mid-period cancel or immediate cross-interval plan swap owes the customer
 relief for the unused, prepaid part of the period. Hardcount now writes all of it
@@ -603,3 +607,13 @@ The crediting rule split the unused amount as an amount before tax, and grossed 
 `AllocateUnusedCredit` now reads each funding invoice's own `TaxInclusive`, which the invoice records when it is priced. With tax included, the share is the credit as it is, capped by the room on the invoice's total. Before tax, the share is grossed up by that invoice's total over its subtotal and capped by its room before tax. The void subtraction takes the voided invoice's total or its subtotal by the same flag (`Invoice.PricedCents`). Because the flag is the invoice's own, a tenant that switched tax-inclusive pricing between the bill and the change is credited in the terms each invoice was priced in, and invoices billed under different settings in one period are each credited in their own.
 
 Invoices from before 00228 carry the account's setting at the upgrade. On an account that switched from prices before tax to tax-included prices, a pre-switch invoice in a period still running is therefore credited as if its prices included tax (half of a 12000 month credits 5000, not 6000): 00228's note that no existing invoice is read differently does not hold for this credit. The operator's check and fix are in `docs/ops/tax-calculation.md` (Credits for unused time on tax-inclusive prices); no repair is guessed from the invoices' lines.
+
+## Amendment 2026-11-25
+
+Scheduled cancel is removed. The cancels that write relief are the immediate
+cancel and dunning's cancel, and the plan swap writes its relief as before.
+Gone: the decision's rule for scheduled cancels (`scheduled_cancel_superseded`
+as the one benign outcome, and a relief refusal that the scan retried), and
+the scheduled-cancel scan's retry in Risks. Where a later amendment names
+the immediate and the scheduled cancel, only the immediate cancel and
+dunning's cancel remain.

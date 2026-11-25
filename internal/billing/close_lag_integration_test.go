@@ -108,67 +108,6 @@ func TestLateClose_Last_CatchUp_EachPeriodBillsItsOwnValue(t *testing.T) {
 	}
 }
 
-// TestThresholdScan_DueMidPeriodCancel_DoesNotBillPastCancelAt (D4): a
-// cancel_at falls inside the period. The first scheduler tick after it runs
-// the threshold scan before the billing run's cancel arm. The scan must not
-// fire a threshold invoice over [period start, now): that window runs past the
-// contracted cancel, and bills usage stamped after the subscription ended.
-// The billing run then cancels at cancel_at with a final invoice for
-// [P1, cancel_at).
-//
-// Mutation seam: drop the cancel_at skip in scanOneThreshold → the scan fires
-// and the 3000c of usage stamped after cancel_at is billed.
-func TestThresholdScan_DueMidPeriodCancel_DoesNotBillPastCancelAt(t *testing.T) {
-	r := newCancelRig(t, "close lag threshold past cancel_at")
-	p0, p1 := r.f.cycleStart, r.f.cycleEnd
-	cancelAt := p1.AddDate(0, 0, 10)
-	if _, err := r.f.subSvc.ScheduleCancel(r.at(p0.Add(24*time.Hour)), r.f.tenantID, r.f.subID, subscription.ScheduleCancelInput{CancelAt: &cancelAt}); err != nil {
-		t.Fatalf("schedule cancel: %v", err)
-	}
-	if _, err := r.f.subSvc.SetBillingThresholds(r.at(p0.Add(24*time.Hour)), r.f.tenantID, r.f.subID, subscription.BillingThresholdsInput{
-		AmountGTE: 7000,
-	}); err != nil {
-		t.Fatalf("set thresholds: %v", err)
-	}
-	// Close [P0, P1).
-	if gen, failures := r.f.engine.RunCycleForTenant(r.at(p1.Add(time.Hour)), r.f.tenantID, 50); gen != 1 || len(failures) != 0 {
-		t.Fatalf("close [P0, P1): generated=%d failures=%v", gen, failures)
-	}
-	r.ingestOne(t, p1.AddDate(0, 0, 1), 500)           // before cancel_at
-	r.ingestOne(t, cancelAt.Add(10*time.Minute), 3000) // after cancel_at
-
-	tick := cancelAt.Add(30 * time.Minute)
-	fired, scanErrs := r.f.engine.ScanThresholds(r.at(tick), 50)
-	if len(scanErrs) != 0 {
-		t.Fatalf("threshold scan: %v", scanErrs)
-	}
-	if gen, failures := r.f.engine.RunCycleForTenant(r.at(tick), r.f.tenantID, 50); len(failures) != 0 {
-		t.Fatalf("billing run: generated=%d failures=%v", gen, failures)
-	}
-
-	sub := r.sub(t)
-	if sub.Status != domain.SubscriptionCanceled || sub.CanceledAt == nil || !sub.CanceledAt.Equal(cancelAt) {
-		t.Errorf("after the tick: status=%s canceled_at=%v, want canceled at %v", sub.Status, sub.CanceledAt, cancelAt)
-	}
-	invs, lines := r.liveInvoices(t)
-	var periodUsage, periodBase int64
-	for _, inv := range invs {
-		if inv.BillingPeriodStart.Equal(p1) {
-			u, b := sumLines(lines[inv.ID])
-			periodUsage += u
-			periodBase += b
-			t.Logf("invoice %s reason=%s [%v, %v) usage=%dc base=%dc", inv.ID, inv.BillingReason, inv.BillingPeriodStart, inv.BillingPeriodEnd, u, b)
-		}
-	}
-	if fired != 0 {
-		t.Errorf("threshold scan fired %d invoice(s) after the cancel_at had passed, want 0", fired)
-	}
-	if periodUsage != 500 {
-		t.Errorf("usage billed for [P1, cancel_at) = %dc, want 500c (the 3000c stamped after cancel_at must not be billed)", periodUsage)
-	}
-	assertUsageBilledOnce(t, r.base)
-}
-
 // pauseUntil pauses the rig's subscription's collection a day into [P0, P1),
 // until resumesAt (nil: until an operator resumes it).
 func (r *cancelRig) pauseUntil(t *testing.T, resumesAt *time.Time) {
@@ -257,41 +196,6 @@ func TestLateClose_ScheduledResume_CatchUp_EachPeriodReadsPauseAtItsEnd(t *testi
 	}
 }
 
-// TestLateClose_ScheduledResumeAfterCancelAt_FinalInvoiceStaysDraft: the same
-// window at a mid-period cancel_at. Collection resumes 30 minutes after
-// cancel_at, and the run that fires the cancel comes 45 minutes after it. The
-// final invoice bills [P1, cancel_at), which ended while paused: a draft.
-//
-// Mutation seams: drop the cancel_at arm of resumeNotWaitingOnCloseSQL → the
-// resumer clears the pause first and the final invoice is finalized; pass the
-// cancel's `now` instead of canceledAt to InvoiceFinalizationStatus → the same.
-func TestLateClose_ScheduledResumeAfterCancelAt_FinalInvoiceStaysDraft(t *testing.T) {
-	r := newCancelRig(t, "close lag scheduled resume at cancel_at")
-	p0, p1 := r.f.cycleStart, r.f.cycleEnd
-	cancelAt := p1.AddDate(0, 0, 10)
-	if _, err := r.f.subSvc.ScheduleCancel(r.at(p0.Add(24*time.Hour)), r.f.tenantID, r.f.subID, subscription.ScheduleCancelInput{CancelAt: &cancelAt}); err != nil {
-		t.Fatalf("schedule cancel: %v", err)
-	}
-	resumesAt := cancelAt.Add(30 * time.Minute)
-	r.pauseUntil(t, &resumesAt)
-	if gen, failures := r.f.engine.RunCycleForTenant(r.at(p1.Add(time.Hour)), r.f.tenantID, 50); gen != 1 || len(failures) != 0 {
-		t.Fatalf("close [P0, P1): generated=%d failures=%v", gen, failures)
-	}
-	r.ingestOne(t, p1.AddDate(0, 0, 1), 500)
-
-	tick := cancelAt.Add(45 * time.Minute)
-	r.resumeExpired(t, tick)
-	if _, failures := r.f.engine.RunCycleForTenant(r.at(tick), r.f.tenantID, 50); len(failures) != 0 {
-		t.Fatalf("billing run: failures=%v", failures)
-	}
-	sub := r.sub(t)
-	if sub.Status != domain.SubscriptionCanceled || sub.CanceledAt == nil || !sub.CanceledAt.Equal(cancelAt) {
-		t.Fatalf("status=%s canceled_at=%v, want canceled at %v", sub.Status, sub.CanceledAt, cancelAt)
-	}
-	invs, _ := r.liveInvoices(t)
-	wantStatus(t, invoiceFor(t, invs, p1, cancelAt), domain.InvoiceDraft, "collection was paused at cancel_at (resumes_at cancel_at+30m)")
-}
-
 // TestLateClose_PauseWithoutResumesAt_CatchUp_AllDraft (control): a pause with
 // no resumes_at holds every period, and no scheduled resume clears it.
 func TestLateClose_PauseWithoutResumesAt_CatchUp_AllDraft(t *testing.T) {
@@ -331,41 +235,41 @@ func wantWriteRefusedUnbilled(t *testing.T, err error) {
 // nothing. Once billing works, the same write lands in the new period.
 //
 // Mutation seam: make CloseEndedPeriodFirst return the row without the
-// still-due check → the schedule is written onto the ended period and the
-// next close cancels at P1.
+// still-due check → the pause is written onto the ended period and the next
+// close drafts its invoice.
 func TestCloseLag_WriteWhileBillingFails_Refused(t *testing.T) {
 	r := newCancelRig(t, "close lag write refused")
 	p0, p1 := r.f.cycleStart, r.f.cycleEnd
 	r.f.invAdapter.createTxErr = errors.New("invoice insert refused (test)")
 	now := p1.Add(time.Hour)
+	pause := subscription.PauseCollectionInput{Behavior: domain.PauseCollectionKeepAsDraft}
 
-	_, err := r.f.subSvc.ScheduleCancel(r.at(now), r.f.tenantID, r.f.subID, subscription.ScheduleCancelInput{AtPeriodEnd: true})
+	_, err := r.f.subSvc.PauseCollection(r.at(now), r.f.tenantID, r.f.subID, pause)
 	wantWriteRefusedUnbilled(t, err)
-	_, err = r.f.subSvc.PauseCollection(r.at(now), r.f.tenantID, r.f.subID, subscription.PauseCollectionInput{Behavior: domain.PauseCollectionKeepAsDraft})
+	_, _, err = r.f.subSvc.ResumeCollection(r.at(now), r.f.tenantID, r.f.subID)
 	wantWriteRefusedUnbilled(t, err)
 	sub := r.sub(t)
-	if sub.CancelAtPeriodEnd || sub.PauseCollection != nil || !sub.CurrentBillingPeriodStart.Equal(p0) {
-		t.Fatalf("after the refusals: cancel_at_period_end=%v pause=%v period start=%v, want nothing written and the period still [P0, P1)",
-			sub.CancelAtPeriodEnd, sub.PauseCollection, sub.CurrentBillingPeriodStart)
+	if sub.PauseCollection != nil || !sub.CurrentBillingPeriodStart.Equal(p0) {
+		t.Fatalf("after the refusals: pause=%v period start=%v, want nothing written and the period still [P0, P1)",
+			sub.PauseCollection, sub.CurrentBillingPeriodStart)
 	}
 	if sub.BillingFailure == nil || sub.BillingFailure.Attempts != 1 {
 		t.Fatalf("billing failure = %+v, want the first refused write's attempt saved (attempt 1); the second write ran inside the wait and attempted nothing", sub.BillingFailure)
 	}
 
-	// Billing works again; retry-billing closes P0, and the schedule lands in P1.
+	// Billing works again; retry-billing closes P0, and the pause lands in P1.
 	r.f.invAdapter.createTxErr = nil
 	now = now.Add(time.Hour)
 	if res, err := r.f.subSvc.RetryBilling(r.at(now), r.f.tenantID, r.f.subID); err != nil || res.InvoicesGenerated != 1 {
 		t.Fatalf("retry billing: %v generated=%d", err, res.InvoicesGenerated)
 	}
-	scheduled, err := r.f.subSvc.ScheduleCancel(r.at(now), r.f.tenantID, r.f.subID, subscription.ScheduleCancelInput{AtPeriodEnd: true})
-	if err != nil || !scheduled.CancelAtPeriodEnd || !scheduled.CurrentBillingPeriodStart.Equal(p1) {
-		t.Fatalf("schedule after the retry: %v cancel_at_period_end=%v period start=%v, want scheduled in [P1, P2)", err, scheduled.CancelAtPeriodEnd, scheduled.CurrentBillingPeriodStart)
+	paused, err := r.f.subSvc.PauseCollection(r.at(now), r.f.tenantID, r.f.subID, pause)
+	if err != nil || paused.PauseCollection == nil || !paused.CurrentBillingPeriodStart.Equal(p1) {
+		t.Fatalf("pause after the retry: %v pause=%v period start=%v, want paused in [P1, P2)", err, paused.PauseCollection, paused.CurrentBillingPeriodStart)
 	}
 	r.runWritesNothing(t, now.Add(time.Hour))
-	if s := r.sub(t); s.Status != domain.SubscriptionActive {
-		t.Errorf("status = %s, want active until the end of [P1, P2)", s.Status)
-	}
+	invs, _ := r.liveInvoices(t)
+	wantStatus(t, invoiceFor(t, invs, p0, p1), domain.InvoiceFinalized, "collection was paused in [P1, P2), after [P0, P1) was closed")
 }
 
 // TestCloseLag_CrossIntervalSwap_OnEndedPeriod_RefusedInTx (D3 backstop): the

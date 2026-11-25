@@ -2,7 +2,6 @@ package subscription
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 	"testing"
 	"time"
@@ -328,18 +327,15 @@ func TestIntervals_CancelClosesAll(t *testing.T) {
 		t.Fatalf("late cancel must cap the seal at period end %s: %+v", ivPE, ivs)
 	}
 
-	// A backdated fire (ADR-097 contracted-instant shape) predating the
-	// open zero-widths the interval instead of minting a negative range.
+	// A cancel instant before the interval opened zero-widths the interval
+	// instead of minting a negative range.
 	sub3 := ivActiveSub(t, store, ctx, tenantID, cust, "sub-iv-cxl3", []domain.SubscriptionItem{{PlanID: planA.ID, Quantity: 1}})
 	fresh3, err := store.Get(ctx, tenantID, sub3.ID)
 	if err != nil {
 		t.Fatalf("get sub3: %v", err)
 	}
-	if err := store.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
-		_, err := store.FireScheduledCancellationTx(ctx, tx, tenantID, sub3.ID, SnapshotOf(fresh3), ivPS.Add(-time.Hour))
-		return err
-	}); err != nil {
-		t.Fatalf("backdated fire: %v", err)
+	if _, err := store.CancelAtomicWithBill(ctx, tenantID, sub3.ID, SnapshotOf(fresh3), ivPS.Add(-time.Hour), nil); err != nil {
+		t.Fatalf("backdated cancel: %v", err)
 	}
 	ivs = readItemIntervals(t, db, ctx, tenantID, sub3.Items[0].ID)
 	if len(ivs) != 1 || !ivEndEq(ivs[0].endsAt, ivs[0].startsAt) {

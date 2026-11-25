@@ -1190,86 +1190,6 @@ func eventTypes(events []capturedEvent) []string {
 	return out
 }
 
-// TestHandler_ScheduleCancel_SetsTheSchedule covers the soft-cancel handler
-// surface: the at_period_end body is accepted, the row picks up
-// CancelAtPeriodEnd=true, and status remains active (schedule must not flip
-// status). Audit logging is wired in handler.go and exercised in the
-// integration tests; here we focus on the contract a UI client depends on.
-// subscription.cancel_scheduled is queued in the schedule's transaction
-// (TestLifecycleEvents_ContextEndsAfterCommit_EventIsQueued).
-func TestHandler_ScheduleCancel_SetsTheSchedule(t *testing.T) {
-	ctx := context.Background()
-	tenantID := "t1"
-	store := newMemStore()
-	subID, _ := seedSubWithItem(t, store, tenantID, "cus_1", "plan_old")
-	svc := NewService(store, nil)
-	h := NewHandler(svc)
-
-	body := bytes.NewBufferString(`{"at_period_end": true}`)
-	req := httptest.NewRequest(http.MethodPost, "/subscriptions/"+subID+"/schedule-cancel", body)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", subID)
-	req = req.WithContext(auth.WithTenantID(
-		context.WithValue(ctx, chi.RouteCtxKey, rctx),
-		tenantID,
-	))
-
-	rr := httptest.NewRecorder()
-	h.scheduleCancel(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
-	}
-
-	var got domain.Subscription
-	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if !got.CancelAtPeriodEnd {
-		t.Error("response must reflect cancel_at_period_end=true")
-	}
-	if got.Status != domain.SubscriptionActive {
-		t.Errorf("status: got %q, want active (schedule must not flip status)", got.Status)
-	}
-}
-
-// TestHandler_ScheduleCancel_RejectsBadInput verifies the validation chain
-// surfaces 400 cleanly: empty body and both fields together both fail at the
-// service layer, and the handler must translate that into a 4xx — never a
-// silent 200 with an unset schedule.
-func TestHandler_ScheduleCancel_RejectsBadInput(t *testing.T) {
-	ctx := context.Background()
-	tenantID := "t1"
-	store := newMemStore()
-	subID, _ := seedSubWithItem(t, store, tenantID, "cus_1", "plan_old")
-	svc := NewService(store, nil)
-	h := NewHandler(svc)
-
-	cases := []struct {
-		name string
-		body string
-	}{
-		{"empty input", `{}`},
-		{"both fields set", `{"at_period_end": true, "cancel_at": "2099-01-01T00:00:00Z"}`},
-		{"past timestamp", `{"cancel_at": "2020-01-01T00:00:00Z"}`},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/subscriptions/"+subID+"/schedule-cancel", bytes.NewBufferString(tc.body))
-			rctx := chi.NewRouteContext()
-			rctx.URLParams.Add("id", subID)
-			req = req.WithContext(auth.WithTenantID(
-				context.WithValue(ctx, chi.RouteCtxKey, rctx),
-				tenantID,
-			))
-			rr := httptest.NewRecorder()
-			h.scheduleCancel(rr, req)
-			if rr.Code < 400 || rr.Code >= 500 {
-				t.Errorf("status: got %d, want 4xx. body=%s", rr.Code, rr.Body.String())
-			}
-		})
-	}
-}
-
 // TestHandler_PauseCollection_SetsThePause covers the pause-collection PUT
 // surface: the keep_as_draft body is accepted, the row picks up
 // PauseCollection, and status remains active.
@@ -1389,49 +1309,11 @@ func TestHandler_ResumeCollection_ClearsThePause(t *testing.T) {
 	}
 }
 
-// TestHandler_ClearScheduledCancel_ClearsTheSchedule covers the inverse: a
-// sub with a scheduled cancel can have it cleared via DELETE.
-// subscription.cancel_cleared is queued in the clear's transaction
-// (TestLifecycleEvents_ContextEndsAfterCommit_EventIsQueued).
-func TestHandler_ClearScheduledCancel_ClearsTheSchedule(t *testing.T) {
-	ctx := context.Background()
-	tenantID := "t1"
-	store := newMemStore()
-	subID, _ := seedSubWithItem(t, store, tenantID, "cus_1", "plan_old")
-	svc := NewService(store, nil)
-	if _, err := svc.ScheduleCancel(ctx, tenantID, subID, ScheduleCancelInput{AtPeriodEnd: true}); err != nil {
-		t.Fatalf("seed schedule: %v", err)
-	}
-	h := NewHandler(svc)
-
-	req := httptest.NewRequest(http.MethodDelete, "/subscriptions/"+subID+"/scheduled-cancel", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", subID)
-	req = req.WithContext(auth.WithTenantID(
-		context.WithValue(ctx, chi.RouteCtxKey, rctx),
-		tenantID,
-	))
-	rr := httptest.NewRecorder()
-	h.clearScheduledCancel(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
-	}
-
-	var got domain.Subscription
-	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if got.CancelAtPeriodEnd {
-		t.Error("cancel_at_period_end should be cleared")
-	}
-}
-
 // TestHandler_NothingToUndo_WritesNoAudit: resuming collection that is not
-// paused, clearing a cancel that is not scheduled, or canceling a plan change
-// that is not scheduled, answers 200 with the subscription (or the item) and
-// changes nothing. So it writes no audit entry. The store writes nothing
-// either, so it queues no subscription.collection_resumed, .cancel_cleared
-// or .pending_change.canceled
+// paused, or canceling a plan change that is not scheduled, answers 200 with
+// the subscription (or the item) and changes nothing. So it writes no audit
+// entry. The store writes nothing either, so it queues no
+// subscription.collection_resumed or .pending_change.canceled
 // (TestLifecycleEvents_ContextEndsAfterCommit_EventIsQueued,
 // TestCancelPendingItemChange_EventOnlyWhenAChangeIsCanceled).
 func TestHandler_NothingToUndo_WritesNoAudit(t *testing.T) {
@@ -1442,7 +1324,6 @@ func TestHandler_NothingToUndo_WritesNoAudit(t *testing.T) {
 		call func(h *Handler, w http.ResponseWriter, r *http.Request)
 	}{
 		{"resume collection, not paused", "/pause-collection", false, (*Handler).resumeCollection},
-		{"clear scheduled cancel, none scheduled", "/scheduled-cancel", false, (*Handler).clearScheduledCancel},
 		{"cancel plan change, none scheduled", "/items/{itemID}/pending-change", true, (*Handler).cancelPendingItemChange},
 	}
 	for _, tc := range cases {

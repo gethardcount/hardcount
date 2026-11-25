@@ -56,10 +56,9 @@ After such an outage, retry the affected subscriptions
 
 ### Changes while billing is failing
 
-- An immediate cancel, a scheduled cancel or its removal, a collection
-  pause or resume, and any item or plan change answer 409
-  `unbilled_period`. Each would otherwise act on the period that ended
-  instead of the one that is running.
+- An immediate cancel, a collection pause or resume, and any item or plan
+  change answer 409 `unbilled_period`. Each would otherwise act on the
+  period that ended instead of the one that is running.
 - The one exception is a subscription with no items: adding an item is how
   that failure is fixed, so it is allowed.
 - A change the 409 rule allows, such as adding an item to a subscription
@@ -199,8 +198,7 @@ Read two fields of the retry response:
 
 `invoices_generated` is not the success test. It counts only the invoices
 built when a period closes, at the end of a billing period. It is 0 when
-the retry fired a scheduled cancel (the subscription comes back `canceled`,
-with its final invoice), or closed a period with nothing to bill.
+the retry closed a period with nothing to bill.
 
 `hardcount_billing_failing_subscriptions` falls on the next scrape.
 

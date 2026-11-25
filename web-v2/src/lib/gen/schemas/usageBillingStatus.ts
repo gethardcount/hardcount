@@ -27,7 +27,7 @@
  *   time, but its plan has no price for this meter.
  * - `outside_subscription`: no active subscription of the customer
  *   bills the event's time. For example, it has none, or the time is
- *   before one starts, or after one ends or its scheduled cancel.
+ *   before one starts or after one ends.
  * - `no_price`: the plan that bills the event's time prices this
  *   meter, but no price of that plan takes the event's `dimensions`.
  *   A price takes an event whose dimensions include all of the
@@ -39,9 +39,8 @@
  * promise that the event will be billed. Hardcount checks only the
  * customer's current billing periods: time after a period end whose
  * invoice is not built yet is not checked. A later change can change
- * the outcome either way: a subscription created or changed, a
- * scheduled cancel undone, or a price added. The invoice is the final
- * answer.
+ * the outcome either way: a subscription created or changed, or a
+ * price added. The invoice is the final answer.
  *
  * Two cases can make a present status wrong: a price change whose
  * save began before a billing period started and finished after the

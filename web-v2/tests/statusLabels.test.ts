@@ -1,7 +1,7 @@
 // One status vocabulary: each state has one label and one tone everywhere.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { dunningRunStatus, genericStatus, humanizeStatus, invoicePaymentChip, invoiceStatus, sentEmailStatus, subscriptionFlags, subscriptionStatus, webhookStatus } from '../src/lib/statusLabels.ts'
+import { collectionPausedFlag, dunningRunStatus, genericStatus, humanizeStatus, invoicePaymentChip, invoiceStatus, sentEmailStatus, subscriptionStatus, webhookStatus } from '../src/lib/statusLabels.ts'
 
 const now = Date.parse('2026-10-16T12:00:00Z')
 
@@ -34,13 +34,12 @@ test('while now is not known, an open invoice shows its stored status, never Pas
   assert.deepEqual(invoiceStatus({ ...inv, payment_status: 'failed' }, undefined), { label: 'Payment failed', tone: 'danger' })
 })
 
-test('subscriptionStatus and flags: paused collection and scheduled cancel are visible', () => {
+test('subscriptionStatus and the pause chip: paused collection is visible', () => {
   assert.deepEqual(subscriptionStatus({ status: 'active' }), { label: 'Active', tone: 'success' })
   assert.deepEqual(subscriptionStatus({ status: 'canceled' }), { label: 'Canceled', tone: 'neutral' })
-  assert.deepEqual(subscriptionFlags({ status: 'active', pause_collection: { behavior: 'keep_as_draft' } }, 0), [{ label: 'Collection paused', tone: 'warning' }])
-  assert.deepEqual(subscriptionFlags({ status: 'active', cancel_at_period_end: true }, 0), [{ label: 'Cancel scheduled', tone: 'warning' }])
-  // A canceled subscription carries no live flags.
-  assert.deepEqual(subscriptionFlags({ status: 'canceled', pause_collection: {} }, 0), [])
+  assert.deepEqual(collectionPausedFlag({ status: 'active', pause_collection: { behavior: 'keep_as_draft' } }, 0), { label: 'Collection paused', tone: 'warning' })
+  // A canceled subscription carries no live chip.
+  assert.equal(collectionPausedFlag({ status: 'canceled', pause_collection: {} }, 0), null)
 })
 
 test('generic codes read as sentence case, never snake_case', () => {

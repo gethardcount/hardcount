@@ -10,41 +10,8 @@ import (
 
 // billing_status follows the windows the close bills a meter's usage over,
 // not only the period: another subscription's coverage end moves a window's
-// start, a scheduled cancel ends it, and an instant of a meter is billed by
-// one plan only. Each test checks the answers against the invoices the close
-// builds.
-
-// TestBillingStatus_AfterAScheduledMidPeriodCancel: a cancel is scheduled for
-// May 11, inside May. Until the run fires it the subscription is active, but
-// its final invoice bills usage only to May 11. An event stamped after May 11
-// is outside_subscription; one before it is billed and carries no status.
-//
-// Mutation check: drop the scheduled cancel from classify → the event after
-// the cancel carries no status.
-func TestBillingStatus_AfterAScheduledMidPeriodCancel(t *testing.T) {
-	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
-	cancelAt := lagB.AddDate(0, 0, 10)
-	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", lagP0.AddDate(0, 0, 5),
-		map[string]any{"cancel_at": cancelAt.Format(time.RFC3339)}, http.StatusOK)
-	r.run(lagB.Add(2 * time.Hour))
-
-	out := r.postLabelled("calls", "before-cancel", cancelAt.Add(-time.Hour), cancelAt.Add(-50*time.Minute), 5, nil)
-	wantStatus(t, "event before the scheduled cancel", out, "")
-	out = r.postLabelled("calls", "after-cancel", cancelAt.Add(20*time.Minute), cancelAt.Add(30*time.Minute), 11, nil)
-	if s := r.sub(); s.Status != domain.SubscriptionActive {
-		t.Fatalf("status when the late event arrived = %s, want active (the cancel has not fired)", s.Status)
-	}
-	wantStatus(t, "event after the scheduled cancel", out, "outside_subscription")
-
-	r.run(cancelAt.Add(e2eGrace + 5*time.Minute))
-	if s := r.sub(); s.Status != domain.SubscriptionCanceled {
-		t.Fatalf("status after the cancel ran = %s, want canceled", s.Status)
-	}
-	if got := usageBilled(r.invoices()); got != 5 {
-		r.logInvoices(r.invoices())
-		t.Errorf("usage billed = %dc, want 5c: the final invoice ends at the cancel", got)
-	}
-}
+// start, and an instant of a meter is billed by one plan only. Each test
+// checks the answers against the invoices the close builds.
 
 // TestBillingStatus_BeforeAnotherSubscriptionsCoverageEnd: subscription A is
 // canceled at 10:00 on day D and its final invoice bills the meter to 10:00.
