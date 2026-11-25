@@ -25,4 +25,6 @@ export type HostedInvoiceCreditNotesItem = {
   credited_cents?: number;
   /** For a note after payment, the amount paid back another way. Absent when 0. */
   settled_outside_cents?: number;
+  /** For the note that records a dispute the customer's bank won, the amount the bank returned to the customer. Absent when 0. */
+  returned_by_bank_cents?: number;
 };

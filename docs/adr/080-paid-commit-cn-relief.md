@@ -9,7 +9,7 @@ adversarial judge; the cap arithmetic was mechanically verified against
 
 ## Summary
 
-A paid prepaid-commit invoice (credits bought up front, sometimes at a discount) can be refunded partly or fully with a relief credit note: a `commit_relief` block on `POST /v1/credit-notes`. The operator names how many credits to retire, and the cash follows the price paid per credit, so a $9,000 commit worth $10,000 refunds $5,400 for $6,000 unused. One function, `commitReliefCash`, computes that cash cumulatively, so any series of partial refunds adds up to no more than was paid. The note is created and issued, and the credits retired, in one transaction; only the Stripe refund and the tax reversal run after commit, with retry. Status: active; ordinary credit notes on a commit invoice are refused and point to relief, and relief never pays into the credit balance. Amended 2026-11-25: relief takes only unused credit, is refused on a disputed payment, and its card cap counts refunds made in Stripe.
+A paid prepaid-commit invoice (credits bought up front, sometimes at a discount) can be refunded partly or fully with a relief credit note: a `commit_relief` block on `POST /v1/credit-notes`. The operator names how many credits to retire, and the cash follows the price paid per credit, so a $9,000 commit worth $10,000 refunds $5,400 for $6,000 unused. One function, `commitReliefCash`, computes that cash cumulatively, so any series of partial refunds adds up to no more than was paid. The note is created and issued, and the credits retired, in one transaction; only the Stripe refund and the tax reversal run after commit, with retry. Status: active; ordinary credit notes on a commit invoice are refused and point to relief, and relief never pays into the credit balance. Amended 2026-11-25: relief takes only unused credit, is refused on a disputed payment, and its card cap counts refunds made in Stripe. Amended again 2026-11-25: money returned outside Hardcount (a refund made in Stripe, a lost dispute) is a credit note that takes back the credit it paid for, and relief refunds no more than the payment's documents leave.
 
 ## Context
 
@@ -157,3 +157,63 @@ refund at face (over-refund); charging consumption at face under-refunds.
   The early `FOR KEY SHARE` keeps the invoice row before the number row. The
   dispute recorder takes the invoice row `FOR NO KEY UPDATE`, so neither
   waits for the other.
+
+## Amendment 2026-11-25 (2) — money returned outside Hardcount takes the credit back
+
+- **One rule.** Money that goes back to the customer outside Hardcount on a
+  top-up's own payment is recorded as it is on any invoice: one credit note
+  for the amount. On a top-up the note also takes back the unused credit the
+  amount paid for.
+  - **A refund made in Stripe** is ADR-134's recorded note (its card refund
+    is that refund). The prepaid-commit check of ADR-134 decision 4 is gone.
+    Each refund stands alone, at its own amount.
+  - **A lost dispute** is recorded in the dispute recorder's
+    transaction, on the move into lost, while `invoice_disputes
+    .credit_note_id` is NULL: one note for the smaller of the disputed amount
+    and what the documents allow, money returned out of band ("Payment
+    reversed in a dispute"), not emailed. A dispute in another currency writes
+    none. `POST /v1/invoices/{id}/disputes/{dispute_id}/record-loss` runs the
+    same step.
+- **The credit a note takes back** is r = min(unused, the largest r with
+  f(K+r) − f(K) ≤ the note's total), clamped to what the documents still
+  allow. A note that uses up what the documents allow takes all the unused
+  credit, whatever f says, so no credit outlives a payment returned in full.
+  Every note's r bumps K, and f still reads K = `cn_retired_cents` alone.
+  So Σ note totals = f(K) holds for operator reliefs only; a note for money
+  returned outside Hardcount takes credit at its own amount.
+- **One room for documents** (`documentsRoom`): what was paid, less the
+  totals of the notes not voided, less refunds made in Stripe of the payment
+  that no note holds (they returned money too). Relief, both notes for money
+  returned outside Hardcount and the lost notice read it, under the
+  credit-note lock.
+- **Relief refunds** the smaller of the unused credit and the worth of that
+  room. With nothing left it answers "This payment has already been returned
+  in full." A `retire_cents` whose cash is the whole room answers `422`
+  asking for `retire_all`, which takes all the unused credit. It waits while
+  a refund made in Stripe on the invoice is not settled (ADR-134 decision
+  11), and while a lost dispute on the payment has no note and the room is
+  not spent (`dispute_loss_unrecorded`): record-loss writes it first. After
+  a loss nothing goes to the card, and relief says to record the rest as out
+  of band when it was paid back another way.
+- **One card-refundable figure** (`domain.CardRefundsSQL`) for relief, an
+  ordinary note's create, the Stripe-refund recorder and the doctor check:
+  what the card paid, less the card refunds of notes not voided (failed ones
+  too), less refunds made in Stripe that no note holds and that moved or may
+  move money. It is arithmetic only. A lost dispute is a guard on the paths
+  that send a refund (relief's card leg, an ordinary note's card refund,
+  `POST /v1/invoices/{id}/refund`, Retry refund), not on the recorder or the
+  linked create, which record a refund already made.
+- **Lock order of every note on a top-up:** relief takes the credit-note
+  lock, then the invoice row FOR KEY SHARE. The recorders (the Stripe-refund recorder, the dispute recorder, record-loss)
+  and the linked create take the invoice row FOR NO KEY UPDATE first (and
+  the dispute recorder the dispute row FOR UPDATE), then the credit-note
+  lock; FOR NO KEY UPDATE does not conflict with FOR KEY SHARE, so the two
+  orders do not deadlock. Then the customer's credit lock and the grant
+  row, then the tenant's number row and the insert. The store numbers the
+  note only after build returns (`CreateUnderInvoiceLockDynamicTx`), so the
+  number row cannot come before the customer's lock, which would deadlock
+  with the payment of the customer's other top-up.
+- **The recording never waits on credit.** The usage not invoiced yet is read
+  before the transaction. When it cannot be read, a refund is flagged
+  `credit_note_not_written` and a dispute is recorded with no note; a
+  Critical notice says why, and the linked create or record-loss writes it.

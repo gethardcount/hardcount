@@ -52,6 +52,10 @@ type CreditNote struct {
 	// relief. It is a real column, not metadata, so auditors can reconcile
 	// grant.cn_retired_cents == SUM(cn.commit_retired_cents).
 	CommitRetiredCents int64 `json:"commit_retired_cents,omitempty"`
+	// ReturnedByBank marks the note that records a dispute the customer's
+	// bank won on a top-up's payment (invoice_disputes.credit_note_id): its
+	// out-of-band money is the bank's, and the customer's documents say so.
+	ReturnedByBank bool `json:"-"`
 	// ReturnedAnotherWayAt is when the operator marked the note's failed card
 	// refund as paid back outside Stripe, which moved it to out_of_band. Nil
 	// on every other note.

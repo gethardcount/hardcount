@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // DisputeStatus is Stripe's Dispute.status, stored as Stripe sends it
 // (https://docs.stripe.com/api/disputes/object#dispute_object-status). The
@@ -78,10 +81,11 @@ func (s DisputeStatus) stage() int {
 }
 
 // InvoiceDispute is a card dispute (chargeback) Stripe reported against one
-// of the invoice's payments (#979). Hardcount records and reports it, but
-// never changes the invoice's payment status and never moves money because
-// of it. The operator answers the dispute in Stripe, and decides what a lost
-// one means for the invoice.
+// of the invoice's payments (#979). Hardcount never changes the invoice's
+// payment status because of it. The operator answers the dispute in Stripe.
+// A loss on a top-up's own payment is recorded as a credit note that takes
+// the credit back (LossTakesCredit); what any other loss means for the
+// invoice is the operator's to decide.
 //
 // There is one row per Stripe dispute. Each charge.dispute.* event carries
 // the whole dispute as it stood when the event was created. The row keeps the
@@ -109,6 +113,10 @@ type InvoiceDispute struct {
 	// ClosedAt is when Stripe closed it: the creation time of the event that
 	// first carried its closed status. Nil while it is open.
 	ClosedAt *time.Time `json:"closed_at,omitempty"`
+	// CreditNoteID names the credit note that records this dispute's loss on
+	// a top-up (LossTakesCredit). A loss is recorded only while it is empty,
+	// so a dispute lost twice, after an appeal, writes one note.
+	CreditNoteID string `json:"credit_note_id,omitempty"`
 	// LastEventAt and LastStripeEventID name the Stripe event whose snapshot
 	// the row holds. They decide whether a later event is newer.
 	LastEventAt       time.Time `json:"-"`
@@ -116,6 +124,21 @@ type InvoiceDispute struct {
 	Livemode          bool      `json:"livemode"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+// OnTopupPayment reports whether d is on the own payment of inv, a paid
+// top-up.
+func (d InvoiceDispute) OnTopupPayment(inv Invoice) bool {
+	return inv.BillingReason == BillingReasonTopup && inv.Status == InvoicePaid &&
+		inv.StripePaymentIntentID != "" && d.StripePaymentIntentID == inv.StripePaymentIntentID
+}
+
+// LossTakesCredit reports whether losing d is recorded as a credit note that
+// takes inv's credit back: d is on the top-up's own payment, in its
+// currency. A dispute in another currency writes no note: its amount cannot
+// be set against what the top-up was paid.
+func (d InvoiceDispute) LossTakesCredit(inv Invoice) bool {
+	return d.OnTopupPayment(inv) && strings.EqualFold(d.Currency, inv.Currency)
 }
 
 // DisputeSnapshot is the dispute as one charge.dispute.* event carries it.

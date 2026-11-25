@@ -55,7 +55,12 @@ export type CreateCreditNoteBody = {
      * `credit_amount_cents` 0, and `auto_issue` true (the
      * note is issued at once). The caps on the invoice still
      * apply. A refund Hardcount flagged on the invoice
-     * (`refunded_in_stripe`) is then marked recorded. Not with
+     * (`refunded_in_stripe`) is then marked recorded. It may
+     * be a refund made before the customer's bank won a
+     * dispute on the payment. On a top-up the note also takes
+     * back the unused credit the refund paid for, at the price
+     * paid, and all of it when the refund returns the last of
+     * the payment (`commit_retired_cents`). Not with
      * commit_relief.
      */
   stripe_refund_id?: string;

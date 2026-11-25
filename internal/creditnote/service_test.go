@@ -121,11 +121,15 @@ func (m *memStore) CreateUnderInvoiceLockTx(ctx context.Context, _ *sql.Tx, tena
 // CreateUnderInvoiceLockDynamicTx mirrors the real store's dynamic-lines
 // variant on the in-memory double (no real locks — the relief lock
 // discipline is proven against real Postgres).
-func (m *memStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, _ *sql.Tx, tenantID, invoiceID string, build func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error)) (domain.CreditNote, error) {
+func (m *memStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, _ *sql.Tx, tenantID, invoiceID string, numbers NumberGenerator, build func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error)) (domain.CreditNote, error) {
 	var lines []domain.CreditNoteLineItem
 	created, err := m.CreateUnderInvoiceLock(ctx, tenantID, invoiceID, nil, func(_ *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error) {
 		cn, ls, err := build(existing)
+		if err != nil {
+			return cn, err
+		}
 		lines = ls
+		cn.CreditNoteNumber, err = nextNumberTx(ctx, nil, tenantID, numbers)
 		return cn, err
 	})
 	if err != nil {
@@ -138,6 +142,18 @@ func (m *memStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, _ *sql.T
 		m.lineItems[created.ID] = append(m.lineItems[created.ID], line)
 	}
 	return created, nil
+}
+
+// CardRefundsTx sums the in-memory notes' card refunds by the one
+// definition's first column; the double records no refunds made in Stripe.
+func (m *memStore) CardRefundsTx(_ context.Context, _ *sql.Tx, invoiceID, _ string) (CardRefunds, error) {
+	var out CardRefunds
+	for _, cn := range m.notes {
+		if cn.InvoiceID == invoiceID && cn.Status != domain.CreditNoteVoided {
+			out.NotesCents += cn.RefundAmountCents
+		}
+	}
+	return out, nil
 }
 
 // ListPendingClawbackDrafts returns the in-memory auto-issue clawback drafts
@@ -213,9 +229,6 @@ func (m *memStore) InvoiceSums(_ context.Context, tenantID, invoiceID string) (I
 		}
 		if cn.Status != domain.CreditNoteVoided {
 			sums.CreditedCents += cn.TotalCents
-			if cn.RefundAmountCents > 0 {
-				sums.RefundCents += cn.RefundAmountCents
-			}
 		}
 		if cn.Status == domain.CreditNoteIssued {
 			sums.IssuedCents += cn.TotalCents
@@ -543,7 +556,7 @@ func (m *memInvoiceReader) LockForCreditNoteTx(ctx context.Context, _ *sql.Tx, t
 	return m.Get(ctx, tenantID, id)
 }
 
-func (m *memInvoiceReader) DisputeStatusesTx(context.Context, *sql.Tx, string, string) ([]domain.DisputeStatus, error) {
+func (m *memInvoiceReader) DisputesTx(context.Context, *sql.Tx, string, string) ([]domain.InvoiceDispute, error) {
 	return nil, nil
 }
 

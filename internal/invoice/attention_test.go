@@ -1701,7 +1701,7 @@ func TestClassifyAttention_OrdinaryDecline_Unchanged(t *testing.T) {
 
 func lostDispute(closedAt time.Time) *domain.InvoiceDispute {
 	return &domain.InvoiceDispute{
-		StripeDisputeID: "du_lost_1", StripePaymentIntentID: "pi_lost_1", Status: domain.DisputeLost,
+		ID: "hc_dsp_lost_1", StripeDisputeID: "du_lost_1", StripePaymentIntentID: "pi_lost_1", Status: domain.DisputeLost,
 		Reason: "fraudulent", AmountCents: 4500, Currency: "USD", ClosedAt: &closedAt,
 	}
 }
@@ -1785,56 +1785,187 @@ func TestClassifyDisputeLost_WithPaymentAnomaly(t *testing.T) {
 	}
 }
 
-// TestClassifyDisputeLost_PrepaidCommit: a lost dispute on a paid invoice that
-// bought prepaid credit. The bank has the money back but the credit is still
-// spendable, and an ordinary credit note is refused on such an invoice. So
-// the notice says how much can still be spent and names the one action that
-// retires it (commit relief, as money returned outside Hardcount); once the
-// credit is all spent there is nothing to retire and no credit note to point
-// to.
-func TestClassifyDisputeLost_PrepaidCommit(t *testing.T) {
+// TestClassifyDisputeLost_OnATopup: a lost dispute on a top-up's own payment
+// is recorded as a credit note that takes the credit back, so the notice is
+// a Warning with plain figures read from that note. Recorded is the dispute
+// naming its note, whether or not the note was read. It is Critical only
+// while the note is not written and the payment's documents still have
+// room; record-loss writes it. When the bank returned more than the
+// documents had left, it says in money what the customer has back twice,
+// never a sum of earlier refunds.
+func TestClassifyDisputeLost_OnATopup(t *testing.T) {
 	closedAt := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
 	inv := domain.Invoice{
-		ID: "hc_inv_c", Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded, Currency: "USD",
-		BillingReason: domain.BillingReasonManual,
+		ID: "hc_inv_t", Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded, Currency: "USD",
+		BillingReason: domain.BillingReasonTopup, StripePaymentIntentID: "pi_lost_1", TotalAmountCents: 9000,
 	}
-
-	t.Run("credit left", func(t *testing.T) {
-		att := classifyInvoiceAttention(inv, attentionContext{
-			LostDispute: lostDispute(closedAt), CommitGrantDrawableCents: 6000, CommitGrantConsumedCents: 4000,
+	lost := func(cents int64, currency, noteID string) *domain.InvoiceDispute {
+		d := lostDispute(closedAt)
+		d.AmountCents, d.Currency, d.CreditNoteID = cents, currency, noteID
+		return d
+	}
+	refundNote := domain.CreditNote{ID: "cn_r", CreditNoteNumber: "CN-1", Status: domain.CreditNoteIssued, TotalCents: 5000, RefundAmountCents: 5000, CommitRetiredCents: 5555}
+	lossNote := func(total, taken int64) domain.CreditNote {
+		return domain.CreditNote{ID: "cn_l", CreditNoteNumber: "CN-2", Status: domain.CreditNoteIssued, TotalCents: total, OutOfBandAmountCents: total, CommitRetiredCents: taken}
+	}
+	room := func(c int64) *int64 { return &c }
+	twice := func(c int64) string { return "paid " + domain.FormatMoneyMinor(c, "USD") + " twice" }
+	for _, tc := range []struct {
+		name     string
+		dispute  *domain.InvoiceDispute
+		notes    []domain.CreditNote
+		room     *int64
+		severity domain.AttentionSeverity
+		message  []string
+		detail   []string
+		never    []string
+	}{
+		{"recorded", lost(9000, "USD", "cn_l"), []domain.CreditNote{lossNote(9000, 7000)}, nil, domain.AttentionSeverityWarning,
+			[]string{domain.FormatMoneyMinor(9000, "USD"), domain.FormatMoneyMinor(7000, "USD")}, []string{"CN-2", "du_lost_1", "paid outside Hardcount"}, []string{"twice", "/credits/grant"}},
+		{"recorded, after a refund", lost(9000, "USD", "cn_l"), []domain.CreditNote{refundNote, lossNote(4000, 4445)}, nil, domain.AttentionSeverityWarning,
+			[]string{domain.FormatMoneyMinor(4445, "USD"), twice(5000), "bill them again or write it off"}, []string{"CN-2"}, []string{"Earlier refunds"}},
+		{"recorded, its note not read", lost(9000, "USD", "cn_l"), nil, nil, domain.AttentionSeverityWarning,
+			[]string{"recorded it"}, nil, []string{"not recorded"}},
+		{"nothing left to record", lost(9000, "USD", ""), nil, room(0), domain.AttentionSeverityWarning,
+			[]string{"nothing left to record", twice(9000)}, nil, []string{"Earlier refunds"}},
+		{"in another currency", lost(9000, "EUR", ""), nil, nil, domain.AttentionSeverityWarning,
+			[]string{"no credit", "EUR"}, []string{"commit relief", "out_of_band_amount_cents", "the bank returned it"}, nil},
+		{"not recorded yet", lost(9000, "USD", ""), nil, room(9000), domain.AttentionSeverityCritical,
+			[]string{domain.FormatMoneyMinor(9000, "USD"), "not recorded"}, []string{"/v1/invoices/hc_inv_t/disputes/" + lostDispute(closedAt).ID + "/record-loss"}, []string{"twice"}},
+		{"not recorded yet, after a refund", lost(9000, "USD", ""), nil, room(4000), domain.AttentionSeverityCritical,
+			[]string{"not recorded", twice(5000)}, nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			att := classifyInvoiceAttention(inv, attentionContext{LostDispute: tc.dispute, TopupNotes: tc.notes, LossRoomCents: tc.room})
+			if att == nil || att.Reason != domain.AttentionReasonDisputeLost || att.Code != "payment.dispute_lost" || att.Severity != tc.severity {
+				t.Fatalf("attention %+v, want %s dispute_lost", att, tc.severity)
+			}
+			checkShape(t, att.Message)
+			for _, want := range tc.message {
+				if !strings.Contains(att.Message, want) {
+					t.Errorf("message %q does not say %q", att.Message, want)
+				}
+			}
+			for _, want := range tc.detail {
+				if !strings.Contains(att.Detail, want) {
+					t.Errorf("detail %q does not name %q", att.Detail, want)
+				}
+			}
+			for _, never := range tc.never {
+				if strings.Contains(att.Message+att.Detail, never) {
+					t.Errorf("notice says %q: %q / %q", never, att.Message, att.Detail)
+				}
+			}
+			if att.Since == nil || !att.Since.Equal(closedAt) {
+				t.Errorf("since = %v, want the close", att.Since)
+			}
 		})
-		if att == nil || att.Reason != domain.AttentionReasonDisputeLost || att.Severity != domain.AttentionSeverityCritical {
-			t.Fatalf("attention %+v, want critical dispute_lost", att)
+	}
+}
+
+// TestClassifyOpenChargeback_OnATopup: while the bank holds a chargeback on a
+// top-up's payment, the customer can still spend the credit it paid for, and
+// Hardcount holds none of it. The notice is Critical: what Stripe took, the
+// date and time to respond by in the invoice's zone and the unused credit,
+// or that none is left, with the recipe to pause the customer's key. A
+// dispute in another currency takes back no credit if the bank wins, and the
+// notice says so. An inquiry raises none, and it clears when the dispute
+// closes. A lost one is the lost notice.
+func TestClassifyOpenChargeback_OnATopup(t *testing.T) {
+	due := time.Date(2026, 12, 5, 23, 59, 0, 0, time.UTC)
+	opened := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	newYork, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	topup := domain.Invoice{
+		ID: "hc_inv_t", Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded, Currency: "USD",
+		BillingReason: domain.BillingReasonTopup, StripePaymentIntentID: "pi_open_1", TotalAmountCents: 9000,
+	}
+	unused, none := int64(6000), int64(0)
+	open := func(st domain.DisputeStatus) *domain.InvoiceDispute {
+		return &domain.InvoiceDispute{StripeDisputeID: "du_open_1", StripePaymentIntentID: "pi_open_1", Status: st,
+			AmountCents: 9000, Currency: "USD", EvidenceDueBy: &due, OpenedAt: opened}
+	}
+	for _, st := range []domain.DisputeStatus{domain.DisputeNeedsResponse, domain.DisputeUnderReview, domain.DisputeAppealNeedsResponse, domain.DisputeAppealUnderReview} {
+		att := classifyInvoiceAttention(topup, attentionContext{OpenChargeback: open(st), UnusedCreditCents: &unused, Location: newYork})
+		if att == nil || att.Reason != domain.AttentionReasonDisputeOpen || att.Severity != domain.AttentionSeverityCritical {
+			t.Fatalf("%s: attention %+v, want a Critical dispute_open", st, att)
 		}
 		checkShape(t, att.Message)
-		if !strings.Contains(att.Message, domain.FormatMoneyMinor(6000, "USD")) {
-			t.Errorf("message %q must say how much prepaid credit is still spendable", att.Message)
-		}
-		if !strings.Contains(att.Message, "pause the customer's key") || strings.Contains(att.Message, "commit relief") {
-			t.Errorf("message %q must say to pause the key, and not name commit relief, which is refused after a loss", att.Message)
-		}
-		for _, want := range []string{"refused after a lost dispute", "du_lost_1"} {
-			if !strings.Contains(att.Detail, want) {
-				t.Errorf("detail %q does not name %q", att.Detail, want)
+		for _, want := range []string{domain.FormatMoneyMinor(9000, "USD"), domain.FormatMoneyMinor(6000, "USD"), "Dec 5, 2026 18:59 EST"} {
+			if !strings.Contains(att.Message, want) {
+				t.Errorf("%s: message %q does not say %q", st, att.Message, want)
 			}
 		}
+		for _, want := range []string{"pause the customer's key", "du_open_1", "the disputed amount paid for"} {
+			if !strings.Contains(att.Detail, want) {
+				t.Errorf("%s: detail %q does not say %q", st, att.Detail, want)
+			}
+		}
+		if att.DueBy == nil || !att.DueBy.Equal(due) || att.Since == nil || !att.Since.Equal(opened) {
+			t.Errorf("%s: due by %v, since %v; want %v, %v", st, att.DueBy, att.Since, due, opened)
+		}
+	}
+	t.Run("nothing unused", func(t *testing.T) {
+		att := classifyInvoiceAttention(topup, attentionContext{OpenChargeback: open(domain.DisputeNeedsResponse), UnusedCreditCents: &none, Location: time.UTC})
+		if att == nil || att.Severity != domain.AttentionSeverityCritical || !strings.Contains(att.Message, "already used all the credit") {
+			t.Errorf("attention %+v, want a Critical notice saying all the credit is used", att)
+		}
 	})
+	t.Run("another currency", func(t *testing.T) {
+		d := open(domain.DisputeNeedsResponse)
+		d.Currency = "EUR"
+		att := classifyInvoiceAttention(topup, attentionContext{OpenChargeback: d, UnusedCreditCents: &unused, Location: time.UTC})
+		if att == nil || strings.Contains(att.Detail, "takes back the unused credit") || !strings.Contains(att.Detail, "takes back no credit") {
+			t.Errorf("attention %+v, want a detail saying a win takes back no credit", att)
+		}
+	})
+	for _, tc := range []struct {
+		name string
+		inv  domain.Invoice
+		d    *domain.InvoiceDispute
+	}{
+		{"an inquiry", topup, open(domain.DisputeWarningNeedsResponse)},
+		{"a closed dispute", topup, open(domain.DisputeWon)},
+		{"an ordinary invoice", domain.Invoice{ID: "hc_inv_o", Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded, Currency: "USD", StripePaymentIntentID: "pi_open_1"}, open(domain.DisputeNeedsResponse)},
+	} {
+		if att := classifyInvoiceAttention(tc.inv, attentionContext{OpenChargeback: tc.d, UnusedCreditCents: &unused, Location: time.UTC}); att != nil {
+			t.Errorf("%s: attention %+v, want none", tc.name, att)
+		}
+	}
+}
 
-	t.Run("credit all spent", func(t *testing.T) {
-		att := classifyInvoiceAttention(inv, attentionContext{
-			LostDispute: lostDispute(closedAt), CommitGrantDrawableCents: 0, CommitGrantConsumedCents: 10000,
-		})
-		if att == nil || att.Reason != domain.AttentionReasonDisputeLost {
-			t.Fatalf("attention %+v, want dispute_lost", att)
+// TestClassifyInvoiceAttention_TopupNoticeOrder: a refund made in Stripe
+// whose note on a top-up is not written comes before a lost dispute's
+// Warning and before an open chargeback, and after a lost dispute's
+// Critical notice.
+func TestClassifyInvoiceAttention_TopupNoticeOrder(t *testing.T) {
+	closedAt := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	topup := domain.Invoice{
+		ID: "hc_inv_t", Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded, Currency: "USD",
+		BillingReason: domain.BillingReasonTopup, StripePaymentIntentID: "pi_lost_1", TotalAmountCents: 9000,
+	}
+	notWritten := &domain.InvoiceStripeRefund{StripeRefundID: "re_1", StripePaymentIntentID: "pi_lost_1", AmountCents: 2700, Currency: "USD",
+		Outcome: domain.StripeRefundNeedsReview, ReviewReason: domain.StripeRefundReviewCreditNoteNotWritten}
+	recorded := lostDispute(closedAt)
+	recorded.CreditNoteID = "cn_l"
+	unrecorded := lostDispute(closedAt)
+	open := &domain.InvoiceDispute{StripeDisputeID: "du_open", StripePaymentIntentID: "pi_lost_1", Status: domain.DisputeNeedsResponse, AmountCents: 9000, Currency: "USD"}
+	room, unused := int64(9000), int64(6000)
+	for _, tc := range []struct {
+		name string
+		atc  attentionContext
+		want domain.AttentionReason
+	}{
+		{"before a lost dispute's Warning", attentionContext{LostDispute: recorded, StripeRefundReview: notWritten}, domain.AttentionReasonRefundedInStripe},
+		{"before an open chargeback", attentionContext{OpenChargeback: open, UnusedCreditCents: &unused, StripeRefundReview: notWritten, Location: time.UTC}, domain.AttentionReasonRefundedInStripe},
+		{"after a lost dispute's Critical notice", attentionContext{LostDispute: unrecorded, LossRoomCents: &room, StripeRefundReview: notWritten}, domain.AttentionReasonDisputeLost},
+	} {
+		if att := classifyInvoiceAttention(topup, tc.atc); att == nil || att.Reason != tc.want {
+			t.Errorf("%s: attention %+v, want %s", tc.name, att, tc.want)
 		}
-		checkShape(t, att.Message)
-		if strings.Contains(att.Message, "credit note") {
-			t.Errorf("message %q points to a credit note, which this invoice refuses and which has nothing to retire", att.Message)
-		}
-		if !strings.Contains(att.Detail, "already spent") {
-			t.Errorf("detail %q must say the credit is already spent", att.Detail)
-		}
-	})
+	}
 }
 
 // TestClassifyRefundedInStripe: a flagged refund made in Stripe pierces the
@@ -1848,7 +1979,7 @@ func TestClassifyRefundedInStripe(t *testing.T) {
 	reasons := map[domain.StripeRefundReviewReason]string{
 		domain.StripeRefundReviewInvoiceNotPaid:         "not paid",
 		domain.StripeRefundReviewCurrencyMismatch:       "EUR",
-		domain.StripeRefundReviewPrepaidCommit:          "commit relief",
+		domain.StripeRefundReviewCreditNoteNotWritten:   "could not read",
 		domain.StripeRefundReviewSeenLate:               "more than a day",
 		domain.StripeRefundReviewCreditNoteRefundFailed: "card refund that failed",
 		domain.StripeRefundReviewExceedsCardRefundable:  "card payment",
@@ -1863,8 +1994,14 @@ func TestClassifyRefundedInStripe(t *testing.T) {
 		if att == nil {
 			t.Fatalf("%s: no attention on a paid invoice", reason)
 		}
-		if att.Reason != domain.AttentionReasonRefundedInStripe || att.Severity != domain.AttentionSeverityWarning {
-			t.Errorf("%s: %s/%s, want refunded_in_stripe/warning", reason, att.Reason, att.Severity)
+		// A refund whose credit note is not written yet is Critical: the
+		// customer can still spend the credit it paid for.
+		severity := domain.AttentionSeverityWarning
+		if reason == domain.StripeRefundReviewCreditNoteNotWritten {
+			severity = domain.AttentionSeverityCritical
+		}
+		if att.Reason != domain.AttentionReasonRefundedInStripe || att.Severity != severity {
+			t.Errorf("%s: %s/%s, want refunded_in_stripe/%s", reason, att.Reason, att.Severity, severity)
 		}
 		if att.Code != "payment.refunded_in_stripe."+string(reason) {
 			t.Errorf("%s: code %q", reason, att.Code)

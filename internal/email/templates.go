@@ -683,15 +683,16 @@ func itoa(n int) string {
 // invoiceNumber names the APPLIED invoice so finance can match the
 // credit to the bill it adjusts. A note that took credit back (a top-up's
 // refund, creditTakenBackCents > 0) states the refund and the credit taken
-// back, never that an amount was credited.
-func renderCreditNoteHTML(customerName, creditNoteNumber, invoiceNumber string, amountCents, creditTakenBackCents int64, currency, companyName string) (subject, contentHTML string) {
+// back, never that an amount was credited; the note of a lost dispute
+// (returnedByBank) says the customer's bank returned it.
+func renderCreditNoteHTML(customerName, creditNoteNumber, invoiceNumber string, amountCents, creditTakenBackCents int64, returnedByBank bool, currency, companyName string) (subject, contentHTML string) {
 	subject = "Credit note " + creditNoteNumber + " from " + sellerName(companyName)
 	var b strings.Builder
 	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">Credit note issued</h1>`)
 	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">Hi ` + escape(customerName) + `,</p>`)
 	b.WriteString(`<p style="margin:0 0 20px;color:#4b5563;">Credit note <strong style="color:#111827;">` + escape(creditNoteNumber) + `</strong> has been issued against invoice <strong style="color:#111827;">` + escape(invoiceNumber) + `</strong>.</p>`)
 	b.WriteString(`<div style="background:#f9fafb;border-radius:8px;padding:16px 20px;margin:8px 0 16px;">`)
-	for i, f := range creditNoteFigures(amountCents, creditTakenBackCents, currency) {
+	for i, f := range creditNoteFigures(amountCents, creditTakenBackCents, returnedByBank, currency) {
 		top := ""
 		if i > 0 {
 			top = "margin-top:12px;"

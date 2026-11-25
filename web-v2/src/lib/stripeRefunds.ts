@@ -49,10 +49,11 @@ export function flaggedStripeRefunds<T extends StripeRefundRow>(refunds: readonl
 // Review reasons whose refund can be recorded as a credit note. The others
 // are refused by the server's checks, and the notice tells the operator to
 // handle them in Stripe or their own books and dismiss them:
-// exceeds_card_refundable and exceeds_creditable fail the caps,
-// currency_mismatch fails the currency check, and prepaid_commit is retired
-// with commit relief instead.
-const RECORDABLE_REASONS = new Set(['seen_late', 'invoice_not_paid', 'credit_note_refund_failed'])
+// exceeds_card_refundable and exceeds_creditable fail the caps, and
+// currency_mismatch fails the currency check. credit_note_not_written is a
+// refund whose note Hardcount has not written yet: recording it writes it,
+// and on a top-up takes back the credit the refund paid for.
+const RECORDABLE_REASONS = new Set(['seen_late', 'invoice_not_paid', 'credit_note_refund_failed', 'credit_note_not_written'])
 
 // stripeRefundChoices is what the notice offers for one flagged refund. Record
 // and Attach follow the server's own checks, so a button is never offered for
@@ -76,6 +77,16 @@ export function stripeRefundChoices(
     record: succeeded && paid && RECORDABLE_REASONS.has(refund.review_reason ?? ''),
     dismiss: true,
   }
+}
+
+// recordConsequences is what the Record dialog says follows: the customer is
+// not refunded again, on a top-up the note takes back the credit the refund
+// paid for, and the note is final.
+export function recordConsequences(billingReason: string | undefined): string[] {
+  const lines = ['The customer is not refunded again.']
+  if (billingReason === 'topup') lines.push('On this top-up, the credit note also takes back the unused credit the refund paid for.')
+  lines.push('The credit note is issued at once and can\u2019t be undone.')
+  return lines
 }
 
 // The reason a recorded note carries, as the webhook path writes it

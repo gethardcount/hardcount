@@ -222,10 +222,12 @@ func goldenWebhookData(t *testing.T, eventType string) map[string]any {
 			"final_subscription_action": "cancel", "final_invoice_action": "mark_uncollectible",
 			"applied": "subscription_canceled+invoice_marked_uncollectible",
 		})
-	case EventCreditBalanceDepleted, EventCreditBalanceRecovered:
+	case EventCreditBalanceRecovered:
 		return CreditBalanceWebhookData(goldenCreditBalance(), nil)
+	case EventCreditBalanceDepleted:
+		return CreditBalanceWebhookData(goldenCreditBalance(), map[string]any{"reason": string(CreditBalanceUsage)})
 	case EventCreditBalanceLow:
-		return CreditBalanceWebhookData(goldenCreditBalance(), map[string]any{"threshold_cents": int64(1000)})
+		return CreditBalanceWebhookData(goldenCreditBalance(), map[string]any{"reason": string(CreditBalanceUsage), "threshold_cents": int64(1000)})
 	case EventCreditCommitRetired:
 		return CreditBalanceWebhookData(goldenCreditBalance(), map[string]any{
 			"grant_id": "hc_ccl_golden", "funding_invoice_id": "hc_inv_commit", "credit_note_id": "hc_cn_golden",

@@ -300,6 +300,33 @@ func (r *returnRig) events(cust, eventType string) int {
 	return n
 }
 
+// reasons is the reason of each event of the type queued for the customer,
+// oldest first.
+func (r *returnRig) reasons(cust, eventType string) []string {
+	r.t.Helper()
+	tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+	if err != nil {
+		r.t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	rows, err := tx.QueryContext(r.ctx, `SELECT COALESCE(payload->>'reason', '') FROM webhook_outbox
+		WHERE tenant_id = $1 AND event_type = $2 AND payload->'credit_balance'->>'customer_id' = $3 ORDER BY next_attempt_at, id`,
+		r.tenantID, eventType, cust)
+	if err != nil {
+		r.t.Fatalf("read events: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var reason string
+		if err := rows.Scan(&reason); err != nil {
+			r.t.Fatalf("scan: %v", err)
+		}
+		out = append(out, reason)
+	}
+	return out
+}
+
 // A void returns credit to a grant that expires next week, with that expiry,
 // and to the paid grant the invoice drew last. Fails before ADR-132: the
 // expiring grant stayed consumed and the credit came back as a new grant with
@@ -498,6 +525,11 @@ func TestCreditReturn_PastExpiryExpiresAtOnce(t *testing.T) {
 		}
 		if got := r.balance(cust); got != 0 {
 			t.Errorf("balance %d, want 0", got)
+		}
+		// The return rose the balance and the expiry took more: it fell, by
+		// expiry.
+		if reasons := r.reasons(cust, domain.EventCreditBalanceDepleted); len(reasons) != 1 || reasons[0] != "expiry" {
+			t.Errorf("depleted reasons = %q, want [expiry]", reasons)
 		}
 		r.checkLedger(cust)
 	})

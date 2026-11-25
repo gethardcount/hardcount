@@ -57,7 +57,11 @@ func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
 // expired-but-unswept block keeps SUM positive until the expiry sweep retires
 // it — the sweep's expiry entry produces the crossing then (minutes-scale,
 // matches the expiry discipline).
-func (s *PostgresStore) emitBalanceCrossings(ctx context.Context, tx *sql.Tx, tenantID, customerID, currency string, before, after int64) error {
+//
+// reason is why the balance fell, which low and depleted carry: the caller
+// states it, since one ledger kind (adjustment) is written for an operator's
+// deduction and for a note taking bought credit back alike.
+func (s *PostgresStore) emitBalanceCrossings(ctx context.Context, tx *sql.Tx, tenantID, customerID, currency string, before, after int64, reason domain.CreditBalanceReason) error {
 	if s.outbox == nil || before == after {
 		return nil
 	}
@@ -67,7 +71,7 @@ func (s *PostgresStore) emitBalanceCrossings(ctx context.Context, tx *sql.Tx, te
 		return balanceEventDataTx(ctx, tx, tenantID, customerID, currency, extra)
 	}
 	if before > 0 && after <= 0 {
-		d, err := data(nil)
+		d, err := data(map[string]any{"reason": string(reason)})
 		if err != nil {
 			return err
 		}
@@ -96,7 +100,7 @@ func (s *PostgresStore) emitBalanceCrossings(ctx context.Context, tx *sql.Tx, te
 		return fmt.Errorf("read balance-low threshold: %w", err)
 	}
 	if threshold.Valid && threshold.Int64 > 0 && before >= threshold.Int64 && after < threshold.Int64 {
-		p, err := data(map[string]any{"threshold_cents": threshold.Int64})
+		p, err := data(map[string]any{"reason": string(reason), "threshold_cents": threshold.Int64})
 		if err != nil {
 			return err
 		}
@@ -124,7 +128,7 @@ func (s *PostgresStore) AppendEntryAudited(ctx context.Context, tenantID string,
 		return domain.CreditLedgerEntry{}, err
 	}
 	defer postgres.Rollback(tx)
-	out, err := s.appendEntryInTx(ctx, tx, tenantID, entry)
+	out, err := s.appendEntryInTx(ctx, tx, tenantID, entry, domain.CreditBalanceAdjustment)
 	if err != nil {
 		return domain.CreditLedgerEntry{}, err
 	}
@@ -145,7 +149,7 @@ func (s *PostgresStore) AppendEntryAudited(ctx context.Context, tenantID string,
 // and this entry needs to share that tx so a failure here rolls back
 // the item add too. ADR-030 atomic-proration follow-through.
 func (s *PostgresStore) AppendEntryTx(ctx context.Context, tx *sql.Tx, tenantID string, entry domain.CreditLedgerEntry) (domain.CreditLedgerEntry, error) {
-	return s.appendEntryInTx(ctx, tx, tenantID, entry)
+	return s.appendEntryInTx(ctx, tx, tenantID, entry, domain.CreditBalanceAdjustment)
 }
 
 // LockCustomerCreditTx takes the customer's credit lock on tx: the
@@ -165,15 +169,17 @@ func (s *PostgresStore) LockCustomerCreditTx(ctx context.Context, tx *sql.Tx, te
 
 // appendEntryInTx is the shared body. AppendEntry opens+commits its
 // own tx; AppendEntryTx delegates to the caller. It inserts the entry and
-// enqueues the balance crossings the entry causes.
-func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantID string, entry domain.CreditLedgerEntry) (domain.CreditLedgerEntry, error) {
+// enqueues the balance crossings the entry causes, saying reason when the
+// balance falls. The public appends write grants, which only raise it, so
+// they state adjustment.
+func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantID string, entry domain.CreditLedgerEntry, reason domain.CreditBalanceReason) (domain.CreditLedgerEntry, error) {
 	out, before, err := s.insertEntryInTx(ctx, tx, tenantID, entry)
 	if err != nil {
 		return domain.CreditLedgerEntry{}, err
 	}
 	// ADR-078 balance-crossing events, atomic with the entry (the advisory
 	// lock insertEntryInTx takes keeps crossings well-ordered per customer).
-	if err := s.emitBalanceCrossings(ctx, tx, tenantID, out.CustomerID, out.Currency, before, out.BalanceAfter); err != nil {
+	if err := s.emitBalanceCrossings(ctx, tx, tenantID, out.CustomerID, out.Currency, before, out.BalanceAfter, reason); err != nil {
 		return domain.CreditLedgerEntry{}, err
 	}
 	return out, nil
@@ -421,7 +427,7 @@ func (s *PostgresStore) ExpireGrantAtomic(ctx context.Context, tenantID, custome
 		// double-append.
 		return 0, nil
 	}
-	if err := s.emitBalanceCrossings(ctx, tx, tenantID, customerID, currency, before, entry.BalanceAfter); err != nil {
+	if err := s.emitBalanceCrossings(ctx, tx, tenantID, customerID, currency, before, entry.BalanceAfter, domain.CreditBalanceExpiry); err != nil {
 		return 0, err
 	}
 
@@ -614,7 +620,7 @@ func (s *PostgresStore) AdjustAtomicAudited(
 	}
 
 	// ADR-078 balance-crossing events (advisory lock held above).
-	if err := s.emitBalanceCrossings(ctx, tx, tenantID, customerID, currency, currentBalance, entry.BalanceAfter); err != nil {
+	if err := s.emitBalanceCrossings(ctx, tx, tenantID, customerID, currency, currentBalance, entry.BalanceAfter, domain.CreditBalanceAdjustment); err != nil {
 		return domain.CreditLedgerEntry{}, err
 	}
 
@@ -995,7 +1001,7 @@ func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, cust
 	}
 
 	// ADR-078 balance-crossing events (advisory lock held above).
-	if err := s.emitBalanceCrossings(ctx, tx, tenantID, customerID, currency, currentBalance, balanceAfter); err != nil {
+	if err := s.emitBalanceCrossings(ctx, tx, tenantID, customerID, currency, currentBalance, balanceAfter, domain.CreditBalanceUsage); err != nil {
 		return 0, err
 	}
 
@@ -1084,65 +1090,36 @@ func (s *PostgresStore) LockCommitGrantTx(ctx context.Context, tx *sql.Tx, tenan
 	return g, true, nil
 }
 
-// CommitGrantExposure reports the prepaid-commit grant funded by invoiceID:
-// how much of it the customer can still spend, and how much they already have.
-// Both zero when the invoice funded no commit. Satisfies
-// invoice.CommitGrantReader — the dispute_lost notice on a paid top-up whose
-// payment the bank took back.
-//
-// Deliberately takes NO LOCK — neither the customer advisory lock that
-// LockCommitGrantTx takes nor a FOR UPDATE. That is a real divergence from its
-// neighbour and the next reader will be tempted to copy the locked shape, so:
-// this runs on dashboard reads, and taking the advisory lock would serialize
-// them behind every concurrent drawdown on the same customer. What it returns
-// is a sentence in a banner, not a figure money is about to move against; a
-// drain racing this read makes it a moment stale, which is the right trade for
-// a display. Every path that actually MOVES commit credit still goes through
-// the locked reader.
-//
-// Drawability mirrors drainPositiveBlocks' liveness predicate exactly —
-// positive, not exhausted, expires_at at or after `now` — because the one thing
-// this must never do is promise the operator spendable credit that the drawdown
-// would refuse to spend. `now` is the caller's bound instant, as the drain
-// takes one.
-//
-// Consumed is consumed_cents as the ledger holds it, reported even when the
-// grant is exhausted or expired. It counts what invoices drew, and also what
-// relief retired and what the expiry sweep wrote off, since both mark credit
-// used up.
-func (s *PostgresStore) CommitGrantExposure(
-	ctx context.Context, tenantID, invoiceID string, now time.Time,
-) (int64, int64, error) {
+// ReadTopupGrantAndBalance reads, with no lock, the grant the top-up
+// invoiceID funded and the customer's spendable balance in its currency, both
+// at `at` (liveness as in LockCommitGrantTx). It is a display read for the
+// open-chargeback notice, so it takes neither the customer's lock nor the
+// row lock and can be a moment stale beside a draw; every path that moves the
+// credit reads it under them. found=false when the invoice funded no grant.
+func (s *PostgresStore) ReadTopupGrantAndBalance(ctx context.Context, tenantID, invoiceID string, at time.Time) (commitGrantState, int64, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return 0, 0, err
+		return commitGrantState{}, 0, false, err
 	}
 	defer postgres.Rollback(tx)
-
-	var drawable, consumed int64
-	// At most one row: idx_credit_ledger_commit_fund_dedup is UNIQUE on
-	// (tenant_id, source_invoice_id) WHERE grant_kind='commit' (migration 0136),
-	// which is also what makes this an index probe rather than a scan.
+	var g commitGrantState
+	// At most one row: idx_credit_ledger_commit_fund_dedup.
 	err = tx.QueryRowContext(ctx, `
-		SELECT
-			CASE
-				WHEN amount_cents > 0
-				 AND consumed_cents < amount_cents
-				 AND (expires_at IS NULL OR expires_at >= $3)
-				THEN amount_cents - consumed_cents
-				ELSE 0
-			END,
-			GREATEST(consumed_cents, 0)
+		SELECT id, customer_id, currency, amount_cents, consumed_cents, cn_retired_cents, (expires_at IS NULL OR expires_at >= $3)
 		FROM customer_credit_ledger
 		WHERE tenant_id = $1 AND source_invoice_id = $2 AND grant_kind = 'commit'
-	`, tenantID, invoiceID, now).Scan(&drawable, &consumed)
+	`, tenantID, invoiceID, at).Scan(&g.GrantID, &g.CustomerID, &g.Currency, &g.AmountCents, &g.ConsumedCents, &g.CNRetiredCents, &g.Live)
 	if err == sql.ErrNoRows {
-		return 0, 0, nil
+		return commitGrantState{}, 0, false, nil
 	}
 	if err != nil {
-		return 0, 0, fmt.Errorf("read commit grant exposure for invoice %s: %w", invoiceID, err)
+		return commitGrantState{}, 0, false, fmt.Errorf("read the top-up grant of invoice %s: %w", invoiceID, err)
 	}
-	return drawable, consumed, nil
+	spendable, err := s.GetSpendableBalanceTx(ctx, tx, tenantID, g.CustomerID, at)
+	if err != nil {
+		return commitGrantState{}, 0, false, err
+	}
+	return g, spendable[g.Currency], true, nil
 }
 
 // TopupGrant returns the credit a paid top-up granted: its amount and its
@@ -1215,21 +1192,22 @@ func (s *PostgresStore) retireCommitSliceTx(ctx context.Context, tx *sql.Tx, ten
 		Description: description,
 		Metadata:    meta,
 		CreatedAt:   clock.Now(ctx),
-	}); err != nil {
+	}, domain.CreditBalanceRefund); err != nil {
 		return fmt.Errorf("append commit retirement entry for grant %s: %w", g.GrantID, err)
 	}
 	return nil
 }
 
 // RetireCommitSliceForReliefTx retires exactly `slice` credits from the
-// commit grant funded by invoiceID — the RELIEF leg (ADR-080). A missing
-// grant is a LOUD error (cash is about to move against a grant that must
-// exist — the top-up's payment funds it in the same tx, so absence is
-// corruption), and cn_retired_cents is bumped (the telescoping anchor K
-// advances with every relief). The ledger entry names the credit note by
-// its number. Returns the post-retire state so the caller can surface
-// remaining/K without a re-read.
-func (s *PostgresStore) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64) (commitGrantState, error) {
+// commit grant funded by invoiceID for a credit note on the top-up (ADR-080).
+// A missing grant is a LOUD error (cash is about to move against a grant
+// that must exist — the top-up's payment funds it in the same tx, so absence
+// is corruption), and cn_retired_cents is bumped (the telescoping anchor K
+// advances with every note). The ledger entry names the credit note by its
+// number, and says the credit was taken back rather than refunded when the
+// note records a lost dispute (lostDispute). Returns the post-retire state so
+// the caller can surface remaining/K without a re-read.
+func (s *PostgresStore) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64, lostDispute bool) (commitGrantState, error) {
 	g, found, err := s.LockCommitGrantTx(ctx, tx, tenantID, invoiceID, clock.Now(ctx))
 	if err != nil {
 		return commitGrantState{}, err
@@ -1240,8 +1218,11 @@ func (s *PostgresStore) RetireCommitSliceForReliefTx(ctx context.Context, tx *sq
 	if slice > g.Remaining() {
 		return commitGrantState{}, fmt.Errorf("%w: %d requested, %d remaining", ErrCommitInsufficientRemaining, slice, g.Remaining())
 	}
-	if err := s.retireCommitSliceTx(ctx, tx, tenantID, g, slice,
-		fmt.Sprintf("Refunded by credit note %s — %s of bought credit", creditNoteNumber, activity.FormatMoney(activity.Money{Cents: slice, Currency: g.Currency})),
+	description := fmt.Sprintf("Refunded by credit note %s — %s of bought credit", creditNoteNumber, activity.FormatMoney(activity.Money{Cents: slice, Currency: g.Currency}))
+	if lostDispute {
+		description = fmt.Sprintf("Taken back by credit note %s after a lost dispute — %s of bought credit", creditNoteNumber, activity.FormatMoney(activity.Money{Cents: slice, Currency: g.Currency}))
+	}
+	if err := s.retireCommitSliceTx(ctx, tx, tenantID, g, slice, description,
 		map[string]any{
 			"reason":               "commit_refund_retire",
 			"grant_id":             g.GrantID,

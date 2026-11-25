@@ -48,7 +48,7 @@ type HandlerDeps struct {
 // EmailSender enqueues the credit-note document email (ADR-082 rider).
 // Satisfied by *email.OutboxSender.
 type EmailSender interface {
-	SendCreditNote(ctx context.Context, tenantID, to string, cc []string, customerName, creditNoteNumber, invoiceNumber string, amountCents, creditTakenBackCents int64, currency string, pdfBytes []byte) error
+	SendCreditNote(ctx context.Context, tenantID, to string, cc []string, customerName, creditNoteNumber, invoiceNumber string, amountCents, creditTakenBackCents int64, returnedByBank bool, currency string, pdfBytes []byte) error
 }
 
 type Handler struct {
@@ -124,7 +124,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if req.StripeRefundID != "" {
-			respond.ValidationField(w, r, "stripe_refund_id", "stripe_refund_id can't be sent with commit_relief; for a refund made in Stripe on a top-up, refund the unused credit with out_of_band_amount_cents inside commit_relief, then dismiss that refund on the invoice.")
+			respond.ValidationField(w, r, "stripe_refund_id", "stripe_refund_id can't be sent with commit_relief; to record a refund made in Stripe on a top-up, send stripe_refund_id without commit_relief: its credit note takes back the credit that refund paid for.")
 			return
 		}
 		if req.CreditAmountCents > 0 {
@@ -644,7 +644,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.emailSender.SendCreditNote(r.Context(), tenantID, to, cc,
-		bt.Name, cn.CreditNoteNumber, orig.Number, cn.TotalCents, cn.CommitRetiredCents, cn.Currency, pdfBytes); err != nil {
+		bt.Name, cn.CreditNoteNumber, orig.Number, cn.TotalCents, cn.CommitRetiredCents, cn.ReturnedByBank, cn.Currency, pdfBytes); err != nil {
 		respond.FromError(w, r, err, "credit_note_email")
 		return
 	}

@@ -68,6 +68,10 @@ test('an after-payment credit note says where the money went', () => {
     '$20.00 refunded to your card · $5.00 added to your account credit · $4.00 settled with you directly',
   )
   assert.equal(creditNoteBackText({ number: 'CN-3', amount_cents: 500, before_payment: false, credited_cents: 500 }, money), '$5.00 added to your account credit')
+  assert.equal(
+    creditNoteBackText({ number: 'CN-4', amount_cents: 9000, before_payment: false, returned_by_bank_cents: 9000 }, money),
+    '$90.00 returned to you by your bank in a dispute',
+  )
 })
 
 // A top-up read as its customer reads it, in each state: what they buy, what

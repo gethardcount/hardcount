@@ -365,6 +365,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/{id}/mark-uncollectible", h.markUncollectible)
 	r.Get("/{id}/payment-timeline", h.paymentTimeline)
 	r.Get("/{id}/disputes", h.listDisputes)
+	r.Post("/{id}/disputes/{dispute_id}/record-loss", h.recordDisputeLoss)
 	r.Get("/{id}/stripe-refunds", h.listStripeRefunds)
 	r.Post("/{id}/stripe-refunds/{stripe_refund_id}/dismiss", h.dismissStripeRefund)
 	return r
@@ -2216,6 +2217,25 @@ func (h *Handler) dismissStripeRefund(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond.JSON(w, r, http.StatusOK, row)
+}
+
+// recordDisputeLoss writes the credit note of a lost dispute on a top-up's
+// own payment that Hardcount could not write as the loss arrived. No body.
+func (h *Handler) recordDisputeLoss(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
+	tenantID := auth.TenantID(r.Context())
+	d, err := h.svc.RecordDisputeLoss(r.Context(), tenantID, chi.URLParam(r, "id"), chi.URLParam(r, "dispute_id"))
+	if errors.Is(err, errs.ErrNotFound) {
+		respond.NotFound(w, r, "dispute")
+		return
+	}
+	if err != nil {
+		respond.FromError(w, r, err, "dispute")
+		return
+	}
+	respond.JSON(w, r, http.StatusOK, d)
 }
 
 // listDisputes returns the card disputes Stripe reported against the

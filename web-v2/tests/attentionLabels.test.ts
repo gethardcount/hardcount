@@ -15,6 +15,11 @@ test('a refund made in Stripe that is not recorded has a label', () => {
   assert.equal(attentionReasonLabel('refunded_in_stripe', 'payment.refunded_in_stripe.seen_late'), 'Refunded in Stripe')
 })
 
+test('the dispute notices have labels', () => {
+  assert.equal(attentionReasonLabel('dispute_open', 'payment.dispute_open'), 'Payment disputed')
+  assert.equal(attentionReasonLabel('dispute_lost', 'payment.dispute_lost'), 'Dispute lost')
+})
+
 test('a charge being confirmed has a label', () => {
   assert.equal(attentionReasonLabel('payment_unconfirmed', 'payment.unconfirmed'), 'Confirming payment')
 })

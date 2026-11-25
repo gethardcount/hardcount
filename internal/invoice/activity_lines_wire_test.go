@@ -51,8 +51,12 @@ func (f *disputesFake) ListDisputesByInvoice(context.Context, string, string) ([
 	return f.disputes, nil
 }
 
-func (f *disputesFake) LostDisputesByInvoices(context.Context, string, []string) (map[string]domain.InvoiceDispute, error) {
+func (f *disputesFake) NoticeDisputesByInvoices(context.Context, string, []string) (map[string]domain.InvoiceDispute, error) {
 	return nil, nil
+}
+
+func (f *disputesFake) RecordDisputeLoss(context.Context, string, string, string) (domain.InvoiceDispute, error) {
+	return domain.InvoiceDispute{}, nil
 }
 
 // wireCase is one invoice and the side lanes around it.
@@ -317,6 +321,20 @@ func TestActivityLines_InvoiceWire(t *testing.T) {
 		if row.Amount != 2300 {
 			t.Errorf("credit note amount %d, want the total 2300", row.Amount)
 		}
+	})
+
+	// The note of a lost dispute: the customer's bank returned the money, so
+	// its row never says it was refunded outside Hardcount.
+	t.Run("a lost dispute's credit note says the bank returned the money", func(t *testing.T) {
+		events := fetchWire(t, wireCase{
+			inv: domain.Invoice{Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded, AmountPaidCents: 9000, PaidAt: &at, StripePaymentIntentID: "pi_card"},
+			cns: []domain.CreditNote{{
+				ID: "cn_1", CreditNoteNumber: "CN-000013", Status: domain.CreditNoteIssued, IssuedAt: &at, Currency: "USD",
+				Reason: "Payment reversed in a dispute", TotalCents: 9000, OutOfBandAmountCents: 9000, ReturnedByBank: true,
+			}},
+		})
+		wantRow(t, oneRow(t, events, "credit_note.issued"), "Credit note issued", "success", "",
+			"CN-000013 · Payment reversed in a dispute · $90.00 returned by the customer's bank in a dispute")
 	})
 
 	t.Run("credit note reasons and refund states", func(t *testing.T) {

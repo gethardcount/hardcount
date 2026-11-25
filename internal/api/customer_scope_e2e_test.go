@@ -487,6 +487,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 			return map[string]any{"note": "wire"}
 		}, 404, "", 0},
 		{"invoice mark uncollectible [path invoice]", "POST", at("/v1/invoices/%s/mark-uncollectible", inv), none, 404, "", 0},
+		{"invoice dispute record loss [path invoice]", "POST", at("/v1/invoices/%s/disputes/hc_dsp_none/record-loss", inv), none, 404, "", 0},
 		{"invoice finalize [path invoice]", "POST", at("/v1/invoices/%s/finalize", inv), none, 404, "", 200},
 		{"invoice void [path invoice]", "POST", at("/v1/invoices/%s/void", inv), none, 404, "", 200},
 		{"credit note send [path credit note]", "POST", at("/v1/credit-notes/%s/send", note), func(_, _ scopeRefs) any {

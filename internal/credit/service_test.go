@@ -68,7 +68,12 @@ func (m *memStore) LockCommitGrantTx(_ context.Context, _ *sql.Tx, tenantID, inv
 	return commitGrantState{}, false, nil
 }
 
-func (m *memStore) RetireCommitSliceForReliefTx(_ context.Context, _ *sql.Tx, tenantID, invoiceID, _, _ string, slice, _, _ int64) (commitGrantState, error) {
+func (m *memStore) ReadTopupGrantAndBalance(ctx context.Context, tenantID, invoiceID string, at time.Time) (commitGrantState, int64, bool, error) {
+	g, found, err := m.LockCommitGrantTx(ctx, nil, tenantID, invoiceID, at)
+	return g, g.Remaining(), found, err
+}
+
+func (m *memStore) RetireCommitSliceForReliefTx(_ context.Context, _ *sql.Tx, tenantID, invoiceID, _, _ string, slice, _, _ int64, _ bool) (commitGrantState, error) {
 	for id, e := range m.entries {
 		if e.TenantID == tenantID && e.SourceInvoiceID == invoiceID && e.GrantKind == domain.GrantKindCommit {
 			if e.ConsumedCents+slice > e.AmountCents {

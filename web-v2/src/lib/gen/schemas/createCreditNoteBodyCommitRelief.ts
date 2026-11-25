@@ -28,7 +28,15 @@ export type CreateCreditNoteBodyCommitRelief = {
      * are empty, the note's reason is `Unused prepaid credit refunded`.
      */
   reason?: string;
-  /** Credit to retire, in the currency's minor unit (cents for USD), from 1 to the unused credit. More than is unused is a 422 that names the figure. */
+  /**
+     * Credit to retire, in the currency's minor unit (cents
+     * for USD), from 1 to the unused credit, and no more
+     * than the cash the payment has left to return pays
+     * for. Above either is a 422 that names the figure. An
+     * amount whose cash returns the last of the payment is
+     * a 422 asking for `retire_all`, which takes all the
+     * unused credit.
+     */
   retire_cents?: number;
   /** Retire all the unused credit at the moment the relief runs, so credit the customer spends meanwhile is not counted. `retire_cents` is then ignored. */
   retire_all?: boolean;

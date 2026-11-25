@@ -747,11 +747,12 @@ func (s *Sender) SendPaymentSetupRequest(ctx context.Context, tenantID, to, cust
 // SendCreditNote emails the credit-note document (ADR-082 rider).
 // invoiceNumber is the APPLIED invoice, named in the body so finance
 // can match the credit against the bill it adjusts. creditTakenBackCents is
-// the credit the note took back (a top-up's refund), 0 for any other note.
+// the credit the note took back (on a top-up), 0 for any other note;
+// returnedByBank marks the note of a dispute the customer's bank won.
 // No CTA — no hosted CN page exists; the attached PDF is the document.
-func (s *Sender) SendCreditNote(ctx context.Context, tenantID, to string, cc []string, customerName, creditNoteNumber, invoiceNumber string, amountCents, creditTakenBackCents int64, currency string, pdfBytes []byte) error {
+func (s *Sender) SendCreditNote(ctx context.Context, tenantID, to string, cc []string, customerName, creditNoteNumber, invoiceNumber string, amountCents, creditTakenBackCents int64, returnedByBank bool, currency string, pdfBytes []byte) error {
 	brand := s.brandingFor(ctx, tenantID)
-	subject, contentHTML := renderCreditNoteHTML(customerName, creditNoteNumber, invoiceNumber, amountCents, creditTakenBackCents, currency, brand.CompanyName)
+	subject, contentHTML := renderCreditNoteHTML(customerName, creditNoteNumber, invoiceNumber, amountCents, creditTakenBackCents, returnedByBank, currency, brand.CompanyName)
 	htmlBody, err := renderLayout(layoutInputs{
 		Subject: subject, CompanyName: brand.CompanyName, LogoURL: brand.LogoURL,
 		BrandColor: brand.BrandColor, SupportURL: brand.SupportURL,
@@ -760,7 +761,7 @@ func (s *Sender) SendCreditNote(ctx context.Context, tenantID, to string, cc []s
 	if err != nil {
 		return fmt.Errorf("render credit note html: %w", err)
 	}
-	textBody := creditNoteTextBody(customerName, creditNoteNumber, invoiceNumber, amountCents, creditTakenBackCents, currency)
+	textBody := creditNoteTextBody(customerName, creditNoteNumber, invoiceNumber, amountCents, creditTakenBackCents, returnedByBank, currency)
 
 	return s.sendRich(ctx, richMessage{
 		TenantID: tenantID, To: to, Cc: cc, Subject: subject,
@@ -1333,9 +1334,9 @@ func envOr(key, fallback string) string {
 	return v
 }
 
-func creditNoteTextBody(customerName, creditNoteNumber, invoiceNumber string, amountCents, creditTakenBackCents int64, currency string) string {
+func creditNoteTextBody(customerName, creditNoteNumber, invoiceNumber string, amountCents, creditTakenBackCents int64, returnedByBank bool, currency string) string {
 	var figures strings.Builder
-	for _, f := range creditNoteFigures(amountCents, creditTakenBackCents, currency) {
+	for _, f := range creditNoteFigures(amountCents, creditTakenBackCents, returnedByBank, currency) {
 		figures.WriteString(f.label + ": " + f.amount + "\n")
 	}
 	return fmt.Sprintf(`Hi %s,
@@ -1353,8 +1354,16 @@ type creditNoteFigure struct{ label, amount string }
 // took credit back refunds its total for that credit; any other credited its
 // total. The refund is named without a tense: the email can be sent at any
 // time after the note is issued, whatever its card refund's state, and the
-// attached PDF says that state.
-func creditNoteFigures(amountCents, creditTakenBackCents int64, currency string) []creditNoteFigure {
+// attached PDF says that state. The note of a dispute the customer's bank won
+// says the bank returned its total, and the credit taken back if any.
+func creditNoteFigures(amountCents, creditTakenBackCents int64, returnedByBank bool, currency string) []creditNoteFigure {
+	if returnedByBank {
+		figures := []creditNoteFigure{{"Returned by your bank in a dispute", formatAmount(amountCents, currency)}}
+		if creditTakenBackCents > 0 {
+			figures = append(figures, creditNoteFigure{"Credit taken back", formatAmount(creditTakenBackCents, currency)})
+		}
+		return figures
+	}
 	if creditTakenBackCents > 0 {
 		return []creditNoteFigure{
 			{"Refund", formatAmount(amountCents, currency)},

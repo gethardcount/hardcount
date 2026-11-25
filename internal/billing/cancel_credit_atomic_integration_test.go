@@ -35,13 +35,17 @@ func (a *cnGrantAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, t
 	return err
 }
 
-func (a *cnGrantAdapter) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (creditnote.ReliefGrant, bool, error) {
-	g, found, err := a.svc.LockCommitGrantForReliefTx(ctx, tx, tenantID, invoiceID, at)
-	return creditnote.ReliefGrant(g), found, err
+func (a *cnGrantAdapter) LockTopupGrantAndBalanceTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (creditnote.TopupGrant, int64, bool, error) {
+	g, spendable, found, err := a.svc.LockTopupGrantAndBalanceTx(ctx, tx, tenantID, invoiceID, at)
+	return creditnote.TopupGrant(g), spendable, found, err
 }
 
-func (a *cnGrantAdapter) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, cnID, cnNumber string, slice, refundedGross, grossPaid int64) (int64, error) {
-	res, err := a.svc.RetireCommitSliceForReliefTx(ctx, tx, tenantID, invoiceID, cnID, cnNumber, slice, refundedGross, grossPaid)
+func (a *cnGrantAdapter) TopupGrantAndBalance(ctx context.Context, tenantID, invoiceID string, at time.Time) (creditnote.TopupGrant, int64, bool, error) {
+	g, spendable, found, err := a.svc.TopupGrantAndBalance(ctx, tenantID, invoiceID, at)
+	return creditnote.TopupGrant(g), spendable, found, err
+}
+func (a *cnGrantAdapter) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, cnID, cnNumber string, slice, refundedGross, grossPaid int64, lostDispute bool) (int64, error) {
+	res, err := a.svc.RetireCommitSliceForReliefTx(ctx, tx, tenantID, invoiceID, cnID, cnNumber, slice, refundedGross, grossPaid, lostDispute)
 	if err != nil {
 		return 0, err
 	}

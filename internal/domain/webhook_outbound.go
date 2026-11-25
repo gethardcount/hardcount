@@ -204,7 +204,8 @@ const (
 	// The three balance events are per currency (ADR-129). Each one is about
 	// the balance in the payload's `currency`, which the crossing is
 	// computed on. Payload: customer_id, currency, balance_cents (plus
-	// threshold_cents on low).
+	// threshold_cents on low). low and depleted also carry the
+	// CreditBalanceReason the writer states.
 
 	// EventCreditBalanceLow fires when the balance crosses from >= to < the
 	// tenant's configured threshold
@@ -280,3 +281,23 @@ var KnownWebhookEventTypes = map[string]bool{
 	EventCreditBalanceRecovered:             true,
 	EventCreditCommitRetired:                true,
 }
+
+// CreditBalanceReason says why a credit balance fell, on credit.balance_low
+// and credit.balance_depleted. The writer that moves the balance states it;
+// it is never read from the ledger entry's kind. A receiver that tops up
+// automatically acts on usage only: never on refund, which is bought credit
+// taken back because its money went back to the customer.
+type CreditBalanceReason string
+
+const (
+	// CreditBalanceUsage: an invoice drew the credit.
+	CreditBalanceUsage CreditBalanceReason = "usage"
+	// CreditBalanceExpiry: a grant expired, including credit returned to a
+	// grant already past its expiry, which nets as expiry.
+	CreditBalanceExpiry CreditBalanceReason = "expiry"
+	// CreditBalanceAdjustment: an operator adjusted the balance.
+	CreditBalanceAdjustment CreditBalanceReason = "adjustment"
+	// CreditBalanceRefund: a credit note took back credit a top-up bought:
+	// a refund of unused credit, a refund made in Stripe, or a lost dispute.
+	CreditBalanceRefund CreditBalanceReason = "refund"
+)

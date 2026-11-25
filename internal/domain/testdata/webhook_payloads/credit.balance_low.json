@@ -9,5 +9,6 @@
     "total_retired": 500,
     "total_used": 8000
   },
+  "reason": "usage",
   "threshold_cents": 1000
 }

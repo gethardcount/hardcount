@@ -8,5 +8,6 @@
     "total_granted": 10000,
     "total_retired": 500,
     "total_used": 8000
-  }
+  },
+  "reason": "usage"
 }

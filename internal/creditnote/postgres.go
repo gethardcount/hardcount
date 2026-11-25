@@ -41,7 +41,10 @@ func (s *PostgresStore) SetEncryptor(enc *crypto.Encryptor) {
 
 // cnReadCols is the canonical credit-note SELECT/RETURNING column list.
 // Every read site uses it with cnScanDest so a schema change updates one
-// place and can't drift a positional scan.
+// place and can't drift a positional scan. Its last column is
+// domain.CreditNote.ReturnedByBank: a dispute names the note
+// (invoice_disputes.credit_note_id), so every site reads credit_notes by its
+// own name.
 const cnReadCols = `id, tenant_id, invoice_id, customer_id, credit_note_number,
 	status, reason, subtotal_cents, tax_amount_cents, total_cents,
 	refund_amount_cents, credit_amount_cents, out_of_band_amount_cents,
@@ -50,7 +53,8 @@ const cnReadCols = `id, tenant_id, invoice_id, customer_id, credit_note_number,
 	COALESCE(tax_transaction_id,''), issue_pending,
 	tax_reversal_pending, commit_retired_cents, returned_another_way_at,
 	metadata, created_at, updated_at, recorded_at,
-	bill_to_snapshot, supplier_snapshot`
+	bill_to_snapshot, supplier_snapshot,
+	EXISTS (SELECT 1 FROM invoice_disputes d WHERE d.credit_note_id = credit_notes.id)`
 
 // cnScanDest returns Scan destinations in cnReadCols order. metaJSON is the
 // raw metadata bytes the caller unmarshals into cn.Metadata after Scan.
@@ -68,6 +72,7 @@ func (s *PostgresStore) cnScanDest(cn *domain.CreditNote, metaJSON *[]byte) []an
 			return b.Open(s.enc)
 		}},
 		domain.SnapshotScanner[domain.DocumentSupplier]{Dst: &cn.SupplierSnapshot},
+		&cn.ReturnedByBank,
 	}
 }
 
@@ -240,15 +245,15 @@ func (s *PostgresStore) createUnderInvoiceLockInTx(ctx context.Context, tx *sql.
 	return created, nil
 }
 
-// CreateUnderInvoiceLockDynamicTx is CreateUnderInvoiceLockTx for callers
-// whose LINE AMOUNTS depend on state that must be read UNDER locks taken
-// inside build (ADR-080 commit relief: the CN's cash amount is derived from
-// the grant's live drawdown state, which is only frozen once build takes
-// the customer advisory + grant row locks — after this method has taken
-// the per-invoice CN lock and the invoice row FOR KEY SHARE, preserving the
-// invoice → customer-advisory → ledger-row → number-row order). build
-// returns the header AND its lines.
-func (s *PostgresStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, build func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error)) (domain.CreditNote, error) {
+// CreateUnderInvoiceLockDynamicTx is CreateUnderInvoiceLockTx for a note
+// whose amounts depend on state read under locks build takes: a note on a
+// top-up takes the customer's credit lock and the grant's row to work out
+// the credit it takes back. It takes the per-invoice credit-note lock and the
+// invoice row FOR KEY SHARE, runs build, and only then numbers the note on
+// the tenant's number row and inserts it. So the order is invoice row →
+// customer's credit lock → grant row → number row, the order a top-up's
+// payment keeps; build never numbers. It returns the header AND its lines.
+func (s *PostgresStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, numbers NumberGenerator, build func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error)) (domain.CreditNote, error) {
 	if err := lockInvoiceForNoteTx(ctx, tx, tenantID, invoiceID); err != nil {
 		return domain.CreditNote{}, err
 	}
@@ -258,6 +263,9 @@ func (s *PostgresStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, tx 
 	}
 	cn, lines, err := build(existing)
 	if err != nil {
+		return domain.CreditNote{}, err
+	}
+	if cn.CreditNoteNumber, err = nextNumberTx(ctx, tx, tenantID, numbers); err != nil {
 		return domain.CreditNote{}, err
 	}
 	created, err := s.insertCreditNoteTx(ctx, tx, tenantID, cn)
@@ -271,6 +279,24 @@ func (s *PostgresStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, tx 
 		}
 	}
 	return created, nil
+}
+
+// nextNumberTx allocates the next credit note number on tx. Credit-note
+// numbers are a strictly monotonic per-tenant sequence, as invoice numbers
+// are, so there is no fallback: a duplicate document number corrupts
+// accounting downstream, while a failed create just retries.
+func nextNumberTx(ctx context.Context, tx *sql.Tx, tenantID string, numbers NumberGenerator) (string, error) {
+	if numbers == nil {
+		return "", fmt.Errorf("credit-note number generator not wired (call SetNumberGenerator)")
+	}
+	n, err := numbers.NextCreditNoteNumberTx(ctx, tx, tenantID)
+	if err != nil {
+		return "", fmt.Errorf("allocate credit note number: %w", err)
+	}
+	if n == "" {
+		return "", fmt.Errorf("credit-note number generator returned an empty number")
+	}
+	return n, nil
 }
 
 // ListPendingClawbackDrafts returns auto-issue clawback drafts (issue_pending,
@@ -542,11 +568,10 @@ func (s *PostgresStore) InvoiceSums(ctx context.Context, tenantID, invoiceID str
 		SELECT
 		    COALESCE(SUM(total_cents) FILTER (WHERE status <> 'voided'), 0)::bigint,
 		    COALESCE(SUM(total_cents) FILTER (WHERE status = 'issued'), 0)::bigint,
-		    COALESCE(SUM(total_cents) FILTER (WHERE status = 'voided' AND issued_at IS NULL), 0)::bigint,
-		    COALESCE(SUM(refund_amount_cents) FILTER (WHERE status <> 'voided' AND refund_amount_cents > 0), 0)::bigint
+		    COALESCE(SUM(total_cents) FILTER (WHERE status = 'voided' AND issued_at IS NULL), 0)::bigint
 		FROM credit_notes
 		WHERE invoice_id = $1
-	`, invoiceID).Scan(&sums.CreditedCents, &sums.IssuedCents, &sums.UnrelievedCents, &sums.RefundCents); err != nil {
+	`, invoiceID).Scan(&sums.CreditedCents, &sums.IssuedCents, &sums.UnrelievedCents); err != nil {
 		return InvoiceSums{}, fmt.Errorf("sum the credit notes on invoice %s: %w", invoiceID, err)
 	}
 	return sums, nil

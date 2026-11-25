@@ -143,6 +143,12 @@ const (
 	// every dispute lands. Lago parity.
 	AttentionReasonDisputeLost AttentionReason = "dispute_lost"
 
+	// AttentionReasonDisputeOpen: the customer's bank holds a chargeback on a
+	// top-up's own payment (an inquiry raises none), while the credit the
+	// payment bought can still be spent. Critical; it clears when the
+	// dispute closes, and a loss raises dispute_lost.
+	AttentionReasonDisputeOpen AttentionReason = "dispute_open"
+
 	// AttentionReasonRefundedInStripe: a refund of this invoice's payment was
 	// made in Stripe outside Hardcount, and Hardcount did not record it as a
 	// credit note (ADR-134): the invoice was not paid yet, the currency

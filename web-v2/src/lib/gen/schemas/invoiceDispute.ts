@@ -18,8 +18,10 @@ import type { InvoiceDisputeStatus } from './invoiceDisputeStatus';
  * invoice's payments, recorded from Stripe's `charge.dispute.created`,
  * `.updated` and `.closed` webhook events. It holds the dispute as the
  * newest of those events showed it, whatever order they arrived in.
- * Hardcount records and reports a dispute, and nothing else: the invoice
- * stays paid and no money moves.
+ * The invoice stays paid. A dispute lost on a top-up's own payment is
+ * recorded as a credit note that takes back the unused credit the money
+ * paid for (`credit_note_id`); any other lost dispute is yours to
+ * record.
  */
 export interface InvoiceDispute {
   /** Unique identifier of the dispute record, `hc_dsp_` and 24 hex characters. */
@@ -56,6 +58,14 @@ export interface InvoiceDispute {
   opened_at: string;
   /** When Stripe closed it. Absent while it is open. */
   closed_at?: string;
+  /**
+     * The credit note that records this dispute's loss on a top-up's
+     * own payment: money returned by the customer's bank (out of band),
+     * with the unused credit it paid for taken back. Absent until the
+     * loss is recorded; a dispute lost again after an appeal keeps its
+     * one note.
+     */
+  credit_note_id?: string;
   /** True for a live-mode payment, false for test mode. */
   livemode: boolean;
   /** When Hardcount first recorded the dispute. */

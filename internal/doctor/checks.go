@@ -18,6 +18,8 @@
 
 package doctor
 
+import "github.com/gethardcount/hardcount/internal/domain"
+
 // Checks is the catalog that ships. Its order groups the checks by domain,
 // for readable output.
 var Checks = []Check{
@@ -334,21 +336,11 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 	{
 		Name:   "card_refunds_exceed_paid",
 		Domain: "credit-notes",
-		Why:    "an invoice's card refunds add up to more than the card paid: the refunds of its issued credit notes that did not fail, plus the refunds made in Stripe of the same payment that moved or may move money and that no note holds. The customer was refunded twice. Compare the refunds of the payment in Stripe with the invoice's credit notes",
-		SQL: `SELECT i.id, i.tenant_id, i.invoice_number, i.amount_paid_cents, n.notes_cents, r.stripe_cents
+		Why:    "an invoice's card refunds add up to more than the card paid, by the one definition the credit-note caps use: the card refunds of its credit notes not voided (failed ones too, since a retry may send them), plus the refunds made in Stripe of the same payment that moved or may move money and that no note holds. Either the customer was refunded twice, or a retry would refund them twice: compare the refunds of the payment in Stripe with the invoice's credit notes, and attach a refund made in Stripe to the note whose refund it replaced",
+		SQL: `SELECT i.id, i.tenant_id, i.invoice_number, i.amount_paid_cents, c.notes_cents, c.stripe_cents
 		FROM invoices i
-		CROSS JOIN LATERAL (
-		  SELECT COALESCE(SUM(cn.refund_amount_cents), 0) AS notes_cents FROM credit_notes cn
-		  WHERE cn.tenant_id = i.tenant_id AND cn.invoice_id = i.id AND cn.status = 'issued'
-		    AND COALESCE(cn.refund_status, 'none') IN ('none', 'pending', 'succeeded', 'unknown')) n
-		CROSS JOIN LATERAL (
-		  SELECT COALESCE(SUM(sr.amount_cents), 0) AS stripe_cents FROM invoice_stripe_refunds sr
-		  WHERE sr.tenant_id = i.tenant_id AND sr.invoice_id = i.id
-		    AND sr.stripe_payment_intent_id = i.stripe_payment_intent_id
-		    AND sr.status IN ('succeeded', 'pending', 'requires_action') AND sr.credit_note_id IS NULL
-		    AND NOT EXISTS (
-		      SELECT 1 FROM credit_notes h WHERE h.tenant_id = sr.tenant_id AND h.stripe_refund_id = sr.stripe_refund_id)) r
+		CROSS JOIN LATERAL (SELECT ` + domain.CardRefundsSQL("i", "NULL") + `) c
 		WHERE COALESCE(i.stripe_payment_intent_id, '') <> ''
-		  AND n.notes_cents + r.stripe_cents > i.amount_paid_cents`,
+		  AND c.notes_cents + c.stripe_cents > i.amount_paid_cents`,
 	},
 }

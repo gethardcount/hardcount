@@ -36,7 +36,7 @@ func TestDecideStripeRefund(t *testing.T) {
 		name      string
 		inv       func(*domain.Invoice)
 		snap      func(*domain.StripeRefundSnapshot)
-		commit    bool
+		lost      bool // the bank won a dispute on the payment
 		existing  []domain.CreditNote
 		firstSeen func(domain.StripeRefundSnapshot) time.Time
 		want      stripeRefundDecision
@@ -86,8 +86,12 @@ func TestDecideStripeRefund(t *testing.T) {
 			want: stripeRefundDecision{outcome: domain.StripeRefundNeedsReview, reviewReason: domain.StripeRefundReviewInvoiceNotPaid}},
 		{name: "another currency", snap: func(s *domain.StripeRefundSnapshot) { s.Currency = "eur" },
 			want: stripeRefundDecision{outcome: domain.StripeRefundNeedsReview, reviewReason: domain.StripeRefundReviewCurrencyMismatch}},
-		{name: "prepaid commit invoice", commit: true,
-			want: stripeRefundDecision{outcome: domain.StripeRefundNeedsReview, reviewReason: domain.StripeRefundReviewPrepaidCommit}},
+		{name: "a top-up is recorded as any invoice is",
+			inv:  func(i *domain.Invoice) { i.BillingReason = domain.BillingReasonTopup },
+			want: stripeRefundDecision{outcome: domain.StripeRefundRecordedAsCreditNote}},
+		{name: "after a lost dispute a refund made before it still records", lost: true,
+			snap: func(s *domain.StripeRefundSnapshot) { s.AmountCents = 100 },
+			want: stripeRefundDecision{outcome: domain.StripeRefundRecordedAsCreditNote}},
 		{name: "first seen more than a day after it was made",
 			snap: func(s *domain.StripeRefundSnapshot) { s.EventAt = s.CreatedAt.Add(48 * time.Hour) },
 			want: stripeRefundDecision{outcome: domain.StripeRefundNeedsReview, reviewReason: domain.StripeRefundReviewSeenLate}},
@@ -129,7 +133,16 @@ func TestDecideStripeRefund(t *testing.T) {
 			if tc.firstSeen != nil {
 				firstSeen = tc.firstSeen(snap)
 			}
-			got, err := decideStripeRefund(inv, snap, firstSeen, tc.commit, tc.existing)
+			// The card's figure as the store reads it: the notes' card
+			// refunds, failed ones too (CardRefundsSQL).
+			var notes int64
+			for _, cn := range tc.existing {
+				if cn.Status != domain.CreditNoteVoided {
+					notes += cn.RefundAmountCents
+				}
+			}
+			card := cardRoom{CardRefunds: CardRefunds{NotesCents: notes}, lost: tc.lost, refundable: inv.CardRefundableCents(notes)}
+			got, err := decideStripeRefund(inv, snap, firstSeen, tc.existing, card)
 			if err != nil {
 				t.Fatalf("decide: %v", err)
 			}

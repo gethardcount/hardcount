@@ -242,17 +242,22 @@ func (a *creditGrantAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.T
 	return err
 }
 
-// LockCommitGrantForReliefTx and RetireCommitSliceForReliefTx (below) pass
-// the relief pair to credit.Service, on the credit note's coordinator
-// transaction. A relief credit note refunds part or all of a paid prepaid
-// commit by retiring credits the customer has not used (ADR-080).
-func (a *creditGrantAdapter) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (creditnote.ReliefGrant, bool, error) {
-	g, found, err := a.svc.LockCommitGrantForReliefTx(ctx, tx, tenantID, invoiceID, at)
-	return creditnote.ReliefGrant(g), found, err
+// LockTopupGrantAndBalanceTx and RetireCommitSliceForReliefTx (below) pass
+// a note on a top-up to credit.Service, on the credit note's transaction: the
+// note reads the grant and the customer's balance, then takes back the credit
+// it paid for (ADR-080).
+func (a *creditGrantAdapter) LockTopupGrantAndBalanceTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (creditnote.TopupGrant, int64, bool, error) {
+	g, spendable, found, err := a.svc.LockTopupGrantAndBalanceTx(ctx, tx, tenantID, invoiceID, at)
+	return creditnote.TopupGrant(g), spendable, found, err
 }
 
-func (a *creditGrantAdapter) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64) (int64, error) {
-	res, err := a.svc.RetireCommitSliceForReliefTx(ctx, tx, tenantID, invoiceID, creditNoteID, creditNoteNumber, slice, refundedGrossCents, grossPaidCents)
+func (a *creditGrantAdapter) TopupGrantAndBalance(ctx context.Context, tenantID, invoiceID string, at time.Time) (creditnote.TopupGrant, int64, bool, error) {
+	g, spendable, found, err := a.svc.TopupGrantAndBalance(ctx, tenantID, invoiceID, at)
+	return creditnote.TopupGrant(g), spendable, found, err
+}
+
+func (a *creditGrantAdapter) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64, lostDispute bool) (int64, error) {
+	res, err := a.svc.RetireCommitSliceForReliefTx(ctx, tx, tenantID, invoiceID, creditNoteID, creditNoteNumber, slice, refundedGrossCents, grossPaidCents, lostDispute)
 	if err != nil {
 		return 0, err
 	}

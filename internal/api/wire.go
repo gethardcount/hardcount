@@ -268,6 +268,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	stripeAdapter.SetBreaker(stripeBreaker)
 	stripeAdapter.SetRefundStatusUpdater(creditNoteSvc)
 	stripeAdapter.SetDisputeRecorder(invoiceStore)
+	invoiceStore.SetDisputeLossRecorder(creditNoteSvc)
 	creditNoteSvc.SetStripeRefundRecording(creditNoteStore, invoiceStore, outboxStore)
 	creditNoteSvc.SetRefundReader(stripeRefunder)
 	stripeAdapter.SetExternalRefundRecorder(creditNoteSvc)
@@ -443,7 +444,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	invoiceSvc.SetDunningRunReader(dunningStore)
 	invoiceSvc.SetSubscriptionPauseReader(subStore)
 	invoiceSvc.SetCustomerSearcher(customerStore)
-	invoiceSvc.SetCommitGrantReader(creditStore)
+	invoiceSvc.SetTopupCreditReader(creditNoteSvc)
 	invoiceSvc.SetPaymentPageReader(invoiceStore)
 	invoiceSvc.SetCardRefusalReader(invoiceStore)
 	invoiceSvc.SetDisputeReader(invoiceStore)
@@ -483,6 +484,11 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 		noPMNotifier, publicPaymentH)
 	webhook.MustWiredOutbox(invoiceStore, creditStore, subStore, dunningStore, customerStore, paymentMethodsStore, creditNoteSvc)
 	stripeAdapter.MustHaveAnomalyRecorder()
+	// Money returned outside Hardcount on a top-up is a credit note that
+	// takes its credit back; the dispute notices on a top-up read its figures.
+	invoiceStore.MustHaveDisputeLossRecorder()
+	invoiceSvc.MustHaveTopupCreditReader()
+	creditNoteSvc.MustRecordTopupReturns()
 
 	// Tax goes through the engine, which owns the tax provider.
 	invoiceSvc.SetTaxCommitter(engine)

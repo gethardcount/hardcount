@@ -464,7 +464,9 @@ func (s *PostgresStore) ReturnCreditTx(ctx context.Context, tx *sql.Tx, tenantID
 	if err != nil {
 		return domain.CreditLedgerEntry{}, domain.CreditReturn{}, err
 	}
-	if err := s.emitBalanceCrossings(ctx, tx, tenantID, in.CustomerID, currency, before, after); err != nil {
+	// A return only raises the balance, unless the grant it lands on has
+	// expired and its expiry takes more: then it fell by expiry.
+	if err := s.emitBalanceCrossings(ctx, tx, tenantID, in.CustomerID, currency, before, after, domain.CreditBalanceExpiry); err != nil {
 		return domain.CreditLedgerEntry{}, domain.CreditReturn{}, err
 	}
 	return out, result, nil

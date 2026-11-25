@@ -24,10 +24,13 @@ type failingGranterTx struct{}
 func (failingGranterTx) GrantForCreditNoteTx(context.Context, *sql.Tx, string, string, creditnote.CreditGrantInput) error {
 	return errors.New("injected in-tx grant failure")
 }
-func (failingGranterTx) LockCommitGrantForReliefTx(context.Context, *sql.Tx, string, string, time.Time) (creditnote.ReliefGrant, bool, error) {
-	return creditnote.ReliefGrant{}, false, nil
+func (failingGranterTx) TopupGrantAndBalance(context.Context, string, string, time.Time) (creditnote.TopupGrant, int64, bool, error) {
+	return creditnote.TopupGrant{}, 0, false, nil
 }
-func (failingGranterTx) RetireCommitSliceForReliefTx(context.Context, *sql.Tx, string, string, string, string, int64, int64, int64) (int64, error) {
+func (failingGranterTx) LockTopupGrantAndBalanceTx(context.Context, *sql.Tx, string, string, time.Time) (creditnote.TopupGrant, int64, bool, error) {
+	return creditnote.TopupGrant{}, 0, false, nil
+}
+func (failingGranterTx) RetireCommitSliceForReliefTx(context.Context, *sql.Tx, string, string, string, string, int64, int64, int64, bool) (int64, error) {
 	return 0, errors.New("not a commit test")
 }
 
@@ -125,10 +128,13 @@ type okGranterTx struct{}
 func (okGranterTx) GrantForCreditNoteTx(context.Context, *sql.Tx, string, string, creditnote.CreditGrantInput) error {
 	return nil
 }
-func (okGranterTx) LockCommitGrantForReliefTx(context.Context, *sql.Tx, string, string, time.Time) (creditnote.ReliefGrant, bool, error) {
-	return creditnote.ReliefGrant{}, false, nil
+func (okGranterTx) TopupGrantAndBalance(context.Context, string, string, time.Time) (creditnote.TopupGrant, int64, bool, error) {
+	return creditnote.TopupGrant{}, 0, false, nil
 }
-func (okGranterTx) RetireCommitSliceForReliefTx(context.Context, *sql.Tx, string, string, string, string, int64, int64, int64) (int64, error) {
+func (okGranterTx) LockTopupGrantAndBalanceTx(context.Context, *sql.Tx, string, string, time.Time) (creditnote.TopupGrant, int64, bool, error) {
+	return creditnote.TopupGrant{}, 0, false, nil
+}
+func (okGranterTx) RetireCommitSliceForReliefTx(context.Context, *sql.Tx, string, string, string, string, int64, int64, int64, bool) (int64, error) {
 	return 0, nil
 }
 

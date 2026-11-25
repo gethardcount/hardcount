@@ -31,12 +31,16 @@ func (a reliefGranterAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.
 	_, err := a.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, credit.CreditNoteReturnInput{Currency: in.Currency, CustomerID: in.CustomerID, AmountCents: in.AmountCents, Description: in.Description, InvoiceID: in.InvoiceID, InvoicePaid: in.InvoicePaid, InvoiceTotalCents: in.InvoiceTotalCents})
 	return err
 }
-func (a reliefGranterAdapter) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (creditnote.ReliefGrant, bool, error) {
-	g, found, err := a.svc.LockCommitGrantForReliefTx(ctx, tx, tenantID, invoiceID, at)
-	return creditnote.ReliefGrant(g), found, err
+func (a reliefGranterAdapter) LockTopupGrantAndBalanceTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (creditnote.TopupGrant, int64, bool, error) {
+	g, spendable, found, err := a.svc.LockTopupGrantAndBalanceTx(ctx, tx, tenantID, invoiceID, at)
+	return creditnote.TopupGrant(g), spendable, found, err
 }
-func (a reliefGranterAdapter) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, cnID, cnNumber string, slice, refundedGross, grossPaid int64) (int64, error) {
-	res, err := a.svc.RetireCommitSliceForReliefTx(ctx, tx, tenantID, invoiceID, cnID, cnNumber, slice, refundedGross, grossPaid)
+func (a reliefGranterAdapter) TopupGrantAndBalance(ctx context.Context, tenantID, invoiceID string, at time.Time) (creditnote.TopupGrant, int64, bool, error) {
+	g, spendable, found, err := a.svc.TopupGrantAndBalance(ctx, tenantID, invoiceID, at)
+	return creditnote.TopupGrant(g), spendable, found, err
+}
+func (a reliefGranterAdapter) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, cnID, cnNumber string, slice, refundedGross, grossPaid int64, lostDispute bool) (int64, error) {
+	res, err := a.svc.RetireCommitSliceForReliefTx(ctx, tx, tenantID, invoiceID, cnID, cnNumber, slice, refundedGross, grossPaid, lostDispute)
 	if err != nil {
 		return 0, err
 	}
@@ -75,9 +79,10 @@ func (f fixedUnbilled) UnbilledUsage(context.Context, string, string) (map[strin
 // stripeRefunds is Stripe's refund call: each refund succeeds, unless refuse
 // is set, when the next one is refused with that Stripe error.
 type stripeRefunds struct {
-	n      atomic.Int64
-	status domain.RefundStatus // zero: succeeded
-	refuse atomic.Pointer[string]
+	n          atomic.Int64
+	lastAmount atomic.Int64        // the amount of the last refund asked for
+	status     domain.RefundStatus // zero: succeeded
+	refuse     atomic.Pointer[string]
 	// holdSearch, when set, holds the next search for a refund (Retry
 	// refund's first Stripe call) until released.
 	holdSearch atomic.Pointer[pause]
@@ -89,7 +94,8 @@ type refundRefused string
 func (e refundRefused) Error() string      { return string(e) }
 func (refundRefused) OutcomeUnknown() bool { return false }
 
-func (r *stripeRefunds) CreateRefund(context.Context, string, int64, string, string) (string, domain.RefundStatus, error) {
+func (r *stripeRefunds) CreateRefund(_ context.Context, _ string, amount int64, _, _ string) (string, domain.RefundStatus, error) {
+	r.lastAmount.Store(amount)
 	if code := r.refuse.Swap(nil); code != nil {
 		return "", "", refundRefused(*code)
 	}
@@ -312,6 +318,14 @@ func TestCommitRelief_Gates(t *testing.T) {
 			t.Errorf("%s: %d credit notes, want none", name, n)
 		}
 	}
+	// A line-based note reads the same definition: the invoice with a commit
+	// line and another billing reason is not a top-up, so it takes one.
+	if _, err := cnSvc.Create(ctx, h.tenantID, creditnote.CreateInput{
+		InvoiceID: notTopup.ID, Reason: "refund",
+		Lines: []creditnote.CreditLineInput{{Description: "x", Quantity: 1, UnitAmountCents: 100}},
+	}); err != nil {
+		t.Errorf("line note on a commit line that is not a top-up: %v, want it created", err)
+	}
 }
 
 // TestCommitRelief_ConcurrentDrawdown: requirement (c) — a drawdown racing
@@ -499,121 +513,211 @@ func TestCommitRelief_PendingDrawSaysTheWayOut(t *testing.T) {
 	}
 }
 
-// TestCommitRelief_CardCapCountsStripeRefunds: the card refund of a relief fits
-// what the card paid less every refund of that payment, made by a note or in
-// Stripe. A refund made in Stripe counts while it moved or may move money,
-// whatever the operator decided about it, and never when it failed, when it is
-// of another payment, or a second time when a note holds it. Each row is a
-// 90.00 top-up of 100.00 credit, paid by card, that relieves 60.00 of credit
-// (54.00) after a 50.00 refund made in Stripe: only 40.00 is left on the card.
-func TestCommitRelief_CardCapCountsStripeRefunds(t *testing.T) {
-	h, ctx := newCommitHarness(t, "Relief Card Cap")
-	refunds := &stripeRefunds{}
-	cnSvc := newCardReliefService(h, refunds)
-	at := time.Now().UTC().Truncate(time.Second)
-
-	for i, tc := range []struct {
-		name    string
-		refund  func(pi, refundID string, invoiceID string)
-		allowed bool
+// TestCardRefundable_OneFigure: what can still go back to the card that paid
+// an invoice is one figure for an ordinary credit note's create, the
+// recorder of refunds made in Stripe and relief (the doctor check reads the
+// same SQL): what the card paid, less the card refunds of notes not voided,
+// failed ones too, and the refunds made in Stripe of that payment that no
+// note holds and that moved or may move money. A lost dispute is a guard on
+// the paths that send a refund, not part of the figure. Each row is a 90.00
+// payment by card, and left is what the row leaves on the card.
+func TestCardRefundable_OneFigure(t *testing.T) {
+	r := newOutsideRig(t, "One Card Figure")
+	late := func(t *testing.T, invoiceID, pi string, cents int64) domain.InvoiceStripeRefund {
+		r.n++
+		at, re := r.next(), fmt.Sprintf("re_late_%d", r.n)
+		if _, err := r.svc.RecordStripeRefund(r.ctx, r.h.tenantID, domain.StripeRefundSnapshot{
+			StripeEventID: "evt_" + re, EventAt: at, StripeRefundID: re, StripePaymentIntentID: pi,
+			AmountCents: cents, Currency: "usd", Status: domain.StripeRefundSucceeded, CreatedAt: at.Add(-48 * time.Hour),
+		}); err != nil {
+			t.Fatalf("record refund: %v", err)
+		}
+		return r.refundRow(t, invoiceID, re)
+	}
+	states := []struct {
+		name string
+		left int64
+		// set brings the invoice paid by pi to the row's state. topup says
+		// whether the invoice is a top-up.
+		set func(t *testing.T, inv domain.Invoice, pi string, topup bool)
 	}{
-		{"succeeded", func(pi, re, _ string) {
-			recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, pi, 5000, domain.StripeRefundSucceeded, at)
-		}, false},
-		{"pending", func(pi, re, _ string) {
-			recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, pi, 5000, domain.StripeRefundPending, at)
-		}, false},
-		{"requires action", func(pi, re, _ string) {
-			recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, pi, 5000, domain.StripeRefundRequiresAction, at)
-		}, false},
-		{"dismissed by the operator", func(pi, re, inv string) {
-			recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, pi, 5000, domain.StripeRefundSucceeded, at)
-			if _, err := cnSvc.DismissStripeRefund(ctx, h.tenantID, inv, re, "handled by hand"); err != nil {
+		{"a refund made in Stripe flagged for review", 4000, func(t *testing.T, inv domain.Invoice, pi string, _ bool) {
+			late(t, inv.ID, pi, 5000)
+		}},
+		{"a refund made in Stripe still in flight", 4000, func(t *testing.T, inv domain.Invoice, pi string, _ bool) {
+			r.refund(t, inv.ID, pi, 5000, domain.StripeRefundPending)
+		}},
+		{"a refund made in Stripe that needs action", 4000, func(t *testing.T, inv domain.Invoice, pi string, _ bool) {
+			r.refund(t, inv.ID, pi, 5000, domain.StripeRefundRequiresAction)
+		}},
+		{"a refund made in Stripe the operator dismissed", 4000, func(t *testing.T, inv domain.Invoice, pi string, _ bool) {
+			row := late(t, inv.ID, pi, 5000)
+			if _, err := r.svc.DismissStripeRefund(r.ctx, r.h.tenantID, inv.ID, row.StripeRefundID, "handled by hand"); err != nil {
 				t.Fatalf("dismiss: %v", err)
 			}
-		}, false},
-		{"failed", func(pi, re, _ string) {
-			recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, pi, 5000, domain.StripeRefundFailed, at)
-		}, true},
-		{"failed after it succeeded", func(pi, re, _ string) {
-			recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, pi, 5000, domain.StripeRefundSucceeded, at)
-			recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, pi, 5000, domain.StripeRefundFailed, at.Add(time.Hour))
-		}, true},
-		{"of another payment", func(_, re, inv string) {
-			other := "pi_cap_other_" + inv
-			if err := h.invStore.RecordChargeAttempt(ctx, h.tenantID, domain.InvoiceChargeAttempt{
-				InvoiceID: inv, StripePaymentIntentID: other, Trigger: domain.ChargeTriggerExternal,
-				Outcome: domain.ChargeAttemptSucceeded, AmountCents: 9000, OccurredAt: at,
+		}},
+		{"a refund made in Stripe that failed", 9000, func(t *testing.T, inv domain.Invoice, pi string, _ bool) {
+			r.refund(t, inv.ID, pi, 5000, domain.StripeRefundFailed)
+		}},
+		{"a refund made in Stripe of another payment", 9000, func(t *testing.T, inv domain.Invoice, _ string, _ bool) {
+			other := "pi_other_" + inv.ID
+			if err := r.h.invStore.RecordChargeAttempt(r.ctx, r.h.tenantID, domain.InvoiceChargeAttempt{
+				InvoiceID: inv.ID, StripePaymentIntentID: other, Trigger: domain.ChargeTriggerExternal,
+				Outcome: domain.ChargeAttemptSucceeded, AmountCents: 9000, OccurredAt: r.at,
 			}); err != nil {
 				t.Fatalf("second charge: %v", err)
 			}
-			recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, other, 5000, domain.StripeRefundSucceeded, at)
-		}, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			inv := h.createTopup(t, ctx, "USD", 9000, 10000)
-			pi := fmt.Sprintf("pi_cap_%d", i)
-			payByCard(t, h, ctx, inv.ID, pi)
-			tc.refund(pi, fmt.Sprintf("re_cap_%d", i), inv.ID)
-
-			cn, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireCents: 6000})
-			if tc.allowed {
-				if err != nil || cn.RefundAmountCents != 5400 {
-					t.Fatalf("relief: card refund %d, err %v; want 5400 to the card", cn.RefundAmountCents, err)
+			r.refund(t, inv.ID, other, 5000, domain.StripeRefundSucceeded)
+		}},
+		{"a refund made in Stripe recorded as a note", 4000, func(t *testing.T, inv domain.Invoice, pi string, _ bool) {
+			if row := r.refund(t, inv.ID, pi, 5000, domain.StripeRefundSucceeded); row.Outcome != domain.StripeRefundRecordedAsCreditNote {
+				t.Fatalf("refund: %s (%s), want recorded", row.Outcome, row.ReviewReason)
+			}
+		}},
+		{"a note whose card refund failed", 3600, func(t *testing.T, inv domain.Invoice, _ string, topup bool) {
+			r.cards.refuseNext("charge_disputed")
+			var cn domain.CreditNote
+			var err error
+			if topup {
+				cn, err = r.relief(creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireCents: 6000})
+			} else {
+				cn, err = r.svc.Create(r.ctx, r.h.tenantID, creditnote.CreateInput{InvoiceID: inv.ID, Reason: "r", RefundAmountCents: 5400, AutoIssue: true,
+					Lines: []creditnote.CreditLineInput{{Description: "x", Quantity: 1, UnitAmountCents: 5400}}})
+				if err == nil {
+					cn, err = r.svc.Issue(r.ctx, r.h.tenantID, cn.ID)
 				}
-				return
 			}
-			if !errors.Is(err, errs.ErrValidation) || errs.Field(err) != "refund_amount_cents" {
-				t.Fatalf("relief of 54.00 by card with 40.00 left: card refund %d, err %v; want 422 on refund_amount_cents", cn.RefundAmountCents, err)
+			if err != nil || cn.RefundStatus != domain.RefundFailed {
+				t.Fatalf("note: refund status %s, err %v; want failed", cn.RefundStatus, err)
 			}
-			if n := len(reliefNotes(t, ctx, cnSvc, h.tenantID, inv.ID)); n != 0 {
-				t.Errorf("%d credit notes after a refused relief, want none", n)
+		}},
+	}
+
+	ordinary := func(t *testing.T) (domain.Invoice, string) {
+		r.n++
+		id := r.h.seedPayable(t, r.ctx, r.h.custID, 9000, 700+r.n)
+		pi := fmt.Sprintf("pi_fig_%d", r.n)
+		payByCard(t, r.h, r.ctx, id, pi)
+		inv, err := r.h.invStore.Get(r.ctx, r.h.tenantID, id)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		return inv, pi
+	}
+	for _, st := range states {
+		t.Run("create: "+st.name, func(t *testing.T) {
+			inv, pi := ordinary(t)
+			st.set(t, inv, pi, false)
+			creditable := inv.TotalAmountCents
+			for _, cn := range reliefNotes(t, r.ctx, r.svc, r.h.tenantID, inv.ID) {
+				creditable -= cn.TotalCents
+			}
+			create := func(cents int64) error {
+				_, err := r.svc.Create(r.ctx, r.h.tenantID, creditnote.CreateInput{InvoiceID: inv.ID, Reason: "r", RefundAmountCents: cents,
+					Lines: []creditnote.CreditLineInput{{Description: "x", Quantity: 1, UnitAmountCents: cents}}})
+				return err
+			}
+			if st.left+1 <= creditable {
+				if err := create(st.left + 1); !errors.Is(err, errs.ErrValidation) || errs.Field(err) != "refund_amount_cents" {
+					t.Errorf("a card refund of %d with %d left: %v, want 422 on refund_amount_cents", st.left+1, st.left, err)
+				}
+			}
+			if st.left > 0 {
+				if err := create(st.left); err != nil {
+					t.Errorf("a card refund of the %d left: %v", st.left, err)
+				}
+			}
+		})
+		t.Run("recorder: "+st.name, func(t *testing.T) {
+			inv, pi := ordinary(t)
+			st.set(t, inv, pi, false)
+			want := domain.StripeRefundReviewExceedsCardRefundable
+			if st.name == "a note whose card refund failed" {
+				want = domain.StripeRefundReviewCreditNoteRefundFailed // rule 7 comes first
+			}
+			if row := r.refund(t, inv.ID, pi, st.left+1, domain.StripeRefundSucceeded); row.ReviewReason != want {
+				t.Errorf("a refund of %d with %d left: %s (%s), want needs_review (%s)", st.left+1, st.left, row.Outcome, row.ReviewReason, want)
 			}
 		})
 	}
 
-	// A refund made in Stripe that a note holds counts once, as the note's
-	// card refund: a relief whose card refund failed, then the operator
-	// attached the refund they made in Stripe to it.
-	t.Run("held by a note", func(t *testing.T) {
-		inv := h.createTopup(t, ctx, "USD", 9000, 10000)
-		const pi, re = "pi_cap_held", "re_cap_held"
-		payByCard(t, h, ctx, inv.ID, pi)
-		refunds.refuseNext("charge_disputed")
-		first, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireCents: 2000})
-		if err != nil || first.RefundStatus != domain.RefundFailed {
-			t.Fatalf("first relief: refund status %s, err %v; want failed", first.RefundStatus, err)
+	// Relief refunds the smaller of the card's figure and what the payment's
+	// documents allow, which a refund made in Stripe that no note holds uses
+	// up too. It waits while such a refund is not settled, since it may be
+	// this money (ADR-134, no path refunds twice).
+	for _, st := range states {
+		t.Run("relief: "+st.name, func(t *testing.T) {
+			inv, pi := r.topup(t, 9000, 10000, 0)
+			st.set(t, inv, pi, true)
+			cn, err := r.relief(creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireAll: true})
+			switch {
+			case strings.Contains(st.name, "flagged") || strings.Contains(st.name, "in flight") || strings.Contains(st.name, "needs action"):
+				if errs.Code(err) != "stripe_refund_unresolved" {
+					t.Errorf("relief: %v, want 409 stripe_refund_unresolved", err)
+				}
+			default:
+				if err != nil || cn.RefundAmountCents != st.left {
+					t.Errorf("retire_all: card refund %d, err %v; want the %d left", cn.RefundAmountCents, err, st.left)
+				}
+			}
+		})
+	}
+
+	// A lost dispute is not part of the figure: it stops every path that
+	// sends a refund to the card (relief's is in TestCommitRelief_DisputeGuard)
+	// and none that records a refund already made, which Stripe allowed
+	// before the dispute.
+	t.Run("after a lost dispute", func(t *testing.T) {
+		inv, pi := ordinary(t)
+		r.dispute(t, "du_fig_"+inv.ID, pi, domain.DisputeLost, 3000, "usd")
+		if _, err := r.svc.Create(r.ctx, r.h.tenantID, creditnote.CreateInput{InvoiceID: inv.ID, Reason: "r", RefundAmountCents: 100,
+			Lines: []creditnote.CreditLineInput{{Description: "x", Quantity: 1, UnitAmountCents: 100}}}); !errors.Is(err, errs.ErrValidation) || errs.Field(err) != "refund_amount_cents" || !strings.Contains(err.Error(), "dispute") {
+			t.Errorf("a card refund on a note: %v, want 422 on refund_amount_cents naming the dispute", err)
 		}
-		recordStripeRefund(t, ctx, cnSvc, h.tenantID, re, pi, 1800, domain.StripeRefundSucceeded, at)
-		cnSvc.SetRefundReader(fixedRefund{domain.StripeRefundFacts{ID: re, PaymentIntentID: pi, AmountCents: 1800, Currency: "usd", Status: domain.StripeRefundSucceeded}})
-		if _, err := cnSvc.AttachStripeRefund(ctx, h.tenantID, first.ID, re); err != nil {
-			t.Fatalf("attach: %v", err)
+		for _, amount := range []int64{0, 100} {
+			if _, err := r.svc.CreateRefund(r.ctx, r.h.tenantID, creditnote.RefundInput{InvoiceID: inv.ID, AmountCents: amount, Reason: "requested_by_customer"}); !errors.Is(err, errs.ErrInvalidState) || !strings.Contains(err.Error(), "dispute") {
+				t.Errorf("the refund route (amount %d): %v, want 409 naming the dispute", amount, err)
+			}
 		}
-		// 72.00 left on the card: 90.00 less the 18.00 the note holds.
-		cn, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireAll: true})
-		if err != nil || cn.RefundAmountCents != 7200 {
-			t.Fatalf("second relief: card refund %d, err %v; want 7200", cn.RefundAmountCents, err)
+		if row := r.refund(t, inv.ID, pi, 2000, domain.StripeRefundSucceeded); row.Outcome != domain.StripeRefundRecordedAsCreditNote {
+			t.Errorf("a refund made in Stripe before the loss: %s (%s), want recorded", row.Outcome, row.ReviewReason)
+		}
+	})
+	t.Run("Retry refund after a lost dispute", func(t *testing.T) {
+		inv, pi := ordinary(t)
+		r.cards.refuseNext("charge_disputed")
+		failed, err := r.svc.Create(r.ctx, r.h.tenantID, creditnote.CreateInput{InvoiceID: inv.ID, Reason: "r", RefundAmountCents: 1000, AutoIssue: true,
+			Lines: []creditnote.CreditLineInput{{Description: "x", Quantity: 1, UnitAmountCents: 1000}}})
+		if err == nil && failed.Status != domain.CreditNoteIssued {
+			failed, err = r.svc.Issue(r.ctx, r.h.tenantID, failed.ID)
+		}
+		if err != nil || failed.RefundStatus != domain.RefundFailed {
+			t.Fatalf("note: refund status %s, err %v; want failed", failed.RefundStatus, err)
+		}
+		r.dispute(t, "du_fig_retry_"+inv.ID, pi, domain.DisputeLost, 3000, "usd")
+		if _, err := r.svc.RetryRefund(r.ctx, r.h.tenantID, failed.ID); !errors.Is(err, errs.ErrInvalidState) || !strings.Contains(err.Error(), "dispute") {
+			t.Errorf("Retry refund: %v, want 409 naming the dispute", err)
 		}
 	})
 
-	// A failed card refund still counts, since a retry may send it. When it
-	// is why the card is short, the refusal names that note and its two
-	// ways out. Here 54.00 to the card failed and the operator refunded
-	// 50.00 by hand in Stripe: without the failed refund, 40.00 is left.
-	t.Run("a failed refund that still counts is named", func(t *testing.T) {
-		inv := h.createTopup(t, ctx, "USD", 9000, 10000)
-		const pi = "pi_cap_failed_note"
-		payByCard(t, h, ctx, inv.ID, pi)
-		refunds.refuseNext("charge_disputed")
-		first, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireCents: 6000})
+	// A refund made in Stripe that a note holds counts once, as the note's
+	// card refund: a relief whose card refund failed, then the operator
+	// attached the refund they made in Stripe to it.
+	t.Run("relief: a refund made in Stripe attached to a failed note", func(t *testing.T) {
+		inv, pi := r.topup(t, 9000, 10000, 0)
+		r.cards.refuseNext("charge_disputed")
+		first, err := r.relief(creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireCents: 2000})
 		if err != nil || first.RefundStatus != domain.RefundFailed {
 			t.Fatalf("first relief: refund status %s, err %v; want failed", first.RefundStatus, err)
 		}
-		recordStripeRefund(t, ctx, cnSvc, h.tenantID, "re_cap_failed_note", pi, 5000, domain.StripeRefundSucceeded, at)
-		_, err = cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireCents: 4000})
-		if !errors.Is(err, errs.ErrValidation) || errs.Field(err) != "refund_amount_cents" ||
-			!strings.Contains(err.Error(), first.CreditNoteNumber) || !strings.Contains(err.Error(), "returned another way") {
-			t.Fatalf("relief of 36.00 by card: err = %v; want 422 on refund_amount_cents naming %s and returned another way", err, first.CreditNoteNumber)
+		row := r.refund(t, inv.ID, pi, 1800, domain.StripeRefundSucceeded)
+		r.svc.SetRefundReader(fixedRefund{domain.StripeRefundFacts{ID: row.StripeRefundID, PaymentIntentID: pi, AmountCents: 1800, Currency: "usd", Status: domain.StripeRefundSucceeded}})
+		if _, err := r.svc.AttachStripeRefund(r.ctx, r.h.tenantID, first.ID, row.StripeRefundID); err != nil {
+			t.Fatalf("attach: %v", err)
+		}
+		cn, err := r.relief(creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireAll: true})
+		if err != nil || cn.RefundAmountCents != 7200 {
+			t.Errorf("second relief: card refund %d, err %v; want 7200", cn.RefundAmountCents, err)
 		}
 	})
 }
@@ -626,15 +730,16 @@ func (r fixedRefund) ReadRefund(context.Context, string) (domain.StripeRefundFac
 }
 
 // TestCommitRelief_DisputeGuard: relief is refused while the customer's bank
-// holds a chargeback on the payment, appeals included, and after the bank won
-// it. An inquiry is not a chargeback: its relief may refund the card, which
-// ends the inquiry. A dispute that closed for the merchant leaves the money
-// paid.
+// holds a chargeback on the payment, appeals included. Once the bank won it,
+// nothing more can go back to the card (the document cap's rows are in
+// TestCommitRelief_BoundedByTheDocumentCap). An inquiry is not a chargeback:
+// its relief may refund the card, which ends the inquiry. A dispute that
+// closed for the merchant leaves the money paid.
 func TestCommitRelief_DisputeGuard(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Relief Dispute Guard")
 	cnSvc := newCardReliefService(h, &stripeRefunds{})
+	h.invStore.SetDisputeLossRecorder(cnSvc)
 	at := time.Now().UTC().Truncate(time.Second)
-	const lostMessage = "This payment was reversed by the customer's bank in a dispute, so there is nothing left to refund."
 
 	for i, tc := range []struct {
 		status  domain.DisputeStatus
@@ -655,12 +760,19 @@ func TestCommitRelief_DisputeGuard(t *testing.T) {
 			inv := h.createTopup(t, ctx, "USD", 9000, 10000)
 			pi := fmt.Sprintf("pi_guard_%d", i)
 			payByCard(t, h, ctx, inv.ID, pi)
+			// A loss of part of the payment leaves the relief room, so what
+			// refuses it is the card.
+			disputed := int64(9000)
+			if tc.status == domain.DisputeLost {
+				disputed = 3000
+			}
 			if _, err := h.invStore.RecordStripeDispute(ctx, h.tenantID, domain.DisputeSnapshot{
 				StripeEventID: fmt.Sprintf("evt_guard_%d", i), EventAt: at, StripeDisputeID: fmt.Sprintf("du_guard_%d", i),
-				StripePaymentIntentID: pi, Status: tc.status, AmountCents: 9000, Currency: "usd", OpenedAt: at,
+				StripePaymentIntentID: pi, Status: tc.status, AmountCents: disputed, Currency: "usd", OpenedAt: at,
 			}); err != nil {
 				t.Fatalf("record dispute: %v", err)
 			}
+			notes := len(reliefNotes(t, ctx, cnSvc, h.tenantID, inv.ID))
 
 			cn, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireCents: 6000})
 			if tc.allowed {
@@ -669,15 +781,16 @@ func TestCommitRelief_DisputeGuard(t *testing.T) {
 				}
 				return
 			}
-			if !errors.Is(err, errs.ErrInvalidState) || errs.Code(err) != "payment_disputed" {
+			switch {
+			case tc.status == domain.DisputeLost:
+				if !errors.Is(err, errs.ErrValidation) || errs.Field(err) != "refund_amount_cents" {
+					t.Fatalf("relief to the card after a loss: card refund %d, err %v; want 422 on refund_amount_cents", cn.RefundAmountCents, err)
+				}
+			case !errors.Is(err, errs.ErrInvalidState) || errs.Code(err) != "payment_disputed":
 				t.Fatalf("relief with a %s dispute: card refund %d, err %v; want 409 payment_disputed", tc.status, cn.RefundAmountCents, err)
 			}
-			var de *errs.DomainError
-			if tc.status == domain.DisputeLost && (!errors.As(err, &de) || de.Message != lostMessage) {
-				t.Errorf("lost: message %q, want %q", err, lostMessage)
-			}
-			if n := len(reliefNotes(t, ctx, cnSvc, h.tenantID, inv.ID)); n != 0 {
-				t.Errorf("%d credit notes after a refused relief, want none", n)
+			if n := len(reliefNotes(t, ctx, cnSvc, h.tenantID, inv.ID)); n != notes {
+				t.Errorf("%d credit notes after a refused relief, want %d", n, notes)
 			}
 		})
 	}
@@ -743,6 +856,7 @@ func TestCommitRelief_FailedCardRefundReachesAnEnd(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Relief Refund Dead End")
 	refunds := &stripeRefunds{}
 	cnSvc := newCardReliefService(h, refunds)
+	h.invStore.SetDisputeLossRecorder(cnSvc)
 	rows := &auditRows{}
 	cnSvc.SetAuditLogger(rows)
 

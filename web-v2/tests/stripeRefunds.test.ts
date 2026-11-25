@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import {
   dismissNoteError,
   flaggedStripeRefunds,
+  recordConsequences,
   recordStripeRefundRequest,
   stripeRefundChoices,
   stripeRefundNoteReason,
@@ -47,9 +48,13 @@ test('a refund on an invoice that is not paid can be recorded only once it is pa
 })
 
 test('refunds the server refuses to record offer Dismiss only', () => {
-  for (const review_reason of ['exceeds_card_refundable', 'exceeds_creditable', 'prepaid_commit', 'currency_mismatch']) {
+  for (const review_reason of ['exceeds_card_refundable', 'exceeds_creditable', 'currency_mismatch']) {
     assert.deepEqual(stripeRefundChoices(refund({ review_reason }), paid, [failedNote()]), { attachTo: [], record: false, dismiss: true }, review_reason)
   }
+})
+
+test('a refund whose credit note is not written yet can be recorded', () => {
+  assert.equal(stripeRefundChoices(refund({ review_reason: 'credit_note_not_written' }), paid, []).record, true)
 })
 
 test('a refund that no longer succeeded at Stripe is not recorded or attached', () => {
@@ -105,4 +110,11 @@ test('the dismissal note is required and at most 1000 characters, as the server 
   assert.match(dismissNoteError('a'.repeat(1001)), /1000 characters/)
   // An emoji is two UTF-16 units but one character to the server.
   assert.equal(dismissNoteError('😀'.repeat(1000)), '')
+})
+
+// On a top-up the Record dialog says the note takes back the credit the
+// refund paid for; on any other invoice it says nothing of credit.
+test('the Record dialog says a top-up\'s note takes back its credit', () => {
+  assert.ok(recordConsequences('topup').some(l => l.includes('takes back the unused credit')))
+  assert.ok(!recordConsequences('manual').some(l => l.includes('credit the refund')))
 })

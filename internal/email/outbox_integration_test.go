@@ -331,7 +331,7 @@ func TestEmailOutbox_CreditNote_RoundTrip(t *testing.T) {
 
 	pdf := []byte("%PDF-cn")
 	if err := sender.SendCreditNote(ctx, tenantID, "ada@example.com", []string{"finance@example.com"},
-		"Ada", "CN-0001", "HC-7", 5_400, 6_000, "USD", pdf); err != nil {
+		"Ada", "CN-0001", "HC-7", 5_400, 6_000, true, "USD", pdf); err != nil {
 		t.Fatalf("enqueue SendCreditNote: %v", err)
 	}
 	// Legacy-shape row: no cc key at all (written by an older binary).
@@ -345,11 +345,12 @@ func TestEmailOutbox_CreditNote_RoundTrip(t *testing.T) {
 	fake := &fakeDeliverer{}
 	seen := map[string][]string{}
 	takenBack := map[string]int64{}
+	byBank := map[string]bool{}
 	n, err := store.ProcessBatch(ctx, 10, func(c context.Context, row email.OutboxRow) error {
 		if err := callDeliverer(c, fake, row); err != nil {
 			return err
 		}
-		seen[fake.lastTo], takenBack[fake.lastTo] = fake.lastCc, fake.lastTakenBack
+		seen[fake.lastTo], takenBack[fake.lastTo], byBank[fake.lastTo] = fake.lastCc, fake.lastTakenBack, fake.lastByBank
 		return nil
 	})
 	if err != nil {
@@ -369,6 +370,9 @@ func TestEmailOutbox_CreditNote_RoundTrip(t *testing.T) {
 	}
 	if takenBack["ada@example.com"] != 6_000 || takenBack["old@example.com"] != 0 {
 		t.Errorf("credit taken back round trip: got %v, want 6000 on the relief note and 0 on the other", takenBack)
+	}
+	if !byBank["ada@example.com"] || byBank["old@example.com"] {
+		t.Errorf("returned by the bank round trip: got %v, want true on the first note only", byBank)
 	}
 }
 
@@ -417,6 +421,7 @@ type fakeDeliverer struct {
 	lastInvoice       string
 	lastAmount        int64
 	lastTakenBack     int64
+	lastByBank        bool
 	lastCurrency      string
 	lastAttemptN      int
 	lastMaxN          int
@@ -505,9 +510,9 @@ func (f *fakeDeliverer) SendMemberInvite(_ context.Context, tenantID, to, invite
 	f.lastUpdateURL = url
 	return nil
 }
-func (f *fakeDeliverer) SendCreditNote(_ context.Context, tenantID, to string, cc []string, name, cnNumber, inv string, amount, takenBack int64, cur string, pdf []byte) error {
+func (f *fakeDeliverer) SendCreditNote(_ context.Context, tenantID, to string, cc []string, name, cnNumber, inv string, amount, takenBack int64, byBank bool, cur string, pdf []byte) error {
 	f.calls++
-	f.lastCc, f.lastTakenBack = cc, takenBack
+	f.lastCc, f.lastTakenBack, f.lastByBank = cc, takenBack, byBank
 	f.lastType, f.lastTenant, f.lastTo, f.lastName, f.lastInvoice = email.TypeCreditNote, tenantID, to, name, inv
 	f.lastAmount, f.lastCurrency, f.lastPDF = amount, cur, pdf
 	return nil
@@ -530,6 +535,7 @@ func callDeliverer(ctx context.Context, d email.EmailDeliverer, row email.Outbox
 		InvoiceNumber        string   `json:"invoice_number"`
 		AmountCents          int64    `json:"amount_cents"`
 		CreditTakenBackCents int64    `json:"credit_taken_back_cents"`
+		ReturnedByBank       bool     `json:"returned_by_bank"`
 		Currency             string   `json:"currency"`
 		AttemptNumber        int      `json:"attempt_number"`
 		Trigger              string   `json:"trigger"`
@@ -566,7 +572,7 @@ func callDeliverer(ctx context.Context, d email.EmailDeliverer, row email.Outbox
 	case email.TypePaymentSetupRequest:
 		return d.SendPaymentSetupRequest(ctx, row.TenantID, m.To, m.CustomerName, m.InvoiceNumber, m.AmountCents, m.Currency, m.UpdateURL, m.InvoiceWrittenOff, m.Trigger)
 	case email.TypeCreditNote:
-		return d.SendCreditNote(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.CreditNoteNumber, m.InvoiceNumber, m.AmountCents, m.CreditTakenBackCents, m.Currency, m.PDF)
+		return d.SendCreditNote(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.CreditNoteNumber, m.InvoiceNumber, m.AmountCents, m.CreditTakenBackCents, m.ReturnedByBank, m.Currency, m.PDF)
 	default:
 		return fmt.Errorf("unknown email_type %q", row.EmailType)
 	}

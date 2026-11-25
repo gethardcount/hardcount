@@ -24,6 +24,10 @@ const REASON_LABELS: Record<string, string> = {
   // A refund made in the Stripe dashboard that Hardcount did not record
   // (ADR-134): the operator records it, attaches it or dismisses it.
   refunded_in_stripe: 'Refunded in Stripe',
+  // A chargeback open on a top-up's payment, and a dispute the customer's
+  // bank won.
+  dispute_open: 'Payment disputed',
+  dispute_lost: 'Dispute lost',
 }
 
 export function attentionReasonLabel(reason: string, code?: string): string {

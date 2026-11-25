@@ -90,7 +90,7 @@ func TestInvoiceSums_MatchThePagedSumsUnderAPage(t *testing.T) {
 			t.Fatalf("invoice %s has %d notes; the old sums are only right under one page", id, len(notes))
 		}
 		// The old code, verbatim in its filters.
-		var oldCredited, oldIssued, oldUnrelieved, oldRefunds int64
+		var oldCredited, oldIssued, oldUnrelieved int64
 		for _, cn := range notes {
 			if cn.Status != domain.CreditNoteVoided {
 				oldCredited += cn.TotalCents
@@ -100,9 +100,6 @@ func TestInvoiceSums_MatchThePagedSumsUnderAPage(t *testing.T) {
 			}
 			if cn.Status == domain.CreditNoteVoided && cn.IssuedAt == nil {
 				oldUnrelieved += cn.TotalCents
-			}
-			if cn.Status != domain.CreditNoteVoided && cn.RefundAmountCents > 0 {
-				oldRefunds += cn.RefundAmountCents
 			}
 		}
 
@@ -118,13 +115,9 @@ func TestInvoiceSums_MatchThePagedSumsUnderAPage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		sums, err := store.InvoiceSums(r.ctx, r.tenantID, id)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if credited != oldCredited || issued != oldIssued || unrelieved != oldUnrelieved || sums.RefundCents != oldRefunds {
-			t.Errorf("invoice %s (%d notes): credited %d/%d issued %d/%d unrelieved %d/%d refunds %d/%d (new/old)",
-				id, len(notes), credited, oldCredited, issued, oldIssued, unrelieved, oldUnrelieved, sums.RefundCents, oldRefunds)
+		if credited != oldCredited || issued != oldIssued || unrelieved != oldUnrelieved {
+			t.Errorf("invoice %s (%d notes): credited %d/%d issued %d/%d unrelieved %d/%d (new/old)",
+				id, len(notes), credited, oldCredited, issued, oldIssued, unrelieved, oldUnrelieved)
 		}
 	}
 }

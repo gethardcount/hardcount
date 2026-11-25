@@ -92,13 +92,15 @@ type Store interface {
 	// period invoice still draws on (domain.CreditDrawOwedSQL, ADR-071 §2).
 	ListExpiredGrants(ctx context.Context) ([]domain.CreditLedgerEntry, error)
 
-	// LockCommitGrantTx + RetireCommitSliceForReliefTx are the ADR-080
-	// relief pair: read the funded grant's frozen state under the relief
-	// locks, live or not at `at`, then retire an explicit slice (bumping the
-	// telescoping anchor cn_retired_cents) with a loud error on a missing
-	// grant.
+	// LockCommitGrantTx + RetireCommitSliceForReliefTx are what a credit
+	// note on a top-up uses (ADR-080): read the funded grant's frozen state
+	// under the customer's credit lock, live or not at `at`, then retire an
+	// explicit slice (bumping the telescoping anchor cn_retired_cents) with a
+	// loud error on a missing grant. ReadTopupGrantAndBalance is the same
+	// read with no lock, for display.
 	LockCommitGrantTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (commitGrantState, bool, error)
-	RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64) (commitGrantState, error)
+	RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64, lostDispute bool) (commitGrantState, error)
+	ReadTopupGrantAndBalance(ctx context.Context, tenantID, invoiceID string, at time.Time) (commitGrantState, int64, bool, error)
 }
 
 type ListFilter struct {

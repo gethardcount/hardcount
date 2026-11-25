@@ -13,6 +13,7 @@ import { stripePaymentUrl } from '@/lib/invoiceNotice'
 import {
   dismissNoteError,
   flaggedStripeRefunds,
+  recordConsequences,
   recordStripeRefundRequest,
   stripeRefundChoices,
 } from '@/lib/stripeRefunds'
@@ -46,6 +47,7 @@ interface RefundInvoice {
   invoice_number: string
   status: string
   payment_status: string
+  billing_reason?: string
   billing_timezone?: string | null
 }
 
@@ -139,8 +141,7 @@ export function StripeRefundActions({ invoice, refunds, creditNotes, primary, on
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <div className="space-y-2 text-sm text-muted-foreground">
-                <p>The customer is not refunded again.</p>
-                <p>The credit note is issued at once and can&apos;t be undone.</p>
+                {recordConsequences(invoice.billing_reason).map(line => <p key={line}>{line}</p>)}
               </div>
               <AlertDialogFooter>
                 <AlertDialogCancel disabled={recordMutation.isPending}>Cancel</AlertDialogCancel>

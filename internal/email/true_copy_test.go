@@ -160,8 +160,8 @@ func TestTopupEmails_SayWhatIsBought(t *testing.T) {
 // time after the note is issued, whatever its card refund's state, and the
 // attached PDF says that state. An ordinary note's email is unchanged.
 func TestCreditNoteEmail_ReliefSaysRefundAndCreditTakenBack(t *testing.T) {
-	_, rawHTML := renderCreditNoteHTML("Ada", "CN-0007", "INV-0042", 5400, 6000, "usd", "Acme")
-	text := creditNoteTextBody("Ada", "CN-0007", "INV-0042", 5400, 6000, "usd")
+	_, rawHTML := renderCreditNoteHTML("Ada", "CN-0007", "INV-0042", 5400, 6000, false, "usd", "Acme")
+	text := creditNoteTextBody("Ada", "CN-0007", "INV-0042", 5400, 6000, false, "usd")
 	if !strings.Contains(text, "Refund: USD 54.00\nCredit taken back: USD 60.00\n") {
 		t.Errorf("relief text part:\n%s", text)
 	}
@@ -178,8 +178,17 @@ func TestCreditNoteEmail_ReliefSaysRefundAndCreditTakenBack(t *testing.T) {
 			}
 		}
 	}
-	if text := creditNoteTextBody("Ada", "CN-0008", "INV-0042", 5000, 0, "usd"); !strings.Contains(text, "Amount credited: USD 50.00\n") || strings.Contains(text, "taken back") {
+	if text := creditNoteTextBody("Ada", "CN-0008", "INV-0042", 5000, 0, false, "usd"); !strings.Contains(text, "Amount credited: USD 50.00\n") || strings.Contains(text, "taken back") {
 		t.Errorf("ordinary text part:\n%s", text)
+	}
+}
+
+// The note of a dispute the customer's bank won says the bank returned the
+// money, and the credit taken back: never a refund, nor an amount credited.
+func TestCreditNoteEmail_ALostDisputeSaysTheBankReturnedIt(t *testing.T) {
+	text := creditNoteTextBody("Ada", "CN-0009", "INV-0042", 9000, 7000, true, "usd")
+	if !strings.Contains(text, "Returned by your bank in a dispute: USD 90.00\nCredit taken back: USD 70.00\n") || strings.Contains(text, "Refund") || strings.Contains(text, "credited") {
+		t.Errorf("lost dispute text part:\n%s", text)
 	}
 }
 

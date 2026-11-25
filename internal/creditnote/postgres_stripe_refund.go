@@ -57,6 +57,7 @@ type StripeRefundStore interface {
 	// holds the refund id; flipped says whether the status moved.
 	ApplyRefundWebhookStatusTx(ctx context.Context, tx *sql.Tx, stripeRefundID string, status domain.RefundStatus) (cn domain.CreditNote, flipped, found bool, err error)
 	ListStripeRefundsByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceStripeRefund, error)
+	ListStripeRefundsByInvoiceTx(ctx context.Context, tx *sql.Tx, invoiceID string) ([]domain.InvoiceStripeRefund, error)
 	// StripeRefundsNeedingReviewByInvoices returns, for a page of invoices,
 	// the newest needs_review refund on each: invoice id → row.
 	StripeRefundsNeedingReviewByInvoices(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]domain.InvoiceStripeRefund, error)
@@ -206,28 +207,27 @@ func (s *PostgresStore) AttachStripeRefundTx(ctx context.Context, tx *sql.Tx, cr
 	return n == 1, nil
 }
 
-// StripeRefundedOutsideNotesTx sums, on the caller's tx, the refunds made in
-// Stripe of payment paymentIntentID on the invoice that moved or may still
-// move money (succeeded, pending, requires_action) and that no credit note
-// holds: what left the card besides the notes' own refunds. The operator's
-// decision on the row (needs review, dismissed) does not matter, because the
-// money left either way. A refund of another payment is not this card's. Zero
-// when there is no payment.
-func (s *PostgresStore) StripeRefundedOutsideNotesTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) (int64, error) {
-	if paymentIntentID == "" {
-		return 0, nil
+// CardRefunds is what has gone or may still go back to the card that paid
+// an invoice, by the one definition (domain.CardRefundsSQL).
+type CardRefunds struct {
+	// NotesCents is the card refunds of the invoice's notes not voided,
+	// failed ones too.
+	NotesCents int64
+	// StripeCents is the refunds made in Stripe of the payment that no note
+	// holds and that moved or may move money.
+	StripeCents int64
+}
+
+// CardRefundsTx reads the invoice's CardRefunds on the caller's tx, leaving
+// out the refund made in Stripe exceptRefundID ("" leaves out none).
+func (s *PostgresStore) CardRefundsTx(ctx context.Context, tx *sql.Tx, invoiceID, exceptRefundID string) (CardRefunds, error) {
+	var out CardRefunds
+	if err := tx.QueryRowContext(ctx,
+		`SELECT `+domain.CardRefundsSQL("i", "NULLIF($2, '')")+` FROM invoices i WHERE i.id = $1`,
+		invoiceID, exceptRefundID).Scan(&out.NotesCents, &out.StripeCents); err != nil {
+		return CardRefunds{}, fmt.Errorf("read the card refunds of invoice %s: %w", invoiceID, err)
 	}
-	var sum int64
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(SUM(r.amount_cents), 0) FROM invoice_stripe_refunds r
-		WHERE r.invoice_id = $1 AND r.stripe_payment_intent_id = $2
-		  AND r.status IN ('succeeded', 'pending', 'requires_action')
-		  AND r.credit_note_id IS NULL
-		  AND NOT EXISTS (SELECT 1 FROM credit_notes n WHERE n.tenant_id = r.tenant_id AND n.stripe_refund_id = r.stripe_refund_id)`,
-		invoiceID, paymentIntentID).Scan(&sum); err != nil {
-		return 0, fmt.Errorf("sum refunds made in Stripe on invoice %s: %w", invoiceID, err)
-	}
-	return sum, nil
+	return out, nil
 }
 
 // ReturnRefundAnotherWayTx moves an issued note's failed card refund to
@@ -367,7 +367,17 @@ func (s *PostgresStore) ListStripeRefundsByInvoice(ctx context.Context, tenantID
 		return nil, err
 	}
 	defer postgres.Rollback(tx)
+	out, err := s.ListStripeRefundsByInvoiceTx(ctx, tx, invoiceID)
+	if err != nil {
+		return nil, err
+	}
+	return out, tx.Commit()
+}
 
+// ListStripeRefundsByInvoiceTx is ListStripeRefundsByInvoice on the caller's
+// tx, for a caller that holds the credit-note lock and must not take a
+// second connection while it does.
+func (s *PostgresStore) ListStripeRefundsByInvoiceTx(ctx context.Context, tx *sql.Tx, invoiceID string) ([]domain.InvoiceStripeRefund, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT `+stripeRefundCols+` FROM invoice_stripe_refunds WHERE invoice_id = $1 ORDER BY refund_created_at, id`, invoiceID)
 	if err != nil {
@@ -382,10 +392,7 @@ func (s *PostgresStore) ListStripeRefundsByInvoice(ctx context.Context, tenantID
 		}
 		out = append(out, r)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, tx.Commit()
+	return out, rows.Err()
 }
 
 func (s *PostgresStore) StripeRefundsNeedingReviewByInvoices(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]domain.InvoiceStripeRefund, error) {

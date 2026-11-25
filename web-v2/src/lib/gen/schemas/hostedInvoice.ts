@@ -42,8 +42,9 @@ export interface HostedInvoice {
      * due. One issued before payment lowered what is owed
      * (`before_payment`). One issued after payment is listed once a
      * part of it has settled, with what came back: a card refund once
-     * Stripe confirmed it, credit added to the customer's balance, or
-     * an amount settled another way. Empty when there are none.
+     * Stripe confirmed it, credit added to the customer's balance, an
+     * amount settled another way, or the money the customer's bank
+     * returned in a dispute. Empty when there are none.
      */
   credit_notes: HostedInvoiceCreditNotesItem[];
   /**

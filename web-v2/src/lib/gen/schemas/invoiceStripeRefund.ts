@@ -71,6 +71,10 @@ export interface InvoiceStripeRefund {
      * Why a refund of the invoice's own payment was flagged instead of
      * recorded. Set for `needs_review` and `dismissed`, and kept when
      * a dashboard user or an API key records one with a credit note.
+     * `credit_note_not_written`: Hardcount has not written this
+     * refund's credit note yet; record it as a credit note. On a top-up
+     * the note takes back the unused credit the refund paid for, which
+     * Hardcount could not work out when the refund arrived.
      */
   review_reason?: InvoiceStripeRefundReviewReason;
   /** The credit note that records the refund, when `outcome` is `credit_note`. */
