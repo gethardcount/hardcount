@@ -122,11 +122,6 @@ type DueBiller interface {
 	BillDue(ctx context.Context, tenantID, subscriptionID string, grace time.Duration) (invoicesGenerated int, err error)
 }
 
-// PlanReader (defined in handler.go) is also used at Create to read
-// BillingInterval for yearly-aware period anchoring (Bug #10).
-// Optional: nil-safe — the period helpers default to monthly math
-// when the reader isn't wired.
-
 type Service struct {
 	store Store
 	// clock is the server's clock: the router's clk, the one the engine
@@ -297,14 +292,6 @@ func (s *Service) tenantLocation(ctx context.Context, tenantID string) (*time.Lo
 	return loc, nil
 }
 
-// beginningOfDayIn is a package-local alias for domain.BeginningOfDayIn
-// so existing callers in this file don't need updates. Calendar-month
-// snapping flows through domain.NextBillingPeriodEnd (called via
-// firstPeriodFromStart), so no local beginningOfMonthIn helper is needed.
-func beginningOfDayIn(t time.Time, loc *time.Location) time.Time {
-	return domain.BeginningOfDayIn(t, loc)
-}
-
 // firstPeriodFromStart computes the first billing period of a sub created
 // at `at`.
 //
@@ -317,7 +304,7 @@ func beginningOfDayIn(t time.Time, loc *time.Location) time.Time {
 //
 // Monthly + anniversary: full month from `at`.
 func firstPeriodFromStart(at time.Time, billingTime domain.SubscriptionBillingTime, interval domain.BillingInterval, loc *time.Location) (time.Time, time.Time, int) {
-	ps := beginningOfDayIn(at, loc)
+	ps := domain.BeginningOfDayIn(at, loc)
 	anchorDay := domain.AnchorDayFor(ps, billingTime, interval, loc)
 	pe := domain.NextBillingPeriodEnd(ps, billingTime, interval, loc, anchorDay)
 	return ps, pe, anchorDay

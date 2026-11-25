@@ -1955,12 +1955,11 @@ func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID 
 		if err != nil {
 			return nil, fmt.Errorf("threshold watermarks of %s: %w", sub.ID, err)
 		}
-		sp.period, err = billing.PeriodPlans(sub, start, end, func() ([]domain.ItemInterval, error) {
-			return a.subs.ListItemIntervals(ctx, tenantID, sub.ID)
-		})
+		intervals, err := a.subs.ListItemIntervals(ctx, tenantID, sub.ID)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("billing intervals of %s: %w", sub.ID, err)
 		}
+		sp.period = billing.PeriodPlans(sub, start, end, intervals)
 		sp.coverage, err = a.subs.ListCustomerMeterCoverageEnds(ctx, tenantID, sub.CustomerID, sub.ID, start, end)
 		if err != nil {
 			return nil, fmt.Errorf("other subscriptions' meter coverage of %s: %w", sub.ID, err)

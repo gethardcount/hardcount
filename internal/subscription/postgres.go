@@ -2795,9 +2795,9 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 			ItemThresholds: []domain.SubscriptionItemThreshold{},
 		}
 	}
-	// ADR-069: derive the read-only cancel_effective_at at THE scan choke
-	// point so every read path (Get/List/scans/API) agrees on when the sub
-	// actually cancels.
+	// Derive the read-only cancel_effective_at at the one place every read
+	// scans a row, so Get, List, the scans and the API agree on when the
+	// subscription cancels.
 	sub.DeriveCancelEffectiveAt()
 	return nil
 }

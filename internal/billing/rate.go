@@ -191,13 +191,8 @@ type PeriodPlan struct {
 // every stretch during which an item was on a plan, an item removed in the
 // period and a plan swapped away from included, and the pin of each plan of
 // the period, and where the close began to bill the subscription. The
-// stretches come from the subscription's billing intervals, read through
-// intervals.
-func PeriodPlans(sub domain.Subscription, start, end time.Time, intervals func() ([]domain.ItemInterval, error)) (PeriodPlan, error) {
-	rows, err := intervals()
-	if err != nil {
-		return PeriodPlan{}, fmt.Errorf("billing intervals of %s: %w", sub.ID, err)
-	}
+// stretches come from rows, the subscription's billing intervals.
+func PeriodPlans(sub domain.Subscription, start, end time.Time, rows []domain.ItemInterval) PeriodPlan {
 	var billedFrom *time.Time
 	rowsByItem := map[string][]domain.ItemInterval{}
 	for _, iv := range rows {
@@ -214,7 +209,7 @@ func PeriodPlans(sub domain.Subscription, start, end time.Time, intervals func()
 	for planID, pin := range pins.byPlan {
 		byPlan[planID] = pin.at
 	}
-	return PeriodPlan{stretches: stretches, Pins: byPlan, BilledFrom: billedFrom}, nil
+	return PeriodPlan{stretches: stretches, Pins: byPlan, BilledFrom: billedFrom}
 }
 
 // Stretches is the period's plan stretches.

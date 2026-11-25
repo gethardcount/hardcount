@@ -186,28 +186,6 @@ func TestCreateSubscription_UnknownFieldRefused(t *testing.T) {
 	}
 }
 
-// TestCreateSubscription_TrialDaysRefused: a subscription is active from its
-// create and has no trial, so `trial_days` is a key the create body does not
-// define. It is a 422 naming it: a caller asking for a trial must not get a
-// subscription billed on day 1 with a 201.
-func TestCreateSubscription_TrialDaysRefused(t *testing.T) {
-	f := newStrictCreateFixture(t, "Strict Create Trial Days")
-
-	rr := f.post(f.body("trial-days", `"trial_days":14`), "")
-	if rr.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("trial_days: status %d, want 422; body %s", rr.Code, rr.Body.String())
-	}
-	if e := decodeEnvelope(t, rr); e.Error.Code != "validation_error" || e.Error.Param != "trial_days" {
-		t.Errorf("error: code %q param %q, want validation_error naming trial_days", e.Error.Code, e.Error.Param)
-	}
-	if n := f.subCount(); n != 0 {
-		t.Fatalf("a create with trial_days wrote %d subscription rows", n)
-	}
-	if f.biller.calls != 0 {
-		t.Fatalf("a create with trial_days ran the day-1 bill %d times", f.biller.calls)
-	}
-}
-
 // TestCreateSubscription_UsageCapRefused locks the cut of the block usage cap
 // (#973): usage_cap_units / overage_action are no longer fields, so a caller
 // still sending them gets a 422 naming the key instead of a subscription that

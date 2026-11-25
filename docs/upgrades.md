@@ -151,7 +151,8 @@ row.
 ### Migration 00249: trialing subscriptions are canceled
 
 The release with migration `00249_remove_trials` removes trials: a
-subscription is active, and bills, from its creation. The migration does
+subscription is active from its creation, and bills from the start of that
+day. The migration does
 three things:
 
 - It cancels every trialing subscription. A trial has billed nothing, so
@@ -189,8 +190,27 @@ trialing subscription that should go on billing:
    this page says.
 
 The upgrade cancels a trial you did not end. To bill the customer
-afterwards, create the subscription again: it is active and bills from its
-creation. Give it a new `code`: the canceled subscription keeps its own.
+afterwards, create the subscription again: it is active and bills from the
+start of the day it is created. Give it a new `code`: the canceled
+subscription keeps its own.
+
+What changes for a billing period that is open when you upgrade:
+
+- **A trial you ended before upgrading.** Its first period started at
+  midnight of the day the trial ended. Before the upgrade, usage on that day
+  up to the trial's end was free. After it, the period's invoice bills that
+  usage too. The same holds for a trial that converted by itself and is
+  still in its first period.
+- **A trial whose end has passed but that is still `trialing`.** Its
+  conversion had not run yet. The upgrade cancels it like any other trial and
+  does not bill its first period. Before you stop the old version, wait
+  until step 1's list shows no row with `trial_end_at` in the past, or end
+  those trials yourself.
+- **A price changed on the day a trial ended, before it ended.** For that
+  first period, usage is billed at the price from before the change.
+- **A canceled trial that you create again on the same day.** The new
+  subscription bills that day's usage from midnight, including what the
+  trial used. Create it the next day to leave that day free.
 
 Run one version at a time for this upgrade. A copy of the previous version
 that keeps running fails on every subscription it reads: the migration drops

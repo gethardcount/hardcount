@@ -282,7 +282,7 @@ rather than at zero.
 <details>
 <summary><strong>Edge cases</strong></summary>
 
-Three cases are handled so that nothing is counted twice or wrongly:
+Two cases are handled so that nothing is counted twice or wrongly:
 
 - **A spend threshold invoiced part of the period early.** A spend
   threshold is a limit that makes Hardcount invoice usage before the period

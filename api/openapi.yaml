@@ -1139,7 +1139,8 @@ components:
           description: |
             Where the subscription is in its life.
 
-            - `active`: billing, from the moment it is created. Usage and base fees billed in arrears are
+            - `active`: billing, from the start of the day it is created
+              (in the account's time zone). Usage and base fees billed in arrears are
               invoiced when each period ends; a base fee billed in advance
               when its period starts.
             - `canceled`: ended at `canceled_at`. It bills nothing more,
@@ -1166,8 +1167,9 @@ components:
           type: string
           format: date-time
           description: |
-            The moment the subscription was created, when its billing
-            begins. A subscription that an earlier release activated from a
+            The moment the subscription was created. Its first period, and
+            the usage it bills, start at the beginning of that day in the
+            account's time zone. A subscription that an earlier release activated from a
             draft has the moment of that activation instead.
         canceled_at:
           type: string

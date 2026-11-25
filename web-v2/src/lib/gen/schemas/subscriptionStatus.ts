@@ -15,7 +15,8 @@
 /**
  * Where the subscription is in its life.
  *
- * - `active`: billing, from the moment it is created. Usage and base fees billed in arrears are
+ * - `active`: billing, from the start of the day it is created
+ *   (in the account's time zone). Usage and base fees billed in arrears are
  *   invoiced when each period ends; a base fee billed in advance
  *   when its period starts.
  * - `canceled`: ended at `canceled_at`. It bills nothing more,

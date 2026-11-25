@@ -1,9 +1,11 @@
 # ADR-069: Trial-cancel semantics — free at trial end, guarded in SQL at all four activation writers
 
 **Date:** 2026-07-02
-**Status:** Accepted (shipped in P2b-b; designed by the second P2b build-time panel — 3 lenses, SHIP-WITH-FIXES — which amended the plan's sketch; see plan §4.2)
+**Status:** Deprecated (2026-11-25: subscription trials are removed, and this decision with them; see the amendment at the end)
 
 ## Summary
+
+**Not in force since 2026-11-25:** subscription trials are removed, so nothing below is in the code. It is kept as the record of what was decided.
 
 Cancelling a trial before it converts never bills, even when the job that activates trials runs late. Scheduling a cancel with `at_period_end` on a trialing subscription ends it at trial end with no invoice, and an immediate cancel of a trial that never activated is also free. An explicit `cancel_at` must be the trial end or on or after the end of the first paid period; a date in between returns 400. All four places that activate a trial check for a pending cancel inside their SQL `UPDATE`, so a cancel that commits during activation is never billed. Status: active.
 

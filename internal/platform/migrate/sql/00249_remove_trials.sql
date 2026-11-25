@@ -9,7 +9,10 @@
 --    upgrade runs with the previous version stopped.
 -- 3. Every trialing subscription is canceled, with the columns a cancel
 --    writes, and its scheduled cancel is cleared. Nothing was invoiced for a
---    trial and nothing is owed, so no event or audit row is written.
+--    trial, so no event or audit row is written. A trial whose end had
+--    passed without its conversion running is canceled like the rest, and
+--    its first period is not billed: docs/upgrades.md says to let those
+--    convert, or to end them, before the upgrade.
 -- 4. The new CHECK is added NOT VALID, and 00250 validates it.
 -- 5. The trial columns are dropped, and activated_at with them: a
 --    subscription is active from the instant it starts (started_at), and

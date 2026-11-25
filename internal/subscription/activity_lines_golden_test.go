@@ -587,6 +587,17 @@ func TestActivityLines_NoFallback(t *testing.T) {
 	}
 }
 
+// TestDescribeUpdate_TrialRowsOfEarlierReleasesStillRead: no release writes a
+// trial row any more, but a database upgraded from one that did still holds
+// them, and its history must name them.
+func TestDescribeUpdate_TrialRowsOfEarlierReleasesStillRead(t *testing.T) {
+	for action, title := range map[string]string{"trial_ended": "Trial ended", "trial_extended": "Trial extended"} {
+		if l := describeUpdate(map[string]any{"action": action}, lineLabels{}); l.Title != title {
+			t.Errorf("update row %q reads %q, want %q", action, l.Title, title)
+		}
+	}
+}
+
 // TestLegacyDetail pins how a line's meta reaches the older detail and
 // detail_timestamp fields the card reads today.
 func TestLegacyDetail(t *testing.T) {

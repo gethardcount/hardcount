@@ -223,6 +223,12 @@ func describeUpdate(meta map[string]any, lb lineLabels) activity.Line {
 		}
 	case domain.SubAuditPendingPlanChangeCanceled:
 		l.Kind, l.Title = kindPlanChangeCanceled, "Scheduled plan change canceled"
+	case "trial_ended":
+		// Written only by earlier releases, which had trials. Kept, with
+		// the next case, so those rows still read.
+		l.Kind, l.Title = kindChanged, "Trial ended"
+	case "trial_extended":
+		l.Kind, l.Title = kindChanged, "Trial extended"
 	default:
 		return changedFallback("update action", a)
 	}

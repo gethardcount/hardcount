@@ -51,7 +51,8 @@ export interface Subscription {
   /**
      * Where the subscription is in its life.
      *
-     * - `active`: billing, from the moment it is created. Usage and base fees billed in arrears are
+     * - `active`: billing, from the start of the day it is created
+     *   (in the account's time zone). Usage and base fees billed in arrears are
      *   invoiced when each period ends; a base fee billed in advance
      *   when its period starts.
      * - `canceled`: ended at `canceled_at`. It bills nothing more,
@@ -76,8 +77,9 @@ export interface Subscription {
      */
   billing_time: SubscriptionBillingTime;
   /**
-     * The moment the subscription was created, when its billing
-     * begins. A subscription that an earlier release activated from a
+     * The moment the subscription was created. Its first period, and
+     * the usage it bills, start at the beginning of that day in the
+     * account's time zone. A subscription that an earlier release activated from a
      * draft has the moment of that activation instead.
      */
   started_at?: string;
