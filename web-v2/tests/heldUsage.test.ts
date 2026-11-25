@@ -65,9 +65,8 @@ test('the release summary says what Hardcount found for rows no subscription bil
   const s = releaseSummary({ customer_id: 'c', released: 3, deduplicated: 1, still_held: 0, more_to_release: 0, in_open_period: 1, no_price: 0, not_on_plan: 0, pending_threshold_invoice: 0, outside_open_period: 2 })
   assert.equal(s.title, 'Released 4 usage rows')
   assert.match(s.description, /1 fall in a billing period not invoiced yet\./)
-  // These rows include trial time and time after a cancel inside the
-  // current period (review round 2, #1390).
-  assert.match(s.description, /2 fall in time no subscription bills \(before it starts, in a free trial, or after it ends\) or in time already invoiced\. Bill them with a one-off invoice if needed\./)
+  // These rows include time after a cancel inside the current period.
+  assert.match(s.description, /2 fall in time no subscription bills \(before it starts or after it ends\) or in time already invoiced\. Bill them with a one-off invoice if needed\./)
   assert.doesNotMatch(s.description, /no subscription invoice includes|no invoice charges/)
   assert.doesNotMatch(s.description, /current billing period|not built yet/)
   assert.match(s.description, /1 were already recorded/)

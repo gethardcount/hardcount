@@ -84,7 +84,6 @@ var requestBodies = map[string]requestBody{
 	"POST /v1/subscriptions":                                            {body: subscription.CreateInput{}},
 	"POST /v1/subscriptions/{id}/schedule-cancel":                       {body: subscription.ScheduleCancelInput{}},
 	"PUT /v1/subscriptions/{id}/pause-collection":                       {body: subscription.PauseCollectionInput{}},
-	"POST /v1/subscriptions/{id}/extend-trial":                          {body: subscription.ExtendTrialInput{}},
 	"PUT /v1/subscriptions/{id}/billing-thresholds":                     {body: subscription.BillingThresholdsInput{}},
 	"POST /v1/subscriptions/{id}/items":                                 {body: subscription.AddItemInput{}},
 	"PATCH /v1/subscriptions/{id}/items/{itemID}":                       {body: subscription.UpdateItemInput{}},

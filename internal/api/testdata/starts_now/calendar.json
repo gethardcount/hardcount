@@ -94,7 +94,6 @@
     }
   ],
   "subscription": {
-    "activated_at": "2026-04-10T14:30:00Z",
     "billing_time": "calendar",
     "cancel_at_period_end": false,
     "code": "starts-now",

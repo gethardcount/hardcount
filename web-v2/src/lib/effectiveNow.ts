@@ -82,14 +82,6 @@ export function timeUntil(iso: string, now: EffectiveNow): string {
   return `in ${days}d`
 }
 
-// daysUntil is the ceil-day count of elapsed time used by ExpiryBadge: >0
-// future, 0 today, <0 past. Matches the prior `Math.ceil((t - ref) / 86_400_000)`.
-// DueBadge counts calendar days instead (dates.ts calendarDaysUntil), because
-// it sits next to a printed due date.
-export function daysUntil(iso: string, now: EffectiveNow): number {
-  return Math.ceil((new Date(iso).getTime() - now) / 86_400_000)
-}
-
 // isOlderThan gates "since X ago" badges: true when iso predates `now` by more
 // than thresholdMs. NaN iso → false (don't gate on garbage).
 export function isOlderThan(iso: string, thresholdMs: number, now: EffectiveNow): boolean {

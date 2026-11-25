@@ -14,15 +14,16 @@ import (
 	"github.com/gethardcount/hardcount/internal/webhook"
 )
 
-// TestRemovedRoutes_AnswerNotFound pins the operations removed after v0.8.2
-// (simplification audit B2). Each one had a kept operation that does
-// the same job, so it was removed rather than kept as a second way in.
+// TestRemovedRoutes_AnswerNotFound pins removed operations. Most have a kept
+// operation that does the same job (simplification audit B2), so the router
+// serves only that one.
 //
 // Each case calls the removed operation with ids that exist, so a handler
 // that is still mounted would answer it, and checks that the router answers
 // 404 itself: code route_not_found, not a handler's not_found.
-// Each case also calls the kept replacement with the same ids and expects it
-// to answer, so a router that refuses everything cannot pass.
+// Each case also calls a kept operation with the same ids, the replacement
+// where there is one, and expects it to answer, so a router that refuses
+// everything cannot pass.
 func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
@@ -192,6 +193,19 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 			name:   "dunning policy set-default",
 			method: "POST", path: "/v1/dunning/policies/hc_dpol_x/set-default",
 			keptMethod: "GET", kept: "/v1/dunning/policy",
+		},
+		// A subscription bills from its creation, so nothing replaces the
+		// trial operations. The kept call reads the subscription they name.
+		{
+			name:   "subscription end trial",
+			method: "POST", path: "/v1/subscriptions/" + subID + "/end-trial",
+			keptMethod: "GET", kept: "/v1/subscriptions/" + subID,
+		},
+		{
+			name:   "subscription extend trial",
+			method: "POST", path: "/v1/subscriptions/" + subID + "/extend-trial",
+			body:       map[string]any{"trial_end": "2026-12-01T00:00:00Z"},
+			keptMethod: "GET", kept: "/v1/subscriptions/" + subID,
 		},
 	}
 	for _, tc := range cases {

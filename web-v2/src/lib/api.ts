@@ -19,6 +19,7 @@ import type { RecipeInstance } from './gen/schemas/recipeInstance'
 import type { ActivityLine } from './gen/schemas/activityLine'
 import type { CreditNoteStats } from './gen/schemas/creditNoteStats'
 import type { ProviderCostRate } from './gen/schemas/providerCostRate'
+import type { SubscriptionStatus } from './gen/schemas/subscriptionStatus'
 
 const API_BASE = '/v1'
 
@@ -225,7 +226,7 @@ export const api = {
   // Subscriptions
   listSubscriptions: (params?: string) =>
     apiRequest<{ data: Subscription[]; total: number }>('GET', `/subscriptions${params ? '?' + params : ''}`),
-  createSubscription: (data: { code: string; display_name: string; customer_id: string; items: { plan_id: string; quantity?: number }[]; billing_time?: string; trial_days?: number }) =>
+  createSubscription: (data: { code: string; display_name: string; customer_id: string; items: { plan_id: string; quantity?: number }[]; billing_time?: string }) =>
     apiRequest<Subscription>('POST', '/subscriptions', data),
 
   // Pricing
@@ -453,10 +454,6 @@ export const api = {
     apiRequest<Subscription>('PUT', `/subscriptions/${id}/billing-thresholds`, body),
   clearSubscriptionBillingThresholds: (id: string) =>
     apiRequest<Subscription>('DELETE', `/subscriptions/${id}/billing-thresholds`),
-  endSubscriptionTrial: (id: string) =>
-    apiRequest<Subscription>('POST', `/subscriptions/${id}/end-trial`),
-  extendSubscriptionTrial: (id: string, body: { trial_end: string }) =>
-    apiRequest<Subscription>('POST', `/subscriptions/${id}/extend-trial`, body),
   // Item CRUD. PATCH body is either `{quantity}` or `{new_plan_id, immediate}`,
   // never both — mirrors the backend's UpdateItemInput guard. Both mutations
   // take an Idempotency-Key (same contract as the credits calls): item
@@ -766,7 +763,7 @@ export interface Subscription {
   // Present on all list/get responses from FEAT-5 onward. Pre-FEAT-5 code
   // paths may omit it, so treat as optional and fall back gracefully.
   items?: SubscriptionItem[]
-  status: string
+  status: SubscriptionStatus
   billing_time: string
   current_billing_period_start?: string
   current_billing_period_end?: string
@@ -778,12 +775,10 @@ export interface Subscription {
   // labels can pass undefined to formatCivil* and fall back to the tenant TZ.
   current_billing_period_display?: string
   next_billing_at?: string
-  trial_start_at?: string
-  trial_end_at?: string
   cancel_at_period_end?: boolean
   // Derived, read-only: the backend's authoritative "when does it actually
-  // cancel" (trialing+flag → trial end; active+flag → period end; explicit
-  // cancel_at otherwise). Consumers must not re-derive from the flag.
+  // cancel" (cancel_at when set; otherwise, with the flag, the period end).
+  // Consumers must not re-derive from the flag.
   cancel_effective_at?: string
   cancel_at?: string
   canceled_at?: string
@@ -1028,7 +1023,7 @@ export interface TimelineEvent {
   // ADR-020.
   detail?: string
   // RFC3339 timestamp the end of detail refers to (the subscription
-  // timeline's "Trial now ends", "Resumes", "On" cases). When set, the
+  // timeline's "Resumes" and "On" cases). When set, the
   // renderer formats it in tenant TZ via formatDateTime so the sub-
   // line stays consistent with the main row timestamp instead of
   // mixing the operator's TZ with backend-baked UTC.

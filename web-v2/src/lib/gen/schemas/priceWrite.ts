@@ -22,9 +22,8 @@ import type { PriceWriteEndedOverridesItem } from './priceWriteEndedOverridesIte
  * `next_period`: each subscriber pays the new content from their next
  * billing period; the current period keeps the prices it started with.
  * A subscriber who first joins the plan in a period after the write
- * gets it from the join: a subscription that starts after it (after a
- * trial, from the trial's end), an immediate plan change onto the
- * plan, or an item added on it. Each is priced from that moment by the
+ * gets it from the join: a subscription that starts after it, an
+ * immediate plan change onto the plan, or an item added on it. Each is priced from that moment by the
  * plan's prices then, so a subscription that starts later on the day
  * of the write bills a price added that day and not one removed that
  * day. A subscription that was on the plan earlier in the period and

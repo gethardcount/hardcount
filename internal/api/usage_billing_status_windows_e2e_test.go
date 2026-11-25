@@ -9,41 +9,10 @@ import (
 )
 
 // billing_status follows the windows the close bills a meter's usage over,
-// not only the period: the trial end and another subscription's coverage end
-// move a window's start, a scheduled cancel ends it, and an instant of a
-// meter is billed by one plan only. And a price set is a flag's evidence only
-// once its pin has passed: a price saved before the pin is in force there.
-// Each test checks the answers against the invoices the close builds.
-
-// TestBillingStatus_TrialEndDayBeforeTheTrialEnd: the trial ends at 18:00 on
-// day D, and the first paid period starts at midnight of D. Usage before
-// 18:00 is trial usage, which no invoice bills: outside_subscription, sent
-// while trialing or after the expiry scan made the subscription active. An
-// event after the trial end is billed and carries no status. So is an event
-// of a meter the plan does not price: trial time, not not_on_plan.
-//
-// Mutation check: drop the trial end from classify → the seats event is
-// not_on_plan. (The calls events are also outside the close's windows,
-// which start at the trial end.)
-func TestBillingStatus_TrialEndDayBeforeTheTrialEnd(t *testing.T) {
-	r := newLagRigBare(t, "in_arrears", 0)
-	r.newMeter("seats", "sum")
-	r.newTrialEndingAt(dayAt(18, 0))
-
-	out := r.postLabelled("calls", "trial-0900", dayAt(9, 0), dayAt(9, 1), 40, nil)
-	wantStatus(t, "trial-end-day event sent while trialing", out, "outside_subscription")
-	out = r.postLabelled("seats", "trial-seats-0930", dayAt(9, 30), dayAt(9, 31), 2, nil)
-	wantStatus(t, "trial-end-day event of an unpriced meter", out, "outside_subscription")
-	r.expireTrials(dayAt(19, 45))
-	out = r.postLabelled("calls", "trial-1100", dayAt(11, 0), dayAt(19, 50), 3, nil)
-	wantStatus(t, "trial-end-day event sent after the expiry scan", out, "outside_subscription")
-	out = r.postLabelled("calls", "paid-1900", dayAt(19, 0), dayAt(19, 55), 7, nil)
-	wantStatus(t, "event after the trial end", out, "")
-
-	if got := r.closePeriod(uwDay).sum("usage"); got != 7 {
-		t.Errorf("first paid invoice usage = %dc, want 7c: only the event after the trial end", got)
-	}
-}
+// not only the period: another subscription's coverage end moves a window's
+// start, a scheduled cancel ends it, and an instant of a meter is billed by
+// one plan only. Each test checks the answers against the invoices the close
+// builds.
 
 // TestBillingStatus_AfterAScheduledMidPeriodCancel: a cancel is scheduled for
 // May 11, inside May. Until the run fires it the subscription is active, but
@@ -88,10 +57,10 @@ func TestBillingStatus_AfterAScheduledMidPeriodCancel(t *testing.T) {
 func TestBillingStatus_BeforeAnotherSubscriptionsCoverageEnd(t *testing.T) {
 	r := newLagRigBare(t, "in_advance", 0)
 	arrears := r.newPlan("plan_arrears", "in_arrears", 2000)
-	subA := r.newSub("sub-a", r.planA, dayAt(8, 0), nil)
+	subA := r.newSub("sub-a", r.planA, dayAt(8, 0))
 	r.ingest(dayAt(9, 0), 100)
 	r.cancelNow(dayAt(10, 0))
-	r.newSub("sub-b", arrears, dayAt(11, 0), nil)
+	r.newSub("sub-b", arrears, dayAt(11, 0))
 	r.ingest(dayAt(12, 0), 20)
 
 	out := r.postLabelled("calls", "late-0930", dayAt(9, 30), dayAt(12, 30), 13, nil)
@@ -176,7 +145,7 @@ func TestBillingStatus_HeldReleaseCountsTheUnbilledMetric(t *testing.T) {
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	tokens := r.newMeter("tokens", "sum")
 	plan := r.planPricing("plan_held_metric", map[string]any{"meter_id": tokens, "dimension_match": map[string]any{"model": "gpt-4o", "token_type": "input"}})
-	r.newSub("held", plan, lagP0, nil)
+	r.newSub("held", plan, lagP0)
 	n0 := unbilledCount(t, "no_price", string(domain.UsageOriginBackfill))
 	out := r.heldRelease(lagP0.AddDate(0, 0, 3), lagP0.AddDate(0, 0, 4))
 	if count(out, "no_price") != 1 {
@@ -184,98 +153,6 @@ func TestBillingStatus_HeldReleaseCountsTheUnbilledMetric(t *testing.T) {
 	}
 	if got := unbilledCount(t, "no_price", string(domain.UsageOriginBackfill)) - n0; got != 1 {
 		t.Errorf("%s{reason=no_price,origin=backfill} moved by %v, want 1", unbilledMetric, got)
-	}
-}
-
-// TestBillingStatus_TrialCanceledAtPeriodEnd: the trial ends at 18:00 on day
-// D and a cancel at period end is scheduled at 10:00. If nothing changes,
-// the trial scan cancels the subscription free at its trial end (ADR-069)
-// and no invoice bills its usage. But until that scan runs the cancel can
-// still be undone, and then the usage is billed
-// (TestBillingStatus_TrialCancelUndoneAfterTheTrialEnd). So an event after
-// the trial end, sent before the scan, is not checked and carries no
-// status, also one sent inside the future skew before the trial end
-// (review round 4 on #1390; round 2 had flagged both).
-//
-// Mutation check: answer the trial end of a trialing subscription with a
-// cancel at period end as its end → both events are outside_subscription.
-func TestBillingStatus_TrialCanceledAtPeriodEnd(t *testing.T) {
-	r := newLagRigBare(t, "in_arrears", 0)
-	r.newTrialEndingAt(dayAt(18, 0))
-	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", dayAt(10, 0),
-		map[string]any{"at_period_end": true}, http.StatusOK)
-
-	out := r.postLabelled("calls", "skew-1802", dayAt(18, 2), dayAt(17, 58), 3, nil)
-	wantStatus(t, "event after the trial end, sent inside the skew before it", out, "")
-	out = r.postLabelled("calls", "after-1830", dayAt(18, 30), dayAt(18, 40), 7, nil)
-	if s := r.sub(); s.Status != domain.SubscriptionTrialing {
-		t.Fatalf("status when the event arrived = %s, want trialing (the expiry scan has not run)", s.Status)
-	}
-	wantStatus(t, "event after the trial end, before the expiry scan", out, "")
-
-	r.clk.Set(dayAt(19, 0))
-	if _, errs := r.srv.SubscriptionSvc.ProcessExpiredTrials(uwCtx(dayAt(19, 0)), 100); len(errs) != 0 {
-		t.Fatalf("trial expiry: %v", errs)
-	}
-	if s := r.sub(); s.Status != domain.SubscriptionCanceled {
-		t.Fatalf("status after the expiry scan = %s, want canceled", s.Status)
-	}
-	out = r.postLabelled("calls", "after-1830-late", dayAt(18, 35), dayAt(19, 5), 1, nil)
-	wantStatus(t, "event after the trial end, sent after the scan canceled it", out, "outside_subscription")
-	r.run(dayAt(20, 0))
-	if got := usageBilled(r.invoices()); got != 0 {
-		r.logInvoices(r.invoices())
-		t.Errorf("usage billed = %dc, want 0c: the trial canceled free at its end", got)
-	}
-}
-
-// TestBillingStatus_TrialCancelUndoneAfterTheTrialEnd: the trial ends at
-// 18:00 on day D with a cancel at period end. An event at 18:30 arrives at
-// 18:40, before the trial scan. At 18:45 the operator undoes the cancel,
-// which the subscription still allows: it is trialing. The scan then
-// activates it at its trial end, and the first paid invoice bills the event.
-// The event is in time Hardcount does not check (after the trial end of a
-// subscription still trialing), so it carries no status (review round 4 on
-// #1390); the undo is a later change, and the invoice is the final answer.
-//
-// Mutation check: answer the trial end of a trialing subscription with a
-// cancel at period end as its end → the event is outside_subscription, and
-// then billed.
-func TestBillingStatus_TrialCancelUndoneAfterTheTrialEnd(t *testing.T) {
-	r := newLagRigBare(t, "in_arrears", 0)
-	r.newTrialEndingAt(dayAt(18, 0))
-	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", dayAt(10, 0),
-		map[string]any{"at_period_end": true}, http.StatusOK)
-
-	out := r.postLabelled("calls", "after-1830", dayAt(18, 30), dayAt(18, 40), 7, nil)
-	wantStatus(t, "event after the trial end, before the expiry scan", out, "")
-	r.must(http.MethodDelete, "/v1/subscriptions/"+r.subID+"/scheduled-cancel", dayAt(18, 45), nil, http.StatusOK)
-
-	r.expireTrials(dayAt(19, 0))
-	if got := r.closePeriod(uwDay).sum("usage"); got != 7 {
-		t.Errorf("first paid invoice usage = %dc, want 7c: the event after the trial end", got)
-	}
-}
-
-// TestBillingStatus_TrialExtendedAfterItsEnd: the trial ends at 18:00 on day
-// D. An event at 18:30 arrives at 18:40, before the trial scan. At 18:45 the
-// operator extends the trial to 22:00, which the subscription still allows:
-// it is trialing. The event is then trial usage, which no invoice bills. The
-// answer is the stated one: an event after a trial end that the scan has not
-// processed is not checked, so it carries no status (review round 4 on
-// #1390).
-func TestBillingStatus_TrialExtendedAfterItsEnd(t *testing.T) {
-	r := newLagRigBare(t, "in_arrears", 0)
-	r.newTrialEndingAt(dayAt(18, 0))
-
-	out := r.postLabelled("calls", "after-1830", dayAt(18, 30), dayAt(18, 40), 7, nil)
-	wantStatus(t, "event after the trial end, before the expiry scan", out, "")
-	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/extend-trial", dayAt(18, 45),
-		map[string]any{"trial_end": dayAt(22, 0).Format(time.RFC3339)}, http.StatusOK)
-
-	r.expireTrials(dayAt(22, 30))
-	if got := r.closePeriod(uwDay).sum("usage"); got != 0 {
-		t.Errorf("first paid invoice usage = %dc, want 0c: the event became trial usage", got)
 	}
 }
 
@@ -292,7 +169,7 @@ func TestBillingStatus_AnotherSubscriptionsGraceIsNotChecked(t *testing.T) {
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
 	subA := r.subID
 	r.newMeter("seats", "sum")
-	subB := r.newSub("sub-b", r.planC, lagP0.AddDate(0, 0, 9), nil)
+	subB := r.newSub("sub-b", r.planC, lagP0.AddDate(0, 0, 9))
 	r.run(lagB.Add(2 * time.Hour))
 	bEnd := *r.sub().CurrentBillingPeriodEnd
 
@@ -320,7 +197,7 @@ func TestBillingStatus_OutsideSubscription_CreatedLaterThatDay(t *testing.T) {
 	out := r.postLabelled("calls", "d-0900", dayAt(9, 0), dayAt(9, 5), 9, nil)
 	wantStatus(t, "event before the subscription is created", out, "outside_subscription")
 
-	r.newSub("later", r.planA, dayAt(15, 0), nil)
+	r.newSub("later", r.planA, dayAt(15, 0))
 	if s := r.sub(); s.CurrentBillingPeriodStart == nil || !s.CurrentBillingPeriodStart.Equal(uwDay) {
 		t.Fatalf("period start after the create = %v, want midnight of the day %v", s.CurrentBillingPeriodStart, uwDay)
 	}

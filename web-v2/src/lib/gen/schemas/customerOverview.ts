@@ -25,7 +25,7 @@ export interface CustomerOverview {
   customer_id: string;
   /**
      * The customer's subscriptions with status `active`, up to 50,
-     * with their items. Trialing subscriptions are not listed.
+     * with their items.
      */
   active_subscriptions: Subscription[];
   /** The 5 newest invoices. */

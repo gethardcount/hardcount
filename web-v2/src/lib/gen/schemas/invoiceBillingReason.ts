@@ -18,7 +18,7 @@
  * - `subscription_cycle`: the invoice for a subscription period that
  *   ended (a renewal).
  * - `subscription_create`: the first invoice when a subscription
- *   starts or its trial ends, for the fees its plans bill in advance.
+ *   starts, for the fees its plans bill in advance.
  *   A subscription billed only in arrears has none.
  * - `subscription_cancel`: the final invoice when a subscription is
  *   canceled at once in the middle of a period.

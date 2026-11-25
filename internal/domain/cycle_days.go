@@ -44,9 +44,10 @@ type CyclePeriod struct {
 //     divided by two numbers a day or a few apart, toward an under-refund: a
 //     calendar month Feb 1 to Mar 1 opened in Asia/Kolkata is charged over
 //     28 and, read in UTC, refunded over 31.
-//   - A full cycle opened on anchor 29 to 31 east of the current zone is
-//     prorated at a trial end: Jan 31 to Feb 28 opened in Asia/Kolkata on
-//     anchor 31, read in UTC, bills 28/29.
+//   - A full cycle opened on anchor 29 to 31 east of the current zone counts
+//     a day more than its own length: Jan 31 to Feb 28 opened in Asia/Kolkata
+//     on anchor 31, read in UTC, counts 29 where its own 28 days are a full
+//     cycle.
 func (p CyclePeriod) CycleDays() int {
 	// The zone is the tenant's, read by the caller; a period with none is the
 	// caller's bug, and In panics on it here, on every path.

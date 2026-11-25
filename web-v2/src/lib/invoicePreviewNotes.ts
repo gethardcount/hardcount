@@ -1,10 +1,7 @@
-// What the Next Invoice Preview card says beside (or instead of) its lines.
-//
-// The card showed only the lines and the subtotal, never the preview's
-// warnings. A trial set to cancel at its end previews no lines, so the card
-// was an empty table with no words; a trialing in-advance plan with meters
-// showed only the base fee, with nothing saying usage comes on a later
-// invoice. The server's warnings already say both in plain sentences.
+// What the Next Invoice Preview card says beside (or instead of) its lines:
+// the preview's warnings, which the server writes in plain sentences, such
+// as usage that matched no price. A preview with no lines is never an empty
+// table with no words.
 export const NO_INVOICE_EXPECTED = 'No invoice is expected for this period.'
 
 // invoicePreviewNotes: `empty` is true when the preview has no lines (the

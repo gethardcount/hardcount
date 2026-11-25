@@ -103,8 +103,8 @@ export function timeOfDay(iso: string, tz: string | undefined): string {
   })
 }
 
-// partTime is a time inside the meta line ("Trial now ends Nov 1, 2026,
-// 9:00 AM"). The card header names the zone, so the part does not.
+// partTime is a time inside the meta line ("Resumes Nov 1, 2026, 9:00 AM").
+// The card header names the zone, so the part does not.
 export function partTime(iso: string, tz: string | undefined): string {
   return new Date(iso).toLocaleString('en-US', {
     year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',

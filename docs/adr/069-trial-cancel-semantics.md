@@ -108,3 +108,12 @@ active+trial-flag state unreachable). Unit: scan routing (one `canceled`,
 zero `trial_ended`, zero bills), boundary matrix, EndTrial/ExtendTrial
 guards, engine no-bill regression (single-route mutation stays green —
 defense in depth — double-route mutation fails), write-off both timings.
+
+## Amendment 2026-11-25
+
+Subscription trials are removed, and this decision with them. A subscription
+is active, and bills, from its creation, so there is no trial to cancel free
+at its end. `cancel_at_period_end` and `cancel_at` mean only what they mean on
+an active subscription, `subscription.canceled` carries no `reason`, and
+cancelling now bills the part of the period used. Migration `00249` canceled
+every trialing subscription, with no invoice.

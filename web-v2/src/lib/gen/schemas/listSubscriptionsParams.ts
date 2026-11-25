@@ -43,7 +43,7 @@ status?: ListSubscriptionsStatus;
  */
 billing?: ListSubscriptionsBilling;
 /**
- * `paused` returns only active and trialing subscriptions whose
+ * `paused` returns only active subscriptions whose
  * `pause_collection` is in force, whether a dashboard user or an
  * API key set it, or dunning (Hardcount's automatic payment
  * retries) did. A timed pause ends at `resumes_at`, even while the
@@ -57,8 +57,8 @@ collection?: ListSubscriptionsCollection;
 search?: string;
 /**
  * The order of the list. `created_at` (the default),
- * `next_billing_at`, `status`, `display_name` (or `name`) or
- * `trial_end_at`. Any other value is a 422 with `param: sort`. Ties
+ * `next_billing_at`, `status` or `display_name` (or `name`). Any
+ * other value is a 422 with `param: sort`. Ties
  * are broken by `id` in the same direction.
  */
 sort?: ListSubscriptionsSort;

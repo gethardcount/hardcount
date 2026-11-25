@@ -30,7 +30,7 @@ func (s *bfSeed) record(id string, w subscription.BillingFailureWrite) bool {
 // Mutation seams, each turning one subtest red:
 //   - drop `<due> IS NOT DISTINCT FROM $2` → "due instant moved";
 //   - drop the observed-count CASE         → "two writers, same attempt";
-//   - drop the status IN                   → "canceled".
+//   - drop `s.status = 'active'`          → "canceled".
 func TestRecordBillingFailure_Guards(t *testing.T) {
 	s := newBFSeed(t, "rec")
 	due := s.now.Add(-48 * time.Hour)
@@ -130,22 +130,6 @@ func TestRecordBillingFailure_Guards(t *testing.T) {
 		}
 	})
 
-	t.Run("read as trialing, now active, same due instant", func(t *testing.T) {
-		trialEnd := s.now.Add(-72 * time.Hour)
-		id := s.sub(bfRow{id: "sub_rec_flip", status: "trialing", nextBilling: due, trialEnd: &trialEnd})
-		seen := s.get(id)
-		// The trial flip commits on its own; the failure comes after it.
-		if _, err := s.store.ActivateAfterTrial(s.ctx, s.tenantID, id, trialEnd); err != nil {
-			t.Fatalf("activate: %v", err)
-		}
-		if !s.record(id, write(*domain.DueInstant(seen), 0)) {
-			t.Fatal("a failure after the trial flip committed was not recorded on that attempt")
-		}
-		if sub := s.get(id); sub.Status != domain.SubscriptionActive || sub.BillingFailure == nil {
-			t.Fatalf("status=%s failure=%+v", sub.Status, sub.BillingFailure)
-		}
-	})
-
 	t.Run("no next attempt parks", func(t *testing.T) {
 		id := s.sub(bfRow{id: "sub_rec_park", nextBilling: due, failedFor: &due, count: 7, nextAttempt: &next})
 		w := write(due, 7)
@@ -195,7 +179,6 @@ func TestDueInstantWriters_VoidOrKeepTheRecord(t *testing.T) {
 	due := s.now.Add(-2 * day)       // a close that is overdue
 	future := s.now.Add(20 * day)    // a close that is not due yet
 	cancelDue := s.now.Add(-3 * day) // a mid-period cancel that is overdue
-	trialEnd := s.now.Add(-4 * day)
 	parked := func(r bfRow, key time.Time) bfRow {
 		r.failedFor, r.count = &key, 8
 		return r
@@ -217,14 +200,6 @@ func TestDueInstantWriters_VoidOrKeepTheRecord(t *testing.T) {
 		{"ClosePeriodTx advancing the period", parked(bfRow{nextBilling: due}, due), func(id string) error {
 			return closeTo(id, due, due.Add(30*day))
 		}, false},
-		{"ExtendTrial", parked(bfRow{status: "trialing", nextBilling: due, trialEnd: &trialEnd}, due), func(id string) error {
-			_, err := s.store.ExtendTrial(s.ctx, s.tenantID, id, s.now.Add(7*day), s.now.Add(7*day), s.now.Add(37*day), s.now.Add(37*day), 0)
-			return err
-		}, false},
-		{"EndTrialEarly", parked(bfRow{status: "trialing", nextBilling: due, trialEnd: &trialEnd}, due), func(id string) error {
-			_, err := s.store.EndTrialEarly(s.ctx, s.tenantID, id, s.now, s.now, s.now.Add(30*day), s.now.Add(30*day), 0)
-			return err
-		}, false},
 		{"ClearScheduledCancellation on a failing mid-period cancel", parked(bfRow{nextBilling: future, cancelAt: &cancelDue}, cancelDue), func(id string) error {
 			_, err := s.store.ClearScheduledCancellation(s.ctx, s.tenantID, id)
 			return err
@@ -233,7 +208,7 @@ func TestDueInstantWriters_VoidOrKeepTheRecord(t *testing.T) {
 			_, err := s.store.ScheduleCancellation(s.ctx, s.tenantID, id, &future, false, domain.SubscriptionActive)
 			return err
 		}, false},
-		// --- void: the row leaves active/trialing; the columns stay as evidence ---
+		// --- void: the row leaves active; the columns stay as evidence ---
 		{"CancelAtomicWithBill", parked(bfRow{nextBilling: due}, due), func(id string) error {
 			_, err := subscriptiontest.Cancel(s.ctx, s.store, s.tenantID, id)
 			return err
@@ -247,10 +222,6 @@ func TestDueInstantWriters_VoidOrKeepTheRecord(t *testing.T) {
 		}, false},
 		{"FireScheduledCancellationWithBill", parked(bfRow{nextBilling: future, cancelAt: &cancelDue}, cancelDue), func(id string) error {
 			_, err := s.store.FireScheduledCancellationWithBill(s.ctx, s.tenantID, id, subscription.SnapshotOf(s.get(id)), cancelDue, nil)
-			return err
-		}, false},
-		{"CancelAtTrialEnd", parked(bfRow{status: "trialing", nextBilling: due, trialEnd: &trialEnd, cancelAt: &trialEnd}, due), func(id string) error {
-			_, err := s.store.CancelAtTrialEnd(s.ctx, s.tenantID, id, trialEnd)
 			return err
 		}, false},
 
@@ -279,10 +250,6 @@ func TestDueInstantWriters_VoidOrKeepTheRecord(t *testing.T) {
 		}, true},
 		{"AddItem", parked(bfRow{nextBilling: due}, due), func(id string) error {
 			_, err := s.store.AddItem(s.ctx, s.tenantID, domain.SubscriptionItem{SubscriptionID: id, PlanID: plan.ID, Quantity: 1})
-			return err
-		}, true},
-		{"ActivateAfterTrial (status only)", parked(bfRow{status: "trialing", nextBilling: due, trialEnd: &trialEnd}, due), func(id string) error {
-			_, err := s.store.ActivateAfterTrial(s.ctx, s.tenantID, id, trialEnd)
 			return err
 		}, true},
 		{"ScheduleCancellation at period end on a failing close", parked(bfRow{nextBilling: due}, due), func(id string) error {
@@ -427,8 +394,8 @@ func TestList_BillingFailingFilter(t *testing.T) {
 		}
 	}
 	// It composes with the exact-match status filter.
-	if _, total, err := s.store.List(s.ctx, subscription.ListFilter{TenantID: s.tenantID, Billing: subscription.ListBillingFailing, Status: "trialing"}); err != nil || total != 0 {
-		t.Fatalf("billing=failing&status=trialing: total=%d err=%v, want 0", total, err)
+	if _, total, err := s.store.List(s.ctx, subscription.ListFilter{TenantID: s.tenantID, Billing: subscription.ListBillingFailing, Status: "canceled"}); err != nil || total != 0 {
+		t.Fatalf("billing=failing&status=canceled: total=%d err=%v, want 0", total, err)
 	}
 	// Control: no filter returns all five.
 	if _, total, err := s.store.List(s.ctx, subscription.ListFilter{TenantID: s.tenantID}); err != nil || total != 5 {

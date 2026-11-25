@@ -57,8 +57,7 @@ func TestListCustomerMeterCoverageEnds(t *testing.T) {
 	cancel(self.ID, 5)
 
 	// Counted: an item removal (day 3), an immediate cancel (day 7), a plan
-	// change away from the meter (day 9), a never-activated trial canceled
-	// (day 11).
+	// change away from the meter (day 9).
 	rm := ivActiveSub(t, store, ctx, tenantID, cust, "cov-rm", items(planM, planNone))
 	if err := store.RemoveItem(at(3), tenantID, rm.Items[0].ID); err != nil {
 		t.Fatalf("remove: %v", err)
@@ -69,18 +68,6 @@ func TestListCustomerMeterCoverageEnds(t *testing.T) {
 	if _, err := store.ApplyItemPlanImmediately(ctx, tenantID, swap.Items[0].ID, planN, day(9)); err != nil {
 		t.Fatalf("plan change: %v", err)
 	}
-	trialEnd := ivPE.AddDate(0, 0, 3)
-	trial, err := store.Create(ctx, tenantID, domain.Subscription{
-		Code: "cov-trial", DisplayName: "cov-trial", CustomerID: cust,
-		Status: domain.SubscriptionTrialing, BillingTime: domain.BillingTimeAnniversary,
-		TrialStartAt: &ivPS, TrialEndAt: &trialEnd, StartedAt: &ivPS,
-		CurrentBillingPeriodStart: &trialEnd, CurrentBillingPeriodEnd: bivPE(trialEnd), NextBillingAt: bivPE(trialEnd),
-		Items: items(planM),
-	})
-	if err != nil {
-		t.Fatalf("create trial: %v", err)
-	}
-	cancel(trial.ID, 11)
 
 	// Not counted: a still-open interval; a subscription canceled before it
 	// ever started (it covered nothing); another customer's cancel; a cancel past
@@ -89,22 +76,16 @@ func TestListCustomerMeterCoverageEnds(t *testing.T) {
 	// day 8).
 	ivActiveSub(t, store, ctx, tenantID, cust, "cov-open", items(planO))
 	// A subscription canceled before it ever started (a draft in earlier
-	// releases, or canceled by migration 00235) has no start and no period.
-	// No writer makes one, so it is set by hand.
-	draft, err := store.Create(ctx, tenantID, domain.Subscription{
-		Code: "cov-draft", DisplayName: "cov-draft", CustomerID: cust,
-		Status: domain.SubscriptionTrialing, BillingTime: domain.BillingTimeCalendar,
-		TrialStartAt: &ivPS, TrialEndAt: &trialEnd, StartedAt: &ivPS,
-		CurrentBillingPeriodStart: &trialEnd, CurrentBillingPeriodEnd: bivPE(trialEnd), NextBillingAt: bivPE(trialEnd),
-		Items: items(planM),
-	})
-	if err != nil {
-		t.Fatalf("create the row to cancel before it started: %v", err)
-	}
+	// releases, or canceled by migration 00235) has no start, no period and
+	// no billing interval. No writer makes one, so it is set by hand.
+	draft := ivActiveSub(t, store, ctx, tenantID, cust, "cov-draft", items(planM))
 	if err := store.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM billing_intervals WHERE subscription_id = $1`, draft.ID); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx, `
 			UPDATE subscriptions
-			SET status = 'canceled', canceled_at = $1, started_at = NULL, trial_start_at = NULL, trial_end_at = NULL,
+			SET status = 'canceled', canceled_at = $1, started_at = NULL,
 			    current_billing_period_start = NULL, current_billing_period_end = NULL, next_billing_at = NULL
 			WHERE id = $2`, day(12), draft.ID)
 		return err
@@ -143,13 +124,13 @@ func TestListCustomerMeterCoverageEnds(t *testing.T) {
 		sort.Strings(out)
 		return out
 	}
-	want := []string{"mtr_m@May 10", "mtr_m@May 12", "mtr_m@May 4", "mtr_m@May 8"}
+	want := []string{"mtr_m@May 10", "mtr_m@May 4", "mtr_m@May 8"}
 	if got := read(ivPS, ivPE); !equalStrings(got, want) {
 		t.Errorf("coverage ends in [%v, %v) = %v, want %v", ivPS, ivPE, got, want)
 	}
 	// The window is open at both ends: an end exactly at `from` is not in it.
-	if got := read(day(7), ivPE); !equalStrings(got, []string{"mtr_m@May 10", "mtr_m@May 12"}) {
-		t.Errorf("coverage ends from the day-7 cancel's own instant = %v, want the day-9 and day-11 ends only", got)
+	if got := read(day(7), ivPE); !equalStrings(got, []string{"mtr_m@May 10"}) {
+		t.Errorf("coverage ends from the day-7 cancel's own instant = %v, want the day-9 end only", got)
 	}
 }
 

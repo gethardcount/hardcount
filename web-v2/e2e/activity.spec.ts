@@ -10,12 +10,10 @@ import { createCustomer, invoicesFor, retriesOn, type Customer, type Plan, type 
 // Shots go to activity-shots/<surface>-<width>.png. CI uploads them as the
 // activity-shots artifact (README.md says how to fetch them).
 
-const DAY = 86_400_000
 const WIDTHS = [1440, 390]
 const SHOTS_DIR = path.join(import.meta.dirname, '..', 'activity-shots')
 
 interface Person extends Customer { email: string }
-interface Sub extends Subscription { trial_end_at?: string }
 interface Invoice { id: string; invoice_number: string }
 interface DunningRun { state: string }
 
@@ -32,12 +30,8 @@ async function asPerson<T>(page: Page, method: string, apiPath: string, body?: u
   return (text ? JSON.parse(text) : undefined) as T
 }
 
-function iso(ms: number): string {
-  return new Date(ms).toISOString().replace(/\.\d+Z$/, 'Z')
-}
-
 // A monthly USD plan whose fee is billed at the start of each period, so a
-// subscription is invoiced as soon as it starts, or as soon as its trial ends.
+// subscription is invoiced as soon as it starts.
 function planBilledInAdvance(): Promise<Plan> {
   const id = uniq()
   return api<Plan>('POST', '/plans', {
@@ -50,15 +44,14 @@ function planBilledInAdvance(): Promise<Plan> {
   })
 }
 
-function subscribe(customerId: string, planId: string, extra: Record<string, unknown> = {}): Promise<Sub> {
+function subscribe(customerId: string, planId: string): Promise<Subscription> {
   const id = uniq()
-  return api<Sub>('POST', '/subscriptions', {
+  return api<Subscription>('POST', '/subscriptions', {
     code: `e2e-act-${id}`,
     display_name: `E2E Activity ${id}`,
     customer_id: customerId,
     items: [{ plan_id: planId, quantity: 1 }],
     billing_time: 'anniversary',
-    ...extra,
   })
 }
 
@@ -173,13 +166,11 @@ test('activity shots: an unpaid first invoice through emails, a credit note and 
   await shootCard(page, sent, 'sent-emails')
 })
 
-test('activity shots: a trial extended, spend thresholds, a cancellation undone, collection paused and resumed (subscription)', async ({ page }) => {
+test('activity shots: spend thresholds, a cancellation undone, collection paused and resumed (subscription)', async ({ page }) => {
   const plan = await planBilledInAdvance()
   const customer = (await createCustomer()) as Person
-  const sub = await subscribe(customer.id, plan.id, { trial_days: 14 })
-  const trialEnd = Date.parse(sub.trial_end_at!) + 7 * DAY
+  const sub = await subscribe(customer.id, plan.id)
 
-  await asPerson(page, 'POST', `/subscriptions/${sub.id}/extend-trial`, { trial_end: iso(trialEnd) })
   await api('PUT', `/subscriptions/${sub.id}/billing-thresholds`, { amount_gte: 50000 })
   await asPerson(page, 'POST', `/subscriptions/${sub.id}/schedule-cancel`, { at_period_end: true })
   await asPerson(page, 'DELETE', `/subscriptions/${sub.id}/scheduled-cancel`)

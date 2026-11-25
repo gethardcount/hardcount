@@ -144,41 +144,6 @@ func TestIntervals_CreateActiveOpensPerItem(t *testing.T) {
 	}
 }
 
-func TestIntervals_TrialOpensNothing_ConvertOpensAtStampedPeriod(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "IV Trial")
-	cust := ivCustomer(t, db, ctx, tenantID, "cus_iv_trial")
-	planA := ivPlan(t, db, ctx, tenantID, "iv-trial-a", 1000)
-	store := NewPostgresStore(db)
-
-	trialStart := ivPS
-	trialEnd := ivPS.AddDate(0, 0, 14)
-	postPE := trialEnd.AddDate(0, 1, 0)
-	sub, err := store.Create(ctx, tenantID, domain.Subscription{
-		Code: "sub-iv-trial", DisplayName: "t", CustomerID: cust,
-		Status: domain.SubscriptionTrialing, BillingTime: domain.BillingTimeAnniversary,
-		TrialStartAt: &trialStart, TrialEndAt: &trialEnd, StartedAt: &trialStart,
-		CurrentBillingPeriodStart: &trialEnd, CurrentBillingPeriodEnd: &postPE, NextBillingAt: &postPE,
-		Items: []domain.SubscriptionItem{{PlanID: planA.ID, Quantity: 1}},
-	})
-	if err != nil {
-		t.Fatalf("create trialing: %v", err)
-	}
-	itemID := sub.Items[0].ID
-	if got := readItemIntervals(t, db, ctx, tenantID, itemID); len(got) != 0 {
-		t.Fatalf("trialing create must open nothing, got %d", len(got))
-	}
-
-	if _, err := store.ActivateAfterTrial(ctx, tenantID, sub.ID, trialEnd); err != nil {
-		t.Fatalf("activate after trial: %v", err)
-	}
-	ivs := readItemIntervals(t, db, ctx, tenantID, itemID)
-	if len(ivs) != 1 || !ivs[0].startsAt.Equal(trialEnd) || ivs[0].source != "trial_convert" {
-		t.Fatalf("trial conversion must open at the stamped post-trial period start: %+v", ivs)
-	}
-}
-
 func TestIntervals_AddItemDayGradeClamp(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)

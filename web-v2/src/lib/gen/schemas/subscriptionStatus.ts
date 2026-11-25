@@ -15,12 +15,7 @@
 /**
  * Where the subscription is in its life.
  *
- * - `trialing`: in a free trial until `trial_end_at`. Usage in
- *   the trial is not billed. When the trial ends, Hardcount makes
- *   the subscription `active` and its first paid period starts.
- *   If a cancel is scheduled for the trial end, it becomes
- *   `canceled` instead, with no charge.
- * - `active`: billing. Usage and base fees billed in arrears are
+ * - `active`: billing, from the moment it is created. Usage and base fees billed in arrears are
  *   invoiced when each period ends; a base fee billed in advance
  *   when its period starts.
  * - `canceled`: ended at `canceled_at`. It bills nothing more,
@@ -34,7 +29,6 @@ export type SubscriptionStatus = typeof SubscriptionStatus[keyof typeof Subscrip
 
 
 export const SubscriptionStatus = {
-  trialing: 'trialing',
   active: 'active',
   canceled: 'canceled',
 } as const;

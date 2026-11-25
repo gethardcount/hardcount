@@ -6,16 +6,9 @@ export interface ToastCopy {
   description?: string
 }
 
-// After "Schedule cancellation". The server's cancel_effective_at is the
-// answer (ADR-069): on a trialing subscription the flag cancels at trial
-// end, and the customer is never charged.
-export function scheduleCancelToast(
-  updated: { status?: string } | undefined,
-  effectiveLabel: string | undefined,
-): ToastCopy {
-  if (updated?.status === 'trialing' && effectiveLabel) {
-    return { title: 'Cancellation scheduled', description: `Cancels at trial end, ${effectiveLabel}. The customer won't be charged.` }
-  }
+// After "Schedule cancellation". effectiveLabel is the server's
+// cancel_effective_at, formatted: the end of the current period.
+export function scheduleCancelToast(effectiveLabel: string | undefined): ToastCopy {
   if (effectiveLabel) {
     return { title: 'Cancellation scheduled', description: `Cancels at the end of the current period, ${effectiveLabel}.` }
   }
@@ -44,15 +37,10 @@ export const PAUSE_DIALOG_SENTENCE =
 
 // The "Immediately" choice and the typed confirm after it. Cancelling now
 // bills a final invoice for time and usage so far (billing.Engine
-// priceFinalOnCancel) and credits unused prepaid time; a trial
-// that never turned paid bills nothing (trials are free, ADR-069). The old
-// "Stops billing right now" hid that final charge.
-export function cancelImmediatelyText(status: string): string {
-  if (status === 'trialing') {
-    return "Ends the trial and the subscription now. Nothing is billed. This can't be undone."
-  }
-  return "Ends the subscription now. Time and usage so far go on a final invoice; unused prepaid time is credited. This can't be undone."
-}
+// priceFinalOnCancel) and credits unused prepaid time, so the words name
+// that final charge.
+export const CANCEL_IMMEDIATELY_SENTENCE =
+  "Ends the subscription now. Time and usage so far go on a final invoice; unused prepaid time is credited. This can't be undone."
 
 // After an item's plan change with no proration to report: a scheduled
 // change (pending_plan_id set) waits for the next period. A change now to a
@@ -122,22 +110,4 @@ export function removeItemText(timing: BillTiming): string {
   if (timing === 'in_advance') return 'Removed mid-period, the unused part of the period is credited.'
   if (timing === 'in_arrears') return 'Removed mid-period, it is billed at the period end for the days it was on.'
   return ''
-}
-
-// startBillingLines says what End trial now does: the first paid period
-// starts now (internal/subscription EndTrial bills day 1 in the same
-// transaction, ADR-056). A plan billed in advance is invoiced at once and
-// charged to the card on file; one billed in arrears is invoiced at the
-// period's end. inAdvance and hasCard are undefined while the page has not
-// loaded them, and the line that needs them is left out rather than guessed.
-export function startBillingLines(o: { inAdvance?: boolean; hasCard?: boolean }): string[] {
-  const lines = ['The trial ends now, and the first paid billing period starts.']
-  if (o.inAdvance === true) {
-    if (o.hasCard === true) lines.push('It is invoiced now and charged to the customer\'s card at once.')
-    else if (o.hasCard === false) lines.push('It is invoiced now. The customer has no card on file, so nothing is charged until they add one.')
-    else lines.push('It is invoiced now.')
-  } else if (o.inAdvance === false) {
-    lines.push('It is invoiced at the end of the period, with any usage.')
-  }
-  return lines
 }

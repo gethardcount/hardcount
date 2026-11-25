@@ -575,7 +575,7 @@ Hardcount customer yet, both of its events are held:
 | `after_close` | Of `accepted`, events whose time was already invoiced, such as a replay after the invoice was built. Bill them with a one-off invoice if they should be charged. A resent event counted in `deduplicated` is never counted here. |
 | `no_price` | Of `accepted`, events no price of the customer's plan takes: usually a model the plan has no price for. To bill later calls, add a price for the model; it applies from the next billing period. |
 | `not_on_plan` | Of `accepted`, events in a billing period not invoiced yet, of a meter the customer's plan has no price for. |
-| `outside_subscription` | Of `accepted`, events whose time no subscription of the customer bills. For example, there is none yet, or the call was before the day it started, in a free trial, or after it ended or its scheduled cancel. |
+| `outside_subscription` | Of `accepted`, events whose time no subscription of the customer bills. For example, there is none yet, or the call was before the day it started, or after it ended or its scheduled cancel. |
 | `errors` | Rows Hardcount refused and did not keep: a call with no `user` or no `id`, or a record that is not valid. |
 
 The four counts `after_close`, `no_price`, `not_on_plan` and
@@ -583,9 +583,8 @@ The four counts `after_close`, `no_price`, `not_on_plan` and
 They are not a promise:
 
 - An event in none of them is not promised to be billed.
-- Hardcount does not check two stretches of time: after a period's end,
-  while its invoice is not built yet; and after a trial's end, before
-  Hardcount has ended the trial.
+- Hardcount does not check the time after a period's end, while its
+  invoice is not built yet.
 - A later change, such as a new subscription or an added price, can change
   the outcome either way.
 - One delivery reads the customer's subscriptions once. A subscription
@@ -661,16 +660,14 @@ way as the counts above:
 
 - `in_open_period`: in a billing period not invoiced yet, and a price of
   the plan that bills that time takes it. Events Hardcount does not check
-  count here too: after the end of the subscription's current period, and
-  after a trial's end before Hardcount ends the trial.
+  count here too: after the end of the subscription's current period.
 - `no_price`: in a billing period not invoiced yet, and that plan prices
   the meter but no price takes the event (a model with no price).
 - `not_on_plan`: in a billing period not invoiced yet, on a meter the plan
   does not price. Add the meter to the plan if later usage should be
   charged.
-- `outside_open_period`: before the day the subscription started, in a
-  free trial, after it ended, or in a period whose invoice is already
-  built. For a customer created after the calls, this is the usual case.
+- `outside_open_period`: before the day the subscription started, after it
+  ended, or in a period whose invoice is already built. For a customer created after the calls, this is the usual case.
   Bill it with a one-off invoice if it should be charged.
 - `pending_threshold_invoice`: inside the current period, but before the
   end of a spend-threshold invoice of that period that is not paid yet.

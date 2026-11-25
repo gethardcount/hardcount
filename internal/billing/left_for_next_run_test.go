@@ -208,14 +208,14 @@ func TestCollect_RefusedClaimSaysWhatIsLeft(t *testing.T) {
 
 // An invoice collected right after it is made (FinalizeOnCreateInvoice) is
 // collected at the instant bound on its context, and its credits are applied
-// then: a trial's end for its first invoice, or dunning's escalation for its
-// final invoice.
+// then: a create request's instant for its first invoice, or dunning's
+// escalation for its final invoice.
 func TestFinalizeOnCreateInvoice_CollectsAtTheCallersInstant(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		at   time.Time
 	}{
-		{"an invoice collected under a context bound to a trial's end", time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC)},
+		{"an invoice collected under a context bound to a create request", time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC)},
 		{"an invoice collected under a context bound to an escalation", time.Date(2026, 5, 10, 6, 0, 0, 0, time.UTC)},
 	} {
 		t.Run(c.name, func(t *testing.T) {

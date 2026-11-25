@@ -106,6 +106,6 @@ test('a day header carries the account-calendar day even when the UTC day is the
 test('the zone header names the zone of the time parts too', async () => {
   setZone('America/New_York')
   // A row in Feb 2027 (EST) whose meta line names a time in April (EDT).
-  const t = text(await render([{ ...finalized, occurred_at: '2027-02-01T15:00:00Z', detail: [[{ text: 'Trial now ends ' }, { time: '2027-04-01T15:00:00Z' }]] }]))
+  const t = text(await render([{ ...finalized, occurred_at: '2027-02-01T15:00:00Z', detail: [[{ text: 'Resumes ' }, { time: '2027-04-01T15:00:00Z' }]] }]))
   assert.match(t, /Times in EST \/ EDT/)
 })

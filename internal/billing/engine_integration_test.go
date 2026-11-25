@@ -912,14 +912,6 @@ func TestBillOnCancel_UnpaidPrebillRelief_E2E(t *testing.T) {
 	})
 }
 
-func (a *subStoreAdapter) ActivateAfterTrialWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error) {
-	return a.store.ActivateAfterTrialWithBill(ctx, tenantID, id, at, billFn)
-}
-
-func (a *subStoreAdapter) CancelAtTrialEnd(ctx context.Context, tenantID, id string, observedTrialEnd time.Time) (domain.Subscription, error) {
-	return a.store.CancelAtTrialEnd(ctx, tenantID, id, observedTrialEnd)
-}
-
 // cancelRelief runs the cancel relief the way Cancel does: written on a real
 // tenant tx, committed, then its post-commit legs.
 func cancelRelief(t *testing.T, ctx context.Context, db *postgres.DB, tenantID string, e *billing.Engine, sub domain.Subscription) domain.Relief {

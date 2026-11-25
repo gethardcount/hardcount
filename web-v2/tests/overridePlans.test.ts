@@ -8,7 +8,7 @@ import { customerPlanIds, customerPlansFirst } from '../src/lib/overridePlans.ts
 test('the plans of subscriptions that can still bill, with scheduled moves', () => {
   const ids = customerPlanIds([
     { status: 'active', items: [{ plan_id: 'pln_a' }, { plan_id: 'pln_b', pending_plan_id: 'pln_c' }] },
-    { status: 'trialing', items: [{ plan_id: 'pln_d' }] },
+    { status: 'active', items: [{ plan_id: 'pln_d' }] },
     { status: 'canceled', items: [{ plan_id: 'pln_x' }] },
     { status: 'active' },
   ])

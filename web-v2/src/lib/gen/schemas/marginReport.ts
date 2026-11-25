@@ -31,8 +31,8 @@ export interface MarginReport {
   /**
      * Total rated usage revenue in the window, in the minor unit of
      * `revenue_currency` (cents for USD). It is an estimate at each
-     * subscription's current prices. Only active and trialing
-     * subscriptions are counted.
+     * subscription's current prices. Only active subscriptions are
+     * counted.
      */
   revenue_cents: number;
   /**

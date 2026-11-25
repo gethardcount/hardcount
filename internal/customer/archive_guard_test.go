@@ -41,11 +41,11 @@ func newArchiveTestSvc(t *testing.T, checker SubscriptionChecker) (*Service, dom
 }
 
 // TestArchive_BlockedWhileSubsBill locks ADR-067: archive is a 409-BLOCK
-// while ANY subscription still bills (active / trialing / active-with-
-// scheduled-cancel), never an auto-cancel. Mutation seam: remove the checker
-// call in Update and every blocked case silently archives.
+// while ANY subscription still bills (active / active-with-scheduled-cancel),
+// never an auto-cancel. Mutation seam: remove the checker call in Update and
+// every blocked case silently archives.
 func TestArchive_BlockedWhileSubsBill(t *testing.T) {
-	for _, status := range []string{"active", "trialing", "active(scheduled-cancel)"} {
+	for _, status := range []string{"active", "active(scheduled-cancel)"} {
 		t.Run(status, func(t *testing.T) {
 			svc, cust := newArchiveTestSvc(t, &fakeSubChecker{subs: []NonTerminalSubscription{{ID: "sub_1", Status: status}}})
 			_, err := svc.Update(context.Background(), "t1", cust.ID, UpdateInput{Status: "archived"})

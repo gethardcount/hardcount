@@ -512,8 +512,7 @@ func (h *exportsHandler) exportSubscriptions(w http.ResponseWriter, r *http.Requ
 	if err := cw.Write([]string{
 		"id", "code", "display_name", "customer_id",
 		"status", "billing_time",
-		"trial_start_at", "trial_end_at",
-		"started_at", "activated_at", "canceled_at",
+		"started_at", "canceled_at",
 		"current_billing_period_start", "current_billing_period_end",
 		"next_billing_at",
 		"plan_ids", // pipe-delimited list of plans on the sub
@@ -530,9 +529,7 @@ func (h *exportsHandler) exportSubscriptions(w http.ResponseWriter, r *http.Requ
 		if err := cw.Write([]string{
 			sub.ID, csvSafe(sub.Code), csvSafe(sub.DisplayName), sub.CustomerID,
 			string(sub.Status), string(sub.BillingTime),
-			timePtrCSV(sub.TrialStartAt), timePtrCSV(sub.TrialEndAt),
-			timePtrCSV(sub.StartedAt), timePtrCSV(sub.ActivatedAt),
-			timePtrCSV(sub.CanceledAt),
+			timePtrCSV(sub.StartedAt), timePtrCSV(sub.CanceledAt),
 			timePtrCSV(sub.CurrentBillingPeriodStart),
 			timePtrCSV(sub.CurrentBillingPeriodEnd),
 			timePtrCSV(sub.NextBillingAt),

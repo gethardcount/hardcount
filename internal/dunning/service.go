@@ -135,8 +135,8 @@ type ChargeHoldClaimer interface {
 // It exists because ADR-112 made exhaustion fire TWO actions that can fail
 // independently, and a failed exhaustion is re-attempted 24h later. Both
 // subscription movers refuse when the sub is already terminal — the
-// cancel's compare-and-set (CancelAtomicWithBill) matches only a trialing
-// or active row, and SetPauseCollection rejects canceled outright — so
+// cancel's compare-and-set (CancelAtomicWithBill) matches only an active
+// row, and SetPauseCollection rejects canceled outright — so
 // without a skip-if-done read, a
 // re-attempt after a partial failure would fail forever on the half that
 // already succeeded and never reach the half that did not. Same reason the

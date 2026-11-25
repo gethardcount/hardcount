@@ -562,6 +562,44 @@ func TestThresholdScan_NoConfigSkipped(t *testing.T) {
 	}
 }
 
+// TestThresholdScan_CanceledSubscriptionNotScanned covers the candidate
+// query's status filter: a canceled subscription is not in
+// ListWithThresholds, so usage past its threshold never fires a threshold
+// invoice. The scan checks no status of its own, so the filter is the guard.
+//
+// Mutation: let ListWithThresholds list canceled rows → the scan fires a
+// threshold invoice on the canceled subscription.
+func TestThresholdScan_CanceledSubscriptionNotScanned(t *testing.T) {
+	f := newThresholdFixture(t, "Threshold Canceled Sub")
+	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
+	defer cancel()
+
+	// 1000c of usage against a 500c threshold, then an immediate cancel.
+	f.ingestUsage(t, ctx, 100, 10)
+	if _, err := f.subSvc.SetBillingThresholds(ctx, f.tenantID, f.subID, subscription.BillingThresholdsInput{
+		AmountGTE: 500,
+	}); err != nil {
+		t.Fatalf("set threshold: %v", err)
+	}
+	f.subSvc.SetBiller(f.engine)
+	if canceled, _, err := f.subSvc.Cancel(ctx, f.tenantID, f.subID); err != nil || canceled.Status != domain.SubscriptionCanceled {
+		t.Fatalf("cancel: status %s, err %v; want canceled", canceled.Status, err)
+	}
+
+	fired, errs := f.engine.ScanThresholds(ctx, 50)
+	if len(errs) > 0 {
+		t.Fatalf("scan errors: %v", errs)
+	}
+	if fired != 0 {
+		t.Fatalf("fired count: got %d, want 0 (the subscription is canceled)", fired)
+	}
+	for _, inv := range f.listInvoices(t, ctx) {
+		if inv.BillingReason == domain.BillingReasonThreshold {
+			t.Errorf("threshold invoice %s on a canceled subscription", inv.InvoiceNumber)
+		}
+	}
+}
+
 // TestThresholdScan_ResetCycleFalse confirms the cycle stays put after a
 // fire (the only behavior since reset_billing_cycle was removed). The next
 // natural cycle invoice picks up where the original cycle ends — not where
@@ -790,7 +828,7 @@ func TestThresholdScan_DrainsWholeFleet_RealStore(t *testing.T) {
 	}
 	rows, err := tx.QueryContext(ctx, `
 		EXPLAIN SELECT s.id FROM subscriptions s
-		WHERE s.status IN ('active', 'trialing')
+		WHERE s.status = 'active'
 		  AND s.livemode = FALSE
 		  AND s.id > ''
 		  AND (s.billing_threshold_amount_gte IS NOT NULL

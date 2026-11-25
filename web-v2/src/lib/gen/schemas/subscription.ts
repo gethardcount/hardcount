@@ -29,8 +29,8 @@ import type { SubscriptionStatus } from './subscriptionStatus';
  * Usage, and a base fee billed in arrears, are invoiced when a period
  * ends. A base fee billed in advance is invoiced when its period
  * starts: the first one in the same transaction that creates the
- * subscription or ends its trial, each later one on the invoice that
- * closes the period before.
+ * subscription, each later one on the invoice that closes the period
+ * before.
  */
 export interface Subscription {
   /** The subscription's ID (`hc_sub_…`). */
@@ -51,12 +51,7 @@ export interface Subscription {
   /**
      * Where the subscription is in its life.
      *
-     * - `trialing`: in a free trial until `trial_end_at`. Usage in
-     *   the trial is not billed. When the trial ends, Hardcount makes
-     *   the subscription `active` and its first paid period starts.
-     *   If a cancel is scheduled for the trial end, it becomes
-     *   `canceled` instead, with no charge.
-     * - `active`: billing. Usage and base fees billed in arrears are
+     * - `active`: billing, from the moment it is created. Usage and base fees billed in arrears are
      *   invoiced when each period ends; a base fee billed in advance
      *   when its period starts.
      * - `canceled`: ended at `canceled_at`. It bills nothing more,
@@ -69,8 +64,7 @@ export interface Subscription {
   status: SubscriptionStatus;
   /**
      * How monthly periods line up. The first period starts on the day
-     * the subscription starts to bill: the day it is created, or,
-     * with a trial, the day the trial ends.
+     * the subscription is created.
      * `calendar`: every period ends on the 1st of a month, in your
      * account's billing time zone, so the first period runs from that
      * day to the next 1st. `anniversary`: each period starts on the
@@ -81,28 +75,12 @@ export interface Subscription {
      * the change.
      */
   billing_time: SubscriptionBillingTime;
-  /** When the trial started. Absent when the subscription had no trial. */
-  trial_start_at?: string;
   /**
-     * When the trial ends, or ended. The first paid period starts at
-     * the beginning of that day in your account's billing time zone.
-     * Ending the trial early (`POST /v1/subscriptions/{id}/end-trial`)
-     * sets it to that moment. Absent when the subscription had no
-     * trial.
-     */
-  trial_end_at?: string;
-  /**
-     * The moment the subscription was created. Its trial begins
-     * then, or, without a trial, its billing. A subscription that an
-     * earlier release activated from a draft has the moment of that
-     * activation instead.
+     * The moment the subscription was created, when its billing
+     * begins. A subscription that an earlier release activated from a
+     * draft has the moment of that activation instead.
      */
   started_at?: string;
-  /**
-     * When the subscription became `active`: at creation without a
-     * trial, or when its trial ended. Absent while it trials.
-     */
-  activated_at?: string;
   /** When the subscription was canceled. Absent until then. */
   canceled_at?: string;
   /**
@@ -113,33 +91,29 @@ export interface Subscription {
   cancel_at?: string;
   /**
      * True when the subscription cancels at the end of the current
-     * period, or, while it trials, at the end of the trial. False
-     * after the subscription is canceled.
+     * period. False after the subscription is canceled.
      */
   cancel_at_period_end: boolean;
   /**
      * When a scheduled cancel takes effect: `cancel_at` when set;
-     * otherwise, with `cancel_at_period_end`, `trial_end_at` while
-     * the subscription trials and `current_billing_period_end`
-     * after. Absent when no cancel is scheduled.
+     * otherwise, with `cancel_at_period_end`,
+     * `current_billing_period_end`. Absent when no cancel is
+     * scheduled.
      */
   cancel_effective_at?: string;
   pause_collection?: SubscriptionPauseCollection;
   billing_thresholds?: SubscriptionBillingThresholds;
   /**
      * Start of the current billing period, normally the beginning of
-     * a day in your account's billing time zone. While the
-     * subscription trials, it is the start of the first paid period:
-     * the beginning of the day the trial ends, not `trial_end_at`
-     * itself. After an immediate change to a plan with another billing
+     * a day in your account's billing time zone. After an immediate
+     * change to a plan with another billing
      * interval, a period can start or end at the instant of the
      * change. On a canceled subscription it keeps its last value.
      */
   current_billing_period_start?: string;
   /**
      * End of the current period (exclusive): the start of the next
-     * one. While the subscription trials, the end of the first paid
-     * period. On a canceled subscription it keeps its last value.
+     * one. On a canceled subscription it keeps its last value.
      */
   current_billing_period_end?: string;
   /**

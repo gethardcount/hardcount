@@ -19,8 +19,8 @@ import type { CustomerUsageTotalsItem } from './customerUsageTotalsItem';
 
 /**
  * A customer's usage and its cost over a window, priced the way the
- * invoice prices it: `GET /v1/customers/{id}/usage`. Only active and
- * trialing subscriptions are counted. Quantities are decimal strings.
+ * invoice prices it: `GET /v1/customers/{id}/usage`. Only active
+ * subscriptions are counted. Quantities are decimal strings.
  */
 export interface CustomerUsage {
   /** The customer the usage belongs to. */
@@ -35,7 +35,7 @@ export interface CustomerUsage {
      */
   period: CustomerUsagePeriod;
   /**
-     * One entry per item of each active or trialing subscription. A
+     * One entry per item of each active subscription. A
      * subscription with several plans appears once per plan, with the
      * same `id`.
      */

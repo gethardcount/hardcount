@@ -38,16 +38,12 @@ func (r *lagRig) setTaxInclusive(inclusive bool) {
 	}
 }
 
-// createSub creates the rig's subscription on plan A at `at`, with extra
-// fields merged into the body.
-func (r *lagRig) createSub(at time.Time, extra map[string]any) {
+// createSub creates the rig's subscription on plan A at `at`.
+func (r *lagRig) createSub(at time.Time) {
 	r.t.Helper()
 	body := map[string]any{
 		"code": "tax-flag-sub", "display_name": "Tax Flag Sub", "customer_id": r.custID,
 		"items": []map[string]any{{"plan_id": r.planA, "quantity": 1}},
-	}
-	for k, v := range extra {
-		body[k] = v
 	}
 	sub := r.must(http.MethodPost, "/v1/subscriptions", at, body, http.StatusCreated)
 	r.subID = sub["id"].(string)
@@ -91,7 +87,7 @@ func (r *lagRig) taxInclusiveOf(invoiceID string) bool {
 }
 
 // taxFlagWriters is every writer of an invoice whose lines are priced, one per
-// billing reason (subscription_create has three). Each writes its invoice and
+// billing reason (subscription_create has two). Each writes its invoice and
 // returns its id.
 var taxFlagWriters = []struct {
 	name   string
@@ -99,34 +95,29 @@ var taxFlagWriters = []struct {
 	write  func(r *lagRig) string
 }{
 	{"cycle close", "in_advance", func(r *lagRig) string {
-		r.createSub(lagP0, nil)
+		r.createSub(lagP0)
 		r.run(lagB)
 		return r.onlyInvoice(domain.BillingReasonSubscriptionCycle)
 	}},
 	{"first invoice", "in_advance", func(r *lagRig) string {
-		r.createSub(lagP0, nil)
-		return r.onlyInvoice(domain.BillingReasonSubscriptionCreate)
-	}},
-	{"trial end", "in_advance", func(r *lagRig) string {
-		r.createSub(lagP0, map[string]any{"trial_days": 14})
-		r.expireTrials(lagP0.AddDate(0, 0, 15))
+		r.createSub(lagP0)
 		return r.onlyInvoice(domain.BillingReasonSubscriptionCreate)
 	}},
 	{"swap to a yearly plan", "in_advance", func(r *lagRig) string {
-		r.createSub(lagP0, nil)
+		r.createSub(lagP0)
 		before := r.invoices()
 		r.must(http.MethodPatch, "/v1/subscriptions/"+r.subID+"/items/"+r.itemA, lagP0.AddDate(0, 0, 14),
 			map[string]any{"new_plan_id": r.planY, "immediate": true}, http.StatusOK)
 		return r.invoiceWrittenSince(before).id
 	}},
 	{"cancel", "in_arrears", func(r *lagRig) string {
-		r.createSub(lagP0, nil)
+		r.createSub(lagP0)
 		r.ingest(lagP0.AddDate(0, 0, 5), 100)
 		r.cancelNow(lagP0.AddDate(0, 0, 10))
 		return r.onlyInvoice(domain.BillingReasonSubscriptionCancel)
 	}},
 	{"threshold", "in_advance", func(r *lagRig) string {
-		r.createSub(lagP0, nil)
+		r.createSub(lagP0)
 		r.ingest(time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC), 100)
 		fireAt := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
 		r.must(http.MethodPut, "/v1/subscriptions/"+r.subID+"/billing-thresholds", fireAt.Add(-time.Hour),
@@ -137,7 +128,7 @@ var taxFlagWriters = []struct {
 		return r.onlyInvoice(domain.BillingReasonThreshold)
 	}},
 	{"item change", "in_advance", func(r *lagRig) string {
-		r.createSub(lagP0, nil)
+		r.createSub(lagP0)
 		r.payFirstInvoice(lagP0.Add(time.Hour))
 		r.must(http.MethodPatch, "/v1/subscriptions/"+r.subID+"/items/"+r.itemA, lagP0.AddDate(0, 0, 14),
 			map[string]any{"quantity": 2}, http.StatusOK)
@@ -199,7 +190,7 @@ func (p refusingProvider) Calculate(ctx context.Context, req tax.Request) (*tax.
 func TestInvoiceTaxInclusive_RecordedWhenTheTaxIsLeftPending(t *testing.T) {
 	r := newTaxFlagRig(t, "in_advance", true)
 	r.srv.BillingEngine.SetTaxProviderResolver(&refusingTaxResolver{inner: tax.NewResolver(nil), refuse: true})
-	r.createSub(lagP0, nil)
+	r.createSub(lagP0)
 	id := r.onlyInvoice(domain.BillingReasonSubscriptionCreate)
 	if got := r.invoice(id)["tax_status"]; got != string(domain.InvoiceTaxPending) {
 		t.Fatalf("tax_status = %v, want pending: the provider refused", got)
@@ -236,7 +227,7 @@ func TestInvoiceTaxInclusive_WrittenOnceAndNeverUpdated(t *testing.T) {
 		r := newTaxFlagRig(t, "in_advance", true)
 		resolver := &refusingTaxResolver{inner: tax.NewResolver(nil), refuse: true}
 		r.srv.BillingEngine.SetTaxProviderResolver(resolver)
-		r.createSub(lagP0, nil)
+		r.createSub(lagP0)
 		id := r.onlyInvoice(domain.BillingReasonSubscriptionCreate)
 		r.setTaxInclusive(false)
 		resolver.refuse = false

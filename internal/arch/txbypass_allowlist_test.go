@@ -73,7 +73,6 @@ var txBypassUsers = map[string]string{
 	"internal/payment/token.go TokenService.Cleanup":                                         "background",
 	"internal/subscription/postgres.go PostgresStore.GetDueBilling":                          "background",
 	"internal/subscription/postgres.go PostgresStore.ListExpiredPauseCollections":            "background",
-	"internal/subscription/postgres.go PostgresStore.ListExpiredTrials":                      "background",
 	"internal/subscription/postgres.go PostgresStore.ListWithThresholds":                     "background",
 	"internal/webhook/outbox.go OutboxStore.ProcessBatch":                                    "background",
 	"internal/webhook/outbox.go OutboxStore.attemptRow":                                      "background",

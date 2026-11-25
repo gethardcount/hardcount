@@ -175,10 +175,10 @@ export function isBeforeCivilToday(yyyymmdd: string, nowMs: number, timezone: st
 // calendarDaysUntil counts CALENDAR days from the anchor's civil date to the
 // civil date of `iso`, both read in tenant TZ: 0 = same day, 1 = tomorrow,
 // -1 = yesterday. Use it where the UI prints a date beside the count, as the
-// invoice due badge does next to "Due Oct 16". An elapsed-time count
-// (daysUntil, ceil over 24h) disagreed with that date because due_at carries
-// the issue hour: due Oct 16 20:16 read "Due in 1d" on the morning of Oct 16
-// and "Due today" until 20:16 the next day. NaN for an unparseable iso.
+// invoice due badge does next to "Due Oct 16". An elapsed-time count (ceil
+// over 24h) would disagree with that date because due_at carries the issue
+// hour: due Oct 16 20:16 would read "Due in 1d" on the morning of Oct 16 and
+// "Due today" until 20:16 the next day. NaN for an unparseable iso.
 export function calendarDaysUntil(iso: string, now: EffectiveNow, timezone?: string): number {
   const t = new Date(iso)
   if (Number.isNaN(t.getTime())) return NaN
@@ -221,8 +221,8 @@ export function civilDateFrom(nowMs: number, days: number, timezone: string): st
 // TS inclusive-day logic can't drift.
 //
 // What remains for these helpers: auxiliary period/date labels the backend does
-// not author — a trial range, a single inclusive period-end date, a line-item's
-// "Covers …" span. Anchor them in the OWNING entity's billing timezone:
+// not author — a single inclusive period-end date, a line-item's "Covers …"
+// span. Anchor them in the OWNING entity's billing timezone:
 //   - INVOICE-anchored dates → pass `invoice.billing_timezone` (the org TZ
 //     denormalized at issue, ADR-077 — stays fixed if the org later re-zones).
 //   - SUBSCRIPTION-anchored dates → pass undefined; a sub bills in the one org

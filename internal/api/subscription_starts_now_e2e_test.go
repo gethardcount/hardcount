@@ -21,8 +21,8 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// A subscription starts when it is created: it is active now, or its trial
-// starts now. No field of the create chooses another start.
+// A subscription starts when it is created: it is active from that instant,
+// and no field of the create chooses another start.
 //
 // A create that names no start must produce the bytes of the golden files
 // under testdata/starts_now exactly: the subscription and its day-1
@@ -217,10 +217,11 @@ func checkStartsNowGolden(t *testing.T, name string, got []byte) {
 	}
 }
 
-// TestCreateSubscription_StartsNowByDefault: a create with no start flag and no
-// trial is active at once and bills its day-1 in_advance invoice, byte-equal
-// to what start_now=true produced before the change. Calendar billing makes a
-// stub to May 1 (prorated base); anniversary billing makes a full month.
+// TestCreateSubscription_StartsNowByDefault: a create is active at once. Its
+// request opens one billing interval per item from the first period's start
+// and bills the day-1 in_advance invoice; the subscription and the invoice are
+// byte-equal to the golden files. Calendar billing makes a stub to May 1
+// (prorated base); anniversary billing makes a full month.
 func TestCreateSubscription_StartsNowByDefault(t *testing.T) {
 	for _, billingTime := range []string{"calendar", "anniversary"} {
 		t.Run(billingTime, func(t *testing.T) {
@@ -233,62 +234,25 @@ func TestCreateSubscription_StartsNowByDefault(t *testing.T) {
 			if subs, invs := r.customerCounts(); subs != 1 || invs != 1 {
 				t.Fatalf("after one create: %d subscriptions and %d invoices, want 1 and 1", subs, invs)
 			}
+			periodStart := flowStr(out, "current_billing_period_start")
+			all := flowCount(t, r.db, `SELECT count(*) FROM billing_intervals WHERE subscription_id = $1`, subID)
+			open := flowCount(t, r.db, `SELECT count(*) FROM billing_intervals bi
+				JOIN subscription_items si ON si.id = bi.subscription_item_id
+				WHERE bi.subscription_id = $1 AND bi.starts_at = $2 AND bi.ends_at IS NULL
+				AND bi.plan_id = si.plan_id AND bi.quantity = si.quantity`, subID, periodStart)
+			if all != 2 || open != 2 {
+				t.Fatalf("billing intervals: %d, of which %d open from %s on the item's plan and quantity; want one per item (2) and both open from the period start", all, open, periodStart)
+			}
 			checkStartsNowGolden(t, billingTime, r.startsNowSnapshot(subID))
 		})
 	}
 }
 
-// TestCreateSubscription_TrialStartsNow: a create with trial_days starts the
-// trial at once, as before: trialing from now, the first paid period anchored
-// on the trial end (ADR-037), and no invoice until the trial ends.
-func TestCreateSubscription_TrialStartsNow(t *testing.T) {
-	r := newLagRigBare(t, "in_advance", 0)
-	out := r.must(http.MethodPost, "/v1/subscriptions", startsNowAt, r.startsNowBody("trial-now", "calendar", map[string]any{"trial_days": 14}), http.StatusCreated)
-	r.subID = flowStr(out, "id")
-	s := r.sub()
-	trialEnd := startsNowAt.AddDate(0, 0, 14)
-	if s.Status != domain.SubscriptionTrialing {
-		t.Fatalf("status = %s, want trialing", s.Status)
-	}
-	if s.TrialStartAt == nil || !s.TrialStartAt.Equal(startsNowAt) || s.TrialEndAt == nil || !s.TrialEndAt.Equal(trialEnd) {
-		t.Fatalf("trial = [%v, %v), want [%v, %v)", s.TrialStartAt, s.TrialEndAt, startsNowAt, trialEnd)
-	}
-	if s.StartedAt == nil || !s.StartedAt.Equal(startsNowAt) || s.ActivatedAt != nil {
-		t.Fatalf("started_at %v activated_at %v, want started now and not yet activated", s.StartedAt, s.ActivatedAt)
-	}
-	ps := time.Date(2026, 4, 24, 0, 0, 0, 0, time.UTC)
-	pe := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	if s.CurrentBillingPeriodStart == nil || !s.CurrentBillingPeriodStart.Equal(ps) || s.CurrentBillingPeriodEnd == nil || !s.CurrentBillingPeriodEnd.Equal(pe) {
-		t.Fatalf("first paid period = [%v, %v), want [%v, %v)", s.CurrentBillingPeriodStart, s.CurrentBillingPeriodEnd, ps, pe)
-	}
-	if _, invs := r.customerCounts(); invs != 0 {
-		t.Fatalf("a trial create wrote %d invoices, want 0", invs)
-	}
-}
-
-// TestCreateSubscription_ZeroTrialDaysIsNoTrial: trial_days 0 is accepted and
-// means no trial. A form whose trial field defaults to 0 sends it, so the spec
-// says "trial_days above 0" makes a trialing subscription: with 0 the create
-// is active and bills day 1.
-func TestCreateSubscription_ZeroTrialDaysIsNoTrial(t *testing.T) {
-	r := newLagRigBare(t, "in_advance", 0)
-	out := r.must(http.MethodPost, "/v1/subscriptions", startsNowAt, r.startsNowBody("zero-trial", "calendar", map[string]any{"trial_days": 0}), http.StatusCreated)
-	if got := flowStr(out, "status"); got != string(domain.SubscriptionActive) {
-		t.Fatalf("status = %q, want active", got)
-	}
-	r.subID = flowStr(out, "id")
-	if s := r.sub(); s.TrialStartAt != nil || s.TrialEndAt != nil {
-		t.Fatalf("trial = [%v, %v), want none", s.TrialStartAt, s.TrialEndAt)
-	}
-	if subs, invs := r.customerCounts(); subs != 1 || invs != 1 {
-		t.Fatalf("%d subscriptions and %d invoices, want 1 and 1 (day-1 bill)", subs, invs)
-	}
-}
-
 // TestCreateSubscription_RefusesAmbiguousStart: a create has no field that
-// chooses another start, so a body that sends one (start_now, status) is a
-// 422 naming it, and nothing is written. Ignoring "status": "draft" would
-// start and bill a subscription the caller asked to hold back.
+// chooses another start, so a body that sends one (start_now, status,
+// trial_days) is a 422 naming it, and nothing is written. Ignoring "status":
+// "draft" would start and bill a subscription the caller asked to hold back;
+// ignoring trial_days would bill at once one the caller asked to start later.
 func TestCreateSubscription_RefusesAmbiguousStart(t *testing.T) {
 	r := newLagRigBare(t, "in_advance", 0)
 	cases := []struct {
@@ -298,6 +262,7 @@ func TestCreateSubscription_RefusesAmbiguousStart(t *testing.T) {
 		{"start_now true", "start_now", map[string]any{"start_now": true}},
 		{"start_now false", "start_now", map[string]any{"start_now": false}},
 		{"status draft", "status", map[string]any{"status": "draft"}},
+		{"trial_days", "trial_days", map[string]any{"trial_days": 14}},
 	}
 	for i, tc := range cases {
 		code, raw := r.do(http.MethodPost, "/v1/subscriptions", startsNowAt, r.startsNowBody(fmt.Sprintf("refused-%d", i), "calendar", tc.extra))

@@ -366,9 +366,11 @@ func seedActiveSubscription(t *testing.T, db *postgres.DB, tenantID, custExt, pl
 // SELECT round-trips the same values, (2) ClearScheduledCancellation wipes
 // both fields, (3) FireScheduledCancellation flips status to canceled,
 // stamps canceled_at to the supplied `at`, nulls out
-// next_billing_at, and clears the schedule fields, and (4) firing on an
-// already-canceled sub returns ErrInvalidState — the engine relies on this
-// to detect concurrent immediate-cancel races and treat them as no-ops.
+// next_billing_at, and clears the schedule fields, (4) firing on an
+// already-canceled sub returns ErrWatermarkMoved — the engine's retry then
+// re-reads and finds the sub terminated, and (5) a schedule validated on
+// the active row and written after the cancel is refused by the status
+// compare-and-set, and writes nothing.
 func TestScheduleAndFireCancellation_Roundtrip(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -437,6 +439,20 @@ func TestScheduleAndFireCancellation_Roundtrip(t *testing.T) {
 	_, err = fireScheduledCancellation(ctx, store, tenantID, subID, fireAt)
 	if !errors.Is(err, subscription.ErrWatermarkMoved) {
 		t.Fatalf("firing on an already-canceled sub: got %v, want ErrWatermarkMoved", err)
+	}
+
+	// 5. A schedule the caller validated while the row was active lands
+	// after the cancel: the status no longer matches, so it is refused and
+	// the canceled row keeps no schedule.
+	if _, err := store.ScheduleCancellation(ctx, tenantID, subID, &cancelAt, false, domain.SubscriptionActive); !errors.Is(err, errs.ErrInvalidState) {
+		t.Fatalf("schedule on a row canceled since it was read: got %v, want ErrInvalidState", err)
+	}
+	after, err := store.Get(ctx, tenantID, subID)
+	if err != nil {
+		t.Fatalf("get after the refused schedule: %v", err)
+	}
+	if after.Status != domain.SubscriptionCanceled || after.CancelAt != nil || after.CancelAtPeriodEnd {
+		t.Errorf("after the refused schedule: status %s cancel_at %v at_period_end %v, want canceled with no schedule", after.Status, after.CancelAt, after.CancelAtPeriodEnd)
 	}
 }
 

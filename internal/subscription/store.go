@@ -162,14 +162,14 @@ type Store interface {
 	// revenue leak — no final-on-cancel reconciler exists). billFn may be nil.
 	//
 	// Its first statement is a compare-and-set (ADR-115, ADR-139): the UPDATE
-	// matches only a trialing or active row that still holds
+	// matches only an active row that still holds
 	// `expected` (status, period start, next_billing_at), the row the caller
 	// planned the bill from. 0 rows → ErrNotFound (row gone), InvalidState
 	// "already terminated" (canceled), or ErrWatermarkMoved (the period or
 	// status moved; nothing was written and the caller plans again). It then
 	// seals every open billing interval at `at` before billFn runs.
 	//
-	// Every cancel writer (this, CancelAtTrialEnd and both
+	// Every cancel writer (this and both
 	// FireScheduledCancellation methods) stores and returns the canceled row
 	// with no cancel schedule and no pending plan change on its items
 	// (retireLiveOnlyStateTx). The collection pause stays: it still holds the
@@ -189,16 +189,9 @@ type Store interface {
 	// the service layer rejects "schedule both at once" so callers don't
 	// pass them together in practice.
 	// ScheduleCancellation writes the cancel schedule, CAS-ing on the status
-	// the caller validated the intent under (ADR-069 — the flag's meaning is
-	// status-polymorphic; landing it on a just-activated sub would silently
-	// invert the operator's promise). Status-changed conflicts return
+	// the caller validated the intent under. Status-changed conflicts return
 	// InvalidState (409).
 	ScheduleCancellation(ctx context.Context, tenantID, id string, cancelAt *time.Time, cancelAtPeriodEnd bool, observedStatus domain.SubscriptionStatus) (domain.Subscription, error)
-	// CancelAtTrialEnd is the dedicated free trialing→canceled transition
-	// (ADR-069): NO invoice, canceled_at = trial_end_at, schedule cleared.
-	// CAS on observed trial_end + a due schedule; conflicts return
-	// domain.ErrTrialCancelConflict (caller re-reads and routes).
-	CancelAtTrialEnd(ctx context.Context, tenantID, id string, observedTrialEnd time.Time) (domain.Subscription, error)
 
 	// ClearScheduledCancellation clears cancel_at and cancel_at_period_end.
 	// A row with neither set returns ErrNoScheduledCancel and is not written.
@@ -218,8 +211,8 @@ type Store interface {
 	// The hard pause (Service.Pause/PauseAtomic) was removed in PR-8 /
 	// migration 0090, and no status 'paused' remains: pause_collection keeps
 	// the cycle running but neuters the financial side; the row's status
-	// field is not touched. Permitted on any status but canceled (trialing,
-	// active). Service layer enforces behavior whitelist.
+	// field is not touched. Permitted on any status but canceled. Service
+	// layer enforces behavior whitelist.
 	//
 	// A lifted pause still on the row (its resumes_at has passed) is
 	// resumed first, in the same transaction, with its own trigger: this
@@ -268,47 +261,12 @@ type Store interface {
 	// subscription.
 	ClearBillingThresholds(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 
-	// ListExpiredTrials returns, for the cron tick, subs whose
-	// `trial_end_at` has elapsed but whose status is still 'trialing'.
-	// Scoped per livemode partition by the caller's ctx (the scheduler fans
-	// out per mode).
-	ListExpiredTrials(ctx context.Context, before time.Time, livemode bool, limit int) ([]domain.Subscription, error)
-
 	// ListExpiredPauseCollections returns subs whose
 	// pause_collection_resumes_at has passed. The scheduler tick walks
 	// these and clears the pause + writes audit (triggered_by=schedule).
 	// Skips a sub that still owes a close before resumes_at (see
 	// resumeNotWaitingOnCloseSQL).
 	ListExpiredPauseCollections(ctx context.Context, before time.Time, limit int) ([]domain.Subscription, error)
-
-	// ActivateAfterTrialWithBill flips trialing→active AND runs billFn (the day-1
-	// in_advance invoice insert) in the SAME transaction, so a billing failure
-	// rolls the activation back rather than leaving an active sub with no
-	// first-period invoice (revenue leak). billFn may be nil.
-	ActivateAfterTrialWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error)
-
-	// EndTrialEarlyWithBill flips trialing→active (resetting the period anchor)
-	// AND runs billFn (the day-1 in_advance invoice insert) in the SAME
-	// transaction, so a billing failure rolls the early-end back rather than
-	// leaving an active sub with no first-period invoice (revenue leak). billFn
-	// may be nil.
-	EndTrialEarlyWithBill(ctx context.Context, tenantID, id string, at, periodStart, periodEnd, nextBilling time.Time, anchorDay int, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error)
-
-	// ExtendTrial atomically updates trial_end_at AND recomputes the
-	// period anchor on a 'trialing' row. Mirrors EndTrialEarly's shape
-	// for the opposite operator action: pushing trial_end later moves
-	// the first-chargeable-cycle anchor to match. Without the period
-	// recompute, extending past the original current_period_end would
-	// silently drop the stub between new_trial_end and the next cycle
-	// close (same bug class as the pre-fix calendar+trial Create
-	// branch).
-	//
-	// The service layer is responsible for rejecting newTrialEnd values
-	// that don't make sense (in the past, or before the existing
-	// trial_end_at — those callers should use EndTrialEarly instead).
-	// Returns errs.InvalidState if the row's status is not 'trialing'
-	// at UPDATE time.
-	ExtendTrial(ctx context.Context, tenantID, id string, newTrialEnd, periodStart, periodEnd, nextBilling time.Time, anchorDay int) (domain.Subscription, error)
 
 	// ---- Subscription items ----
 	//
@@ -392,7 +350,7 @@ type Store interface {
 	EnqueueEventTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID, eventType string, extra map[string]any) error
 
 	// FindMeterConflicts returns, for each candidate meter, the live
-	// (trialing / active) subscriptions of the customer whose
+	// (active) subscriptions of the customer whose
 	// items' plans already bill that meter — including scheduled
 	// pending_plan_id swaps, which will start billing at the next cycle
 	// boundary. excludeItemID skips one item (the item being plan-swapped;
@@ -427,7 +385,7 @@ type ListFilter struct {
 	// record, retrying or parked (ADR-119). Empty = no filter. The handler
 	// rejects any other value.
 	Billing string
-	// Collection "paused" keeps only live (active or trialing) subscriptions
+	// Collection "paused" keeps only live (active) subscriptions
 	// whose pause_collection is in force now (set, by an operator or by
 	// dunning, and its resumes_at, if any, not yet reached). Paused
 	// collection is not a status: the subscription stays active and keeps

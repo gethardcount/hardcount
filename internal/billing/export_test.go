@@ -93,8 +93,8 @@ func (e *Engine) WriteCancelReliefTx(ctx context.Context, tx *sql.Tx, canceled d
 // own-transaction BillOnCreate ran after its insert. Like it, a second call
 // for the same period finds the period's slot taken and returns the zero
 // invoice. The invoice is empty when there is nothing to bill. Production
-// code has no such method: create and the trial flip bill through
-// BillOnCreateTx, on the transaction that writes the subscription.
+// code has no such method: create bills through BillOnCreateTx, on the
+// transaction that writes the subscription.
 func (e *Engine) BillOnCreate(ctx context.Context, sub domain.Subscription) (domain.Invoice, error) {
 	var (
 		inv domain.Invoice

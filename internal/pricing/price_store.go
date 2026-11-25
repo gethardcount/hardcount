@@ -181,7 +181,7 @@ type PinPrices struct {
 	// Passed: the pin had passed when the prices were read, so a price saved
 	// after the read is not in force at it (a used plan's version takes
 	// effect from its write, ADR-130 §7). At a pin still ahead (the next
-	// period's start, a trial end) a price saved now is.
+	// period's start) a price saved now is.
 	Passed bool
 }
 
@@ -655,10 +655,10 @@ func refuseMeterOverlapTx(ctx context.Context, tx *sql.Tx, planID, meterID strin
 		FROM subscriptions s
 		JOIN subscription_items si ON si.subscription_id = s.id AND si.deleted_at IS NULL
 		     AND (si.plan_id = $1 OR si.pending_plan_id = $1)
-		JOIN subscriptions s2 ON s2.customer_id = s.customer_id AND s2.status IN ('trialing', 'active')
+		JOIN subscriptions s2 ON s2.customer_id = s.customer_id AND s2.status = 'active'
 		JOIN subscription_items si2 ON si2.subscription_id = s2.id AND si2.deleted_at IS NULL AND si2.id <> si.id
 		JOIN plan_prices pp ON pp.meter_id = $2 AND (pp.plan_id = si2.plan_id OR pp.plan_id = si2.pending_plan_id)
-		WHERE s.status IN ('trialing', 'active')
+		WHERE s.status = 'active'
 		ORDER BY s2.code
 		LIMIT 1`, planID, meterID).Scan(&code)
 	if err == sql.ErrNoRows {

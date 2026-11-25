@@ -51,14 +51,14 @@ func storedAnchorCycle(p domain.CyclePeriod) int {
 // close (R2) bills the period it rolls, which ends where NextBillingPeriodEnd
 // says in the tenant's zone now; the others read the stored period, which a
 // zone change can leave as it was opened. The on-create lines (R3) bill a new
-// subscription's first period, the trial's first paid period at trial end
-// (written at create or ExtendTrial, so possibly in another zone), the
-// in-advance swap's period from the swap's instant (BillOnPlanSwapTx), and
-// the trial-end preview (previewTrialEnd).
+// subscription's first period and the in-advance swap's period from the
+// swap's instant (BillOnPlanSwapTx). Each is opened and billed in one
+// transaction, in the zone in force then, so R3 never reads a period opened
+// in another zone.
 var readerSees = map[string][]string{
 	"R1": {"plain", "calendar", "calendar-stub", "calendar-stale", "cut-short", "seam", "zone-changed", "no-anchor", "swap"},
 	"R2": {"plain", "calendar", "calendar-stale", "seam", "no-anchor"},
-	"R3": {"plain", "calendar", "calendar-stub", "zone-changed", "swap"},
+	"R3": {"plain", "calendar", "calendar-stub", "swap"},
 	"R4": {"plain", "calendar", "calendar-stub", "calendar-stale", "seam", "zone-changed", "no-anchor", "swap"},
 	"R5": {"plain", "calendar", "calendar-stub", "calendar-stale", "seam", "zone-changed", "no-anchor", "swap"},
 }
@@ -171,9 +171,6 @@ var changed = map[[2]string]int{
 	{"R2", "longer than one interval"}:       17800,
 	{"R2", "off the anchor, from day 29-31"}: 200,
 	{"R2", "calendar after yearly"}:          200,
-	{"R3", "off the anchor"}:                 16740,
-	{"R3", "off the anchor, from day 29-31"}: 1230,
-	{"R3", "longer than one interval"}:       580,
 	{"R4", "off the anchor"}:                 16780,
 	{"R4", "calendar after yearly"}:          5600,
 	{"R4", "off the anchor, from day 29-31"}: 1790,

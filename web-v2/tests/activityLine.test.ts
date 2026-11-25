@@ -106,7 +106,7 @@ test('the zone is named once, as the dashboard formatter names it', () => {
 test('the zone header counts the time parts, not only the row times', () => {
   // A New York account with a row in Feb 2027 (EST) whose meta line names a
   // time in April (EDT). The header names both.
-  const withPart: ActivityLine = { ...line('b', '2027-02-01T15:00:00Z'), detail: [[{ text: 'Trial now ends ' }, { time: '2027-04-01T15:00:00Z' }]] }
+  const withPart: ActivityLine = { ...line('b', '2027-02-01T15:00:00Z'), detail: [[{ text: 'Resumes ' }, { time: '2027-04-01T15:00:00Z' }]] }
   assert.deepEqual(lineTimes([withPart]), ['2027-02-01T15:00:00Z', '2027-04-01T15:00:00Z'])
   assert.equal(zoneHeader(lineTimes([withPart]), NEW_YORK), 'Times in EST / EDT')
   // Negative control: the row times alone name one zone.

@@ -408,34 +408,6 @@ func TestEvaluateThresholds_InArrearsBaseAloneDoesNotCross(t *testing.T) {
 	}
 }
 
-// TestScanThresholds_SkipsTerminalSubs covers the gate that prevents
-// firing on canceled/archived subs. The candidate query in postgres
-// already restricts to active+trialing — this test guards the second-line
-// defense in scanOneThreshold so a stale candidate row can't bypass.
-func TestScanThresholds_SkipsTerminalSubs(t *testing.T) {
-	thresholds := &domain.BillingThresholds{
-		AmountGTE: 100, // very low cap so we'd cross if it fired
-	}
-	engine, subs, invoices := setupThresholdEngine(thresholds, 1000)
-
-	// Force-cancel the candidate after build.
-	s := subs.subs["sub_1"]
-	s.Status = domain.SubscriptionCanceled
-	subs.subs["sub_1"] = s
-	subs.candidates[0] = s
-
-	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
-	if len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
-	}
-	if fired != 0 {
-		t.Errorf("expected 0 fires for canceled sub, got %d", fired)
-	}
-	if len(invoices.invoices) != 0 {
-		t.Errorf("expected 0 invoices, got %d", len(invoices.invoices))
-	}
-}
-
 // TestScanThresholds_SkipsPauseCollection covers pause_collection: the
 // scan must not emit an invoice that can't be charged or dunned.
 func TestScanThresholds_SkipsPauseCollection(t *testing.T) {

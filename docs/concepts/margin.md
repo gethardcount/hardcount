@@ -93,7 +93,7 @@ recorded cost.
 
 - **Base fees, credit and tax.** Margin covers usage only.
 - **What was billed.** Revenue is worked out again at each subscription's
-  current prices, over active and trialing subscriptions. After a price
+  current prices, over active subscriptions. After a price
   change, or for a canceled subscription, it differs from the invoices.
 - **Events with no cost labels.** Their price still counts in
   `revenue_cents`, so `margin_bps` reads higher than your real margin.

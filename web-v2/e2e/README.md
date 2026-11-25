@@ -24,14 +24,11 @@ the screen, and that the main things an operator does work end to end.
   passwords in a row make the sign-in page say how long to wait. Each journey checks that the screen
   shows what the API returned. The arithmetic behind the numbers is tested in
   Go, not here.
-- `subscriptions.spec.ts` changes subscriptions on screen: a plan change now
-  (with its proration invoice) and at renewal, a change now to a yearly plan
-  (the dialog's words and the invoice the toast names), a seat decrease whose
-  credit goes partly to the balance and partly off an open invoice, a seat
-  decrease over a draft renewal (its credit waits for the draft), cancel at
-  period end, undo and cancel now, quantity and item changes against the
-  upcoming invoice, and the trial and collection controls. Each journey checks
-  the page, the toast and any invoice the change made against the API.
+- `subscriptions.spec.ts` changes subscriptions on screen. A plan change at
+  renewal makes no invoice and shows as pending until it is canceled. A
+  cancel at period end shows its date until Undo clears it, and a cancel now
+  needs CANCEL typed, then reads "Ended" on the page and in the list. Each
+  journey checks the page and the toast against the API.
 - `dunning.spec.ts` opens a payment-retry run's invoice from its row and
   closes the run by recording an offline payment there. The run is made the
   real way: a customer with no card on file is billed, under the account's

@@ -6,7 +6,7 @@
 // must return null for those, so the form can refuse.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { amountInputError, dollarsToRateCents, dollarsToWholeCents, percentRate, wholeNumberIn, wholeUnits } from '../src/lib/priceInput.ts'
+import { amountInputError, dollarsToRateCents, dollarsToWholeCents, percentRate, wholeUnits } from '../src/lib/priceInput.ts'
 
 test('a blank price is not a price — it must never become a free rate', () => {
   assert.equal(dollarsToRateCents(''), null)
@@ -64,18 +64,6 @@ test('a unit count is a whole number above 0, or refused', () => {
   for (const bad of ['', '0', '-1', '1000.5', '1e3', '1,000', 'abc']) {
     assert.equal(wholeUnits(bad), null, `"${bad}" must be refused`)
   }
-})
-
-// Trial days take 0 (no trial) to 730. parseInt cut "2.7" to 2 and sent "-5"
-// as -5; a blank box is the caller's choice, never read as 0 here.
-test('a whole number in a range takes 0 where the range does, and refuses the rest', () => {
-  assert.equal(wholeNumberIn('0', 0, 730), 0)
-  assert.equal(wholeNumberIn(' 14 ', 0, 730), 14)
-  assert.equal(wholeNumberIn('730', 0, 730), 730)
-  for (const bad of ['', ' ', '731', '-5', '2.7', '1e2', '1,000', 'abc']) {
-    assert.equal(wholeNumberIn(bad, 0, 730), null, `"${bad}" must be refused`)
-  }
-  assert.equal(wholeNumberIn('0', 1, 10), null)
 })
 
 // The tax rate box read a blank as 0 (tax off) and "8,5" as 8. The server

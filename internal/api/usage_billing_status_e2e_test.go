@@ -100,7 +100,7 @@ func TestBillingStatus_OutsideSubscription(t *testing.T) {
 	out := r.postLabelled("calls", "no-sub", lagP0.AddDate(0, 0, 2), lagP0.AddDate(0, 0, 2), 5, nil)
 	wantStatus(t, "event of a customer with no subscription", out, "outside_subscription")
 
-	r.newSub("sub", r.planA, lagP0.AddDate(0, 0, 3), nil)
+	r.newSub("sub", r.planA, lagP0.AddDate(0, 0, 3))
 	start := *r.sub().CurrentBillingPeriodStart
 	out = r.postLabelled("calls", "before-start", start.Add(-time.Hour), lagP0.AddDate(0, 0, 4), 7, nil)
 	wantStatus(t, "event before the subscription started", out, "outside_subscription")
@@ -130,7 +130,7 @@ func TestBillingStatus_OutsideSubscription_SameDaySubscriptionBillsIt(t *testing
 	out := r.postLabelled("calls", "morning", morning, morning, 5, nil)
 	wantStatus(t, "event before any subscription", out, "outside_subscription")
 
-	r.newSub("sub", r.planA, lagP0.Add(12*time.Hour), nil)
+	r.newSub("sub", r.planA, lagP0.Add(12*time.Hour))
 	if s := r.sub(); !s.CurrentBillingPeriodStart.Equal(lagP0) {
 		t.Fatalf("period start = %v, want the start of the day %v", s.CurrentBillingPeriodStart, lagP0)
 	}
@@ -189,7 +189,7 @@ func TestBillingStatus_NoPrice(t *testing.T) {
 		map[string]any{"meter_id": tokens, "dimension_match": map[string]any{"model": "a"}},
 		map[string]any{"meter_id": tokens, "dimension_match": map[string]any{"model": "1"}},
 	)
-	r.newSub("sub", plan, lagP0, nil)
+	r.newSub("sub", plan, lagP0)
 	n0 := unbilledCount(t, "no_price", "api")
 	at := lagP0.AddDate(0, 0, 4)
 
@@ -240,7 +240,7 @@ func TestBillingStatus_NoPriceStaysTrueAfterAnEdit(t *testing.T) {
 	tokens := r.newMeter("tokens", "sum")
 	plan := r.planPricing("plan_edit", map[string]any{"meter_id": tokens, "dimension_match": map[string]any{"model": "a"}})
 	started := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -3)
-	r.newSub("sub", plan, started.Add(time.Hour), nil)
+	r.newSub("sub", plan, started.Add(time.Hour))
 	s := r.sub()
 	if !s.CurrentBillingPeriodStart.Equal(started) {
 		t.Fatalf("period start = %v, want %v", s.CurrentBillingPeriodStart, started)
@@ -353,7 +353,7 @@ func TestBillingStatus_BatchAnswersPerIndex(t *testing.T) {
 	tokens := r.newMeter("tokens", "sum")
 	r.newMeter("seats", "sum")
 	plan := r.planPricing("plan_batch", map[string]any{"meter_id": tokens, "dimension_match": map[string]any{"model": "a"}})
-	r.newSub("sub", plan, lagP0.AddDate(0, 0, 1), nil)
+	r.newSub("sub", plan, lagP0.AddDate(0, 0, 1))
 	at := lagP0.AddDate(0, 0, 4)
 	r.postLabelled("tokens", "stored", at, at, 1, map[string]any{"model": "a"})
 
@@ -419,7 +419,7 @@ func TestBillingStatus_LiteLLMCounts(t *testing.T) {
 		t.Errorf("call before any subscription = %v, want accepted 2 and outside_subscription 2", out)
 	}
 
-	r.newSub("llm", plan, lagP0.AddDate(0, 0, 2), nil)
+	r.newSub("llm", plan, lagP0.AddDate(0, 0, 2))
 	out = r.must(http.MethodPost, "/v1/integrations/litellm/spend", lagP0.AddDate(0, 0, 4),
 		litellmCall("call-gpt", r.custExt, lagP0.AddDate(0, 0, 4), 7, 3), http.StatusOK)
 	if count(out, "accepted") != 2 || count(out, "no_price") != 2 || count(out, "not_on_plan") != 0 {
@@ -449,7 +449,7 @@ func TestBillingStatus_HeldReleaseCountsNoPrice(t *testing.T) {
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	tokens := r.newMeter("tokens", "sum")
 	plan := r.planPricing("plan_held", map[string]any{"meter_id": tokens, "dimension_match": map[string]any{"model": "gpt-4o", "token_type": "input"}})
-	r.newSub("held", plan, lagP0, nil)
+	r.newSub("held", plan, lagP0)
 	out := r.heldRelease(lagP0.AddDate(0, 0, 3), lagP0.AddDate(0, 0, 4))
 	if count(out, "released") != 2 || count(out, "no_price") != 1 || count(out, "in_open_period") != 1 {
 		t.Errorf("release answer = %v, want released 2, no_price 1, in_open_period 1", out)

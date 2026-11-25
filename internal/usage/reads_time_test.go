@@ -48,33 +48,6 @@ func TestCustomerUsage_ReadsTheBoundInstant(t *testing.T) {
 	}
 }
 
-// The default window is picked at the read's instant: of the customer's
-// subscriptions, the one whose current period started last, among those
-// that have started by then. Here a second subscription's period starts on
-// 2026-05-01, after the bound instant (2026-04-12) and before machine time,
-// so the window is the first subscription's period only when the pick reads
-// the bound instant.
-func TestCustomerUsage_TheWindowIsPickedAtTheBoundInstant(t *testing.T) {
-	bound := time.Date(2026, 4, 12, 9, 0, 0, 0, time.UTC)
-	cu, _, subs := readsFixture()
-	first := subs.subs[0]
-	laterStart := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	laterEnd := laterStart.AddDate(0, 1, 0)
-	subs.subs = append(subs.subs, domain.Subscription{
-		ID: "sub_2", TenantID: "t1", CustomerID: "cus_1", Status: domain.SubscriptionActive,
-		CurrentBillingPeriodStart: &laterStart, CurrentBillingPeriodEnd: &laterEnd,
-		Items: []domain.SubscriptionItem{{ID: "si_2", PlanID: "pln_1"}},
-	})
-	res, err := cu.Get(boundCtx(bound), "t1", "cus_1", CustomerUsagePeriod{})
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if !res.Period.From.Equal(*first.CurrentBillingPeriodStart) || !res.Period.To.Equal(*first.CurrentBillingPeriodEnd) {
-		t.Errorf("window [%v, %v); want sub_1's period [%v, %v), the one started at the bound instant",
-			res.Period.From, res.Period.To, *first.CurrentBillingPeriodStart, *first.CurrentBillingPeriodEnd)
-	}
-}
-
 // The public cost dashboard runs on the request's instant, and the whole
 // page reads it: the live credit figure and the usage view.
 func TestCostDashboard_ReadsTheBoundInstant(t *testing.T) {
