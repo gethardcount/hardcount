@@ -23,7 +23,7 @@ original text.
 
 ### Added
 
-- **One retry policy per account and mode: `GET` and `PUT /v1/dunning/policy`.** `GET` answers the policy, or `404` when the mode has none. `PUT` creates it or replaces it whole, with the same fields and checks as before. The Payment retries page's Policy tab is one form for it.
+- **One retry policy per account and mode: `GET` and `PUT /v1/dunning/policy`.** `GET` answers the policy, or `404` when the mode has none. `PUT` creates it or replaces it whole: all four settings are required, with the same limits as before. The Payment retries page's Policy tab is one form for it.
 - **Home's credit figures.** `GET /v1/analytics/overview` adds `credit_sold_by_currency` (credit granted by top-ups paid in the period) and `usage_billed_by_currency` (usage on invoices issued in the period). `GET /v1/credits/balances` takes `balance=out` (zero or less) or `balance=low` (below the low-balance setting), each leaving out archived customers.
 - **Top-ups sell prepaid credit, issued when paid.** An invoice created with one `commit_granted_cents` line and nothing else is a top-up (`billing_reason` `topup`): an unnumbered draft with a pay link. Charging the saved card (`collect`), the hosted page or `record-payment` numbers it, issues it and grants the credit, valid for the new `topup_credit_valid_days` setting (unset: never expires). Void withdraws it.
 - **Sell credit from the dashboard.** The customer page's Credits section and the Credits page have **Sell credit**: the price, the credit, how long it lasts and how the customer pays. It creates the top-up and opens its page with that payment's confirm. New invoice no longer sells credit. Set the validity in Settings → Invoicing.
