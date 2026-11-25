@@ -96,6 +96,7 @@ func cnEntries() []cnEntry {
 func cnService(store Store, inv domain.Invoice, clk clock.Clock) *Service {
 	svc := NewService(store, &memInvoiceReader{invoices: map[string]domain.Invoice{inv.ID: inv}}, &fakeRefunder{})
 	svc.SetNumberGenerator(&fakeCNNumbers{})
+	svc.SetStripeRefundRecording(noStripeRefunds{}, nil, nil)
 	if clk != nil {
 		svc.SetClock(clk)
 	}

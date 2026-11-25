@@ -110,6 +110,7 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		_, inv := seedInvoiceForCN(t, db, tenantID, "unk-resend", domain.InvoicePaid, domain.PaymentSucceeded, "pi_unk_resend")
 		refunder := &keyRecordingRefunder{err: outcomeRefundErr{unknown: true}, refundID: "re_unk_resent"}
 		svc := creditnote.NewService(store, invStore, refunder)
+		svc.SetStripeRefundRecording(store, invStore, nil)
 		svc.SetNumberGenerator(&seqNumbers{prefix: "UNKRESEND"})
 
 		cn, err := svc.CreateRefund(ctx, tenantID, creditnote.RefundInput{InvoiceID: inv.ID, Reason: "requested_by_customer"})
@@ -157,6 +158,7 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		_, inv := seedInvoiceForCN(t, db, tenantID, "unk-refused", domain.InvoicePaid, domain.PaymentSucceeded, "pi_unk_refused")
 		refunder := &keyRecordingRefunder{err: outcomeRefundErr{unknown: false}}
 		svc := creditnote.NewService(store, invStore, refunder)
+		svc.SetStripeRefundRecording(store, invStore, nil)
 		svc.SetNumberGenerator(&seqNumbers{prefix: "UNKREFUSED"})
 
 		cn, err := svc.CreateRefund(ctx, tenantID, creditnote.RefundInput{InvoiceID: inv.ID, Reason: "requested_by_customer"})
@@ -260,6 +262,7 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		_, inv := seedInvoiceForCN(t, db, tenantID, "unk-deadline-issue", domain.InvoicePaid, domain.PaymentSucceeded, "pi_unk_deadline_issue")
 		refunder := &keyRecordingRefunder{}
 		svc := creditnote.NewService(store, invStore, refunder)
+		svc.SetStripeRefundRecording(store, invStore, nil)
 		svc.SetNumberGenerator(&seqNumbers{prefix: "UNKDLISSUE"})
 		svc.SetAuditLogger(audit.NewLogger(db)) // its row rides the same write
 		// The issue endpoint runs Issue on the request's context. (A refund,
@@ -292,6 +295,7 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		cn := seedCardRefund(t, "unk-deadline-retry", domain.RefundFailed, "")
 		refunder := &keyRecordingRefunder{}
 		svc := creditnote.NewService(store, invStore, refunder)
+		svc.SetStripeRefundRecording(store, invStore, nil)
 		svc.SetAuditLogger(audit.NewLogger(db)) // its row rides the same write
 		reqCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
@@ -319,6 +323,7 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		cn := seedCardRefund(t, "unk-none-resend", domain.RefundNone, "")
 		refunder := &keyRecordingRefunder{refundID: "re_unk_none_resend"}
 		svc := creditnote.NewService(store, invStore, refunder)
+		svc.SetStripeRefundRecording(store, invStore, nil)
 
 		out, err := svc.RetryRefund(ctx, tenantID, cn.ID)
 		if err != nil {

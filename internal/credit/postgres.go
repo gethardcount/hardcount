@@ -1198,7 +1198,7 @@ func (s *PostgresStore) retireCommitSliceTx(ctx context.Context, tx *sql.Tx, ten
 	return nil
 }
 
-// RetireCommitSliceForReliefTx retires exactly `slice` credits from the
+// RetireForTopupNoteTx retires exactly `slice` credits from the
 // commit grant funded by invoiceID for a credit note on the top-up (ADR-080).
 // A missing grant is a LOUD error (cash is about to move against a grant
 // that must exist — the top-up's payment funds it in the same tx, so absence
@@ -1207,7 +1207,7 @@ func (s *PostgresStore) retireCommitSliceTx(ctx context.Context, tx *sql.Tx, ten
 // number, and says the credit was taken back rather than refunded when the
 // note records a lost dispute (lostDispute). Returns the post-retire state so
 // the caller can surface remaining/K without a re-read.
-func (s *PostgresStore) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64, lostDispute bool) (commitGrantState, error) {
+func (s *PostgresStore) RetireForTopupNoteTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64, lostDispute bool) (commitGrantState, error) {
 	g, found, err := s.LockCommitGrantTx(ctx, tx, tenantID, invoiceID, clock.Now(ctx))
 	if err != nil {
 		return commitGrantState{}, err
@@ -1275,7 +1275,10 @@ var ErrCommitInsufficientRemaining = errors.New("commit grant has insufficient r
 // total_granted = total_used + total_expired + total_retired +
 // total_deducted + balance. Retires are adjustments recognised by the
 // reason retireCommitSliceTx writes; every other negative adjustment is a
-// deduction (AdjustAtomicAudited is the only other writer of one).
+// deduction (AdjustAtomicAudited is the only other writer of one). That
+// reason, commit_refund_retire, is stored in ledger rows already written and
+// read here and by the grants summary, so it keeps its name though the code
+// now says "top-up note".
 const balanceWriteOffColumns = `COALESCE(SUM(CASE WHEN entry_type = 'expiry' THEN ABS(amount_cents) ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN entry_type = 'adjustment' AND amount_cents < 0
 			                   AND metadata->>'reason' = 'commit_refund_retire'

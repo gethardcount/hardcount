@@ -270,13 +270,13 @@ type CommitReliefResult struct {
 	CNRetiredCents      int64
 }
 
-// RetireCommitSliceForReliefTx retires `slice` credits from the commit
+// RetireForTopupNoteTx retires `slice` credits from the commit
 // grant funded by invoiceID on the caller's credit-note tx (ADR-080). Loud on
 // a missing grant; bumps the telescoping anchor K. The ledger entry names the
 // credit note by its number, and a lost dispute's note as taking the credit
 // back (lostDispute).
-func (s *Service) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64, lostDispute bool) (CommitReliefResult, error) {
-	g, err := s.store.RetireCommitSliceForReliefTx(ctx, tx, tenantID, invoiceID, creditNoteID, creditNoteNumber, slice, refundedGrossCents, grossPaidCents, lostDispute)
+func (s *Service) RetireForTopupNoteTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64, lostDispute bool) (CommitReliefResult, error) {
+	g, err := s.store.RetireForTopupNoteTx(ctx, tx, tenantID, invoiceID, creditNoteID, creditNoteNumber, slice, refundedGrossCents, grossPaidCents, lostDispute)
 	if err != nil {
 		return CommitReliefResult{}, err
 	}

@@ -73,7 +73,7 @@ func (m *memStore) ReadTopupGrantAndBalance(ctx context.Context, tenantID, invoi
 	return g, g.Remaining(), found, err
 }
 
-func (m *memStore) RetireCommitSliceForReliefTx(_ context.Context, _ *sql.Tx, tenantID, invoiceID, _, _ string, slice, _, _ int64, _ bool) (commitGrantState, error) {
+func (m *memStore) RetireForTopupNoteTx(_ context.Context, _ *sql.Tx, tenantID, invoiceID, _, _ string, slice, _, _ int64, _ bool) (commitGrantState, error) {
 	for id, e := range m.entries {
 		if e.TenantID == tenantID && e.SourceInvoiceID == invoiceID && e.GrantKind == domain.GrantKindCommit {
 			if e.ConsumedCents+slice > e.AmountCents {

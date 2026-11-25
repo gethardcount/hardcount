@@ -30,7 +30,7 @@ func (failingGranterTx) TopupGrantAndBalance(context.Context, string, string, ti
 func (failingGranterTx) LockTopupGrantAndBalanceTx(context.Context, *sql.Tx, string, string, time.Time) (creditnote.TopupGrant, int64, bool, error) {
 	return creditnote.TopupGrant{}, 0, false, nil
 }
-func (failingGranterTx) RetireCommitSliceForReliefTx(context.Context, *sql.Tx, string, string, string, string, int64, int64, int64, bool) (int64, error) {
+func (failingGranterTx) RetireForTopupNoteTx(context.Context, *sql.Tx, string, string, string, string, int64, int64, int64, bool) (int64, error) {
 	return 0, errors.New("not a commit test")
 }
 
@@ -134,7 +134,7 @@ func (okGranterTx) TopupGrantAndBalance(context.Context, string, string, time.Ti
 func (okGranterTx) LockTopupGrantAndBalanceTx(context.Context, *sql.Tx, string, string, time.Time) (creditnote.TopupGrant, int64, bool, error) {
 	return creditnote.TopupGrant{}, 0, false, nil
 }
-func (okGranterTx) RetireCommitSliceForReliefTx(context.Context, *sql.Tx, string, string, string, string, int64, int64, int64, bool) (int64, error) {
+func (okGranterTx) RetireForTopupNoteTx(context.Context, *sql.Tx, string, string, string, string, int64, int64, int64, bool) (int64, error) {
 	return 0, nil
 }
 

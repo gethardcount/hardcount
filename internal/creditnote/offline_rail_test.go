@@ -204,6 +204,7 @@ func TestRetryRefund_OfflinePaid_FailsCleanlyInsteadOfForever(t *testing.T) {
 	refunder := &fakeRefunder{}
 	svc := NewService(store, invoices, refunder)
 	svc.SetNumberGenerator(&fakeCNNumbers{})
+	svc.SetStripeRefundRecording(noStripeRefunds{}, nil, nil)
 
 	legacy := domain.CreditNote{
 		ID: "hc_cn_legacy", TenantID: "t1", InvoiceID: inv.ID, CustomerID: "cus_1",

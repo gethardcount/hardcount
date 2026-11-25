@@ -57,9 +57,11 @@ func buyTopup(t *testing.T, ctx context.Context, svc *invoice.Service, tenantID,
 }
 
 func newReliefService(db *postgres.DB, invStore *invoice.PostgresStore, creditSvc *credit.Service, settings *tenant.SettingsStore) *creditnote.Service {
-	svc := creditnote.NewService(creditnote.NewPostgresStore(db), invStore, nil, &cnGrantAdapter{creditSvc})
+	cnStore := creditnote.NewPostgresStore(db)
+	svc := creditnote.NewService(cnStore, invStore, nil, &cnGrantAdapter{creditSvc})
 	svc.SetNumberGenerator(settings)
 	svc.SetUnbilledUsageReader(noUnbilledUsage{})
+	svc.SetStripeRefundRecording(cnStore, invStore, nil)
 	return svc
 }
 

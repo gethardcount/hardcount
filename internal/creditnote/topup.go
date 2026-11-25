@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -57,9 +58,9 @@ func (s *Service) holdTopupGrantTx(ctx context.Context, tx *sql.Tx, tenantID str
 	return topupHold{TopupGrant: g, grossPaid: inv.TotalAmountCents, unused: unusedCredit(g, spendable, unbilledCents)}, nil
 }
 
-// cash is what r credit refunds at the price paid (commitReliefCash).
+// cash is what r credit refunds at the price paid (topupNoteCash).
 func (h topupHold) cash(r int64) int64 {
-	return commitReliefCash(h.grossPaid, h.GrantedCents, h.CNRetiredCents, r)
+	return topupNoteCash(h.grossPaid, h.GrantedCents, h.CNRetiredCents, r)
 }
 
 // worth is the most credit cash buys back at the price paid: the largest r
@@ -79,14 +80,21 @@ func (h topupHold) worth(cash int64) int64 {
 }
 
 // takes is the credit a note of total takes back when it would take r and
-// the payment's documents allow capLeft: a note that uses up what they allow
+// the payment's documents allow room: a note that uses up what they allow
 // takes all the unused credit, whatever the price says, so no credit
 // outlives a payment returned in full.
-func (h topupHold) takes(r, total, capLeft int64) int64 {
-	if total >= capLeft {
+func (h topupHold) takes(r, total, room int64) int64 {
+	if total >= room {
 		return h.unused
 	}
 	return min(r, h.unused)
+}
+
+// takesBackFor is the credit a note for money returned outside Hardcount
+// takes back: what amount buys at the price paid, or all the unused credit
+// when amount uses up room, what the payment's documents still allow.
+func (h topupHold) takesBackFor(amount, room int64) int64 {
+	return h.takes(h.worth(amount), amount, room)
 }
 
 // issueNoteTx is the core: it inserts the note build returns on tx (build
@@ -107,6 +115,14 @@ func (s *Service) issueNoteTx(ctx context.Context, tx *sql.Tx, tenantID string, 
 		return domain.CreditNote{}, err
 	}
 	cn.ReturnedByBank = byBank
+	return s.issueCreatedTx(ctx, tx, tenantID, inv, cn)
+}
+
+// issueCreatedTx issues, on tx, a note the same transaction created, and
+// retires the credit it takes back (CommitRetiredCents) from the top-up's
+// grant: the issue of every note that is issued as it is made (issueNoteTx,
+// the linked create).
+func (s *Service) issueCreatedTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, cn domain.CreditNote) (domain.CreditNote, error) {
 	// Trivially won on a row this transaction created, but the one writer of
 	// issued, and it stamps issued_at.
 	won, err := s.store.TransitionStatusTx(ctx, tx, tenantID, cn.ID, domain.CreditNoteDraft, domain.CreditNoteIssued)
@@ -118,7 +134,7 @@ func (s *Service) issueNoteTx(ctx context.Context, tx *sql.Tx, tenantID string, 
 	}
 	cn.Status = domain.CreditNoteIssued
 	if cn.CommitRetiredCents > 0 {
-		if _, err := s.credits.RetireCommitSliceForReliefTx(ctx, tx, tenantID, inv.ID, cn.ID, cn.CreditNoteNumber, cn.CommitRetiredCents, cn.TotalCents, inv.TotalAmountCents, cn.ReturnedByBank); err != nil {
+		if _, err := s.credits.RetireForTopupNoteTx(ctx, tx, tenantID, inv.ID, cn.ID, cn.CreditNoteNumber, cn.CommitRetiredCents, cn.TotalCents, inv.TotalAmountCents, cn.ReturnedByBank); err != nil {
 			return domain.CreditNote{}, fmt.Errorf("take back the credit of credit note %s: %w", cn.CreditNoteNumber, err)
 		}
 	}
@@ -251,14 +267,14 @@ func (s *Service) TakeBackForLostDisputeTx(ctx context.Context, tx *sql.Tx, tena
 		if err != nil {
 			return domain.CreditNote{}, nil, err
 		}
-		capLeft, err := documentsRoom(inv, existing, card)
+		room, err := documentsRoom(inv, existing, card)
 		if err != nil {
 			return domain.CreditNote{}, nil, err
 		}
-		if capLeft <= 0 {
+		if room <= 0 {
 			return domain.CreditNote{}, nil, errNothingToRecord
 		}
-		total := min(d.AmountCents, capLeft)
+		total := min(d.AmountCents, room)
 		hold, err := s.holdTopupGrantTx(ctx, tx, tenantID, inv, unbilledCents)
 		if err != nil {
 			return domain.CreditNote{}, nil, err
@@ -271,7 +287,7 @@ func (s *Service) TakeBackForLostDisputeTx(ctx context.Context, tx *sql.Tx, tena
 			SubtotalCents:        total, // a top-up carries no tax
 			TotalCents:           total,
 			OutOfBandAmountCents: total,
-			CommitRetiredCents:   hold.takes(hold.worth(total), total, capLeft),
+			CommitRetiredCents:   hold.takesBackFor(total, room),
 			Currency:             inv.Currency,
 			RefundStatus:         domain.RefundNone,
 			ReturnedByBank:       true,
@@ -290,7 +306,9 @@ func (s *Service) TakeBackForLostDisputeTx(ctx context.Context, tx *sql.Tx, tena
 	if err != nil {
 		return "", fmt.Errorf("record lost dispute %s as a credit note: %w", d.StripeDisputeID, err)
 	}
+	facts := map[string]any{"origin": "dispute_lost", "stripe_dispute_id": d.StripeDisputeID}
 	if s.audit != nil {
+		// The create row states what the issued row states.
 		md := map[string]any{
 			"credit_note_number":       cn.CreditNoteNumber,
 			"invoice_id":               cn.InvoiceID,
@@ -300,16 +318,16 @@ func (s *Service) TakeBackForLostDisputeTx(ctx context.Context, tx *sql.Tx, tena
 			"credit_taken_back_cents":  cn.CommitRetiredCents,
 			"reason":                   cn.Reason,
 			"currency":                 cn.Currency,
-			"origin":                   "dispute_lost",
-			"stripe_dispute_id":        d.StripeDisputeID,
 		}
-		for _, action := range []string{domain.AuditActionCreate, "credit_note.issued"} {
-			if err := s.audit.LogInTx(ctx, tx, audit.Entry{
-				Action: action, ResourceType: "credit_note", ResourceID: cn.ID, ResourceLabel: cn.CreditNoteNumber, Metadata: md,
-			}); err != nil {
-				return "", fmt.Errorf("audit emission: %w", err)
-			}
+		maps.Copy(md, facts)
+		if err := s.audit.LogInTx(ctx, tx, audit.Entry{
+			Action: domain.AuditActionCreate, ResourceType: "credit_note", ResourceID: cn.ID, ResourceLabel: cn.CreditNoteNumber, Metadata: md,
+		}); err != nil {
+			return "", fmt.Errorf("audit emission: %w", err)
 		}
+	}
+	if err := s.auditIssuedTx(ctx, tx, cn, facts); err != nil {
+		return "", err
 	}
 	return cn.ID, nil
 }

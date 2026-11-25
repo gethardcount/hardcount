@@ -430,7 +430,7 @@ func TestBalanceCrossingEvents(t *testing.T) {
 	if _, err := svc.GrantCommitForInvoiceTx(ctx, tx, tenantID, custID, topup, "HC-CROSS-TOPUP", "USD", 1000, nil); err != nil {
 		t.Fatalf("top-up grant: %v", err)
 	}
-	if _, err := svc.RetireCommitSliceForReliefTx(ctx, tx, tenantID, topup, "hc_cn_cross", "CN-CROSS", 1000, 900, 900, false); err != nil {
+	if _, err := svc.RetireForTopupNoteTx(ctx, tx, tenantID, topup, "hc_cn_cross", "CN-CROSS", 1000, 900, 900, false); err != nil {
 		t.Fatalf("take back: %v", err)
 	}
 	if err := tx.Commit(); err != nil {

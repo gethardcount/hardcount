@@ -438,7 +438,7 @@ func (s *Service) recordRefundCreditNoteTx(ctx context.Context, tx *sql.Tx, tena
 			if err != nil {
 				return domain.CreditNote{}, nil, err
 			}
-			cn.CommitRetiredCents = hold.takes(hold.worth(amount), amount, room)
+			cn.CommitRetiredCents = hold.takesBackFor(amount, room)
 		}
 		return cn, []domain.CreditNoteLineItem{line}, nil
 	})
@@ -446,8 +446,8 @@ func (s *Service) recordRefundCreditNoteTx(ctx context.Context, tx *sql.Tx, tena
 		return domain.CreditNote{}, fmt.Errorf("record refund %s as a credit note: %w", snap.StripeRefundID, err)
 	}
 	if s.audit != nil {
-		for _, e := range []audit.Entry{{
-			Action: domain.AuditActionCreate,
+		if err := s.audit.LogInTx(ctx, tx, audit.Entry{
+			Action: domain.AuditActionCreate, ResourceType: "credit_note", ResourceID: cn.ID, ResourceLabel: cn.CreditNoteNumber,
 			Metadata: map[string]any{
 				"invoice_id":       cn.InvoiceID,
 				"customer_id":      cn.CustomerID,
@@ -457,29 +457,18 @@ func (s *Service) recordRefundCreditNoteTx(ctx context.Context, tx *sql.Tx, tena
 				"origin":           "stripe_refund",
 				"stripe_refund_id": snap.StripeRefundID,
 			},
-		}, {
-			Action: "credit_note.issued",
-			Metadata: map[string]any{
-				"credit_note_number":       cn.CreditNoteNumber,
-				"invoice_id":               cn.InvoiceID,
-				"customer_id":              cn.CustomerID,
-				"total_cents":              cn.TotalCents,
-				"refund_amount_cents":      cn.RefundAmountCents,
-				"credit_amount_cents":      cn.CreditAmountCents,
-				"out_of_band_amount_cents": cn.OutOfBandAmountCents,
-				"credit_taken_back_cents":  cn.CommitRetiredCents,
-				"reason":                   cn.Reason,
-				"currency":                 cn.Currency,
-				"origin":                   "stripe_refund",
-				"stripe_refund_id":         snap.StripeRefundID,
-				"refund_status":            string(cn.RefundStatus),
-			},
-		}} {
-			e.ResourceType, e.ResourceID, e.ResourceLabel = "credit_note", cn.ID, cn.CreditNoteNumber
-			if err := s.audit.LogInTx(ctx, tx, e); err != nil {
-				return domain.CreditNote{}, fmt.Errorf("audit emission: %w", err)
-			}
+		}); err != nil {
+			return domain.CreditNote{}, fmt.Errorf("audit emission: %w", err)
 		}
+	}
+	if err := s.auditIssuedTx(ctx, tx, cn, map[string]any{
+		"refund_amount_cents": cn.RefundAmountCents,
+		"credit_amount_cents": cn.CreditAmountCents,
+		"origin":              "stripe_refund",
+		"stripe_refund_id":    snap.StripeRefundID,
+		"refund_status":       string(cn.RefundStatus),
+	}); err != nil {
+		return domain.CreditNote{}, err
 	}
 	return cn, nil
 }
@@ -629,9 +618,12 @@ func (s *Service) StripeRefundsNeedingReview(ctx context.Context, tenantID strin
 
 // linkedStripeRefund is a refund the operator links to the credit note they
 // create (POST /v1/credit-notes with stripe_refund_id), checked against
-// Stripe before the create.
+// Stripe before the create. unbilledCents is the usage not invoiced yet, read
+// before the note's transaction, which a note on a top-up counts as credit
+// already used.
 type linkedStripeRefund struct {
-	facts domain.StripeRefundFacts
+	facts         domain.StripeRefundFacts
+	unbilledCents int64
 }
 
 // checkLinkedStripeRefund reads the refund an operator's create names from
@@ -669,7 +661,7 @@ func (s *Service) checkLinkedStripeRefund(ctx context.Context, tenantID string, 
 		return nil, errs.Invalid("refund_type", "use refund_amount_cents with stripe_refund_id")
 	case input.RefundAmountCents != facts.AmountCents:
 		return nil, errs.Invalid("refund_amount_cents", fmt.Sprintf(
-			"must be the refund's amount, %s: the card part of this note is that refund", domain.FormatMoneyMinor(facts.AmountCents, inv.Currency)))
+			"must be the refund's amount, %s: the card part of this note is that refund", moneyText(facts.AmountCents, inv.Currency)))
 	case input.CreditAmountCents != 0:
 		return nil, errs.Invalid("credit_amount_cents", "a note that records a refund made in Stripe sends nothing to the credit balance; issue a separate credit note for credit")
 	}
@@ -763,21 +755,17 @@ func (s *Service) createAndIssueLinked(ctx context.Context, tenantID string, inp
 	if inv.Status != domain.InvoicePaid || inv.PaymentStatus != domain.PaymentSucceeded {
 		return domain.CreditNote{}, errs.Invalid("stripe_refund_id", "a refund made in Stripe can be linked only on a paid invoice")
 	}
-	var cn domain.CreditNote
-	if inv.BillingReason == domain.BillingReasonTopup {
-		cn, err = s.linkedTopupNoteTx(ctx, tx, tenantID, inv, input, unbilled)
-	} else {
-		cn, err = s.create(ctx, tenantID, input, tx)
-		if err == nil {
-			cn, err = s.issueDraftTx(ctx, tx, tenantID, cn)
-		}
+	input.linked.unbilledCents = unbilled
+	cn, err := s.create(ctx, tenantID, input, tx)
+	if err == nil {
+		cn, err = s.issueCreatedTx(ctx, tx, tenantID, inv, cn)
 	}
 	if err != nil {
 		return domain.CreditNote{}, err
 	}
 	// The note sends nothing to the credit balance (checkLinkedStripeRefund),
 	// so issuing it grants nothing and changes no amount due; on a top-up it
-	// took its credit back on this transaction (issueNoteTx).
+	// took its credit back on this transaction (issueCreatedTx).
 	if err := s.emitIssuedTx(ctx, tx, cn, 0, 0, false); err != nil {
 		return domain.CreditNote{}, err
 	}
@@ -785,104 +773,6 @@ func (s *Service) createAndIssueLinked(ctx context.Context, tenantID string, inp
 		return domain.CreditNote{}, fmt.Errorf("commit linked credit note: %w", err)
 	}
 	return s.runPostIssueExternalLegs(ctx, tenantID, cn.ID, cn, inv)
-}
-
-// issueDraftTx issues, on tx, a draft the same transaction created.
-func (s *Service) issueDraftTx(ctx context.Context, tx *sql.Tx, tenantID string, cn domain.CreditNote) (domain.CreditNote, error) {
-	won, err := s.store.TransitionStatusTx(ctx, tx, tenantID, cn.ID, domain.CreditNoteDraft, domain.CreditNoteIssued)
-	if err != nil {
-		return domain.CreditNote{}, fmt.Errorf("issue the linked credit note: %w", err)
-	}
-	if !won {
-		return domain.CreditNote{}, fmt.Errorf("the linked credit note %s lost its issue CAS on the transaction that created it (impossible; investigate)", cn.ID)
-	}
-	cn.Status = domain.CreditNoteIssued
-	return cn, nil
-}
-
-// linkedTopupNoteTx writes and issues, on tx, the note an operator links to a
-// refund made in Stripe on a top-up: the note create would write, built and
-// checked the same way, which also takes back the unused credit its total
-// paid for. It runs the core (issueNoteTx), so its number comes after the
-// customer's lock; create numbers before it, which is right only where no
-// customer lock follows. create's refusal of a top-up stays for an unlinked
-// note.
-func (s *Service) linkedTopupNoteTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, input CreateInput, unbilledCents int64) (domain.CreditNote, error) {
-	if strings.TrimSpace(input.Reason) == "" {
-		return domain.CreditNote{}, errs.Required("reason")
-	}
-	if err := checkLines(input.Lines); err != nil {
-		return domain.CreditNote{}, err
-	}
-	lines, subtotal, err := noteLines(input, func() ([]domain.InvoiceLineItem, error) {
-		return s.invoices.ListLineItemsTx(ctx, tx, tenantID, inv.ID)
-	})
-	if err != nil {
-		return domain.CreditNote{}, err
-	}
-	var linkRow *domain.InvoiceStripeRefund
-	cn, err := s.issueNoteTx(ctx, tx, tenantID, inv, func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error) {
-		var err error
-		if linkRow, err = s.linkUnderLockTx(ctx, tx, inv.ID, input.linked, existing); err != nil {
-			return domain.CreditNote{}, nil, err
-		}
-		existingTotal, existingTax, err := noteSums(inv.ID, existing)
-		if err != nil {
-			return domain.CreditNote{}, nil, err
-		}
-		if err := fitsCreditable(inv, subtotal, existingTotal); err != nil {
-			return domain.CreditNote{}, nil, err
-		}
-		card, err := s.cardRoomTx(ctx, tx, inv, input.linked.facts.ID)
-		if err != nil {
-			return domain.CreditNote{}, nil, err
-		}
-		cn, err := buildCreditNote(input, inv, subtotal, existingTotal, existingTax, card, false)
-		if err != nil {
-			return domain.CreditNote{}, nil, err
-		}
-		cn.StripeRefundID = input.linked.facts.ID
-		cn.RefundStatus = input.linked.facts.Status.CreditNoteRefundStatus()
-		cn.RecordedFromStripe = true
-		hold, err := s.holdTopupGrantTx(ctx, tx, tenantID, inv, unbilledCents)
-		if err != nil {
-			return domain.CreditNote{}, nil, err
-		}
-		room, err := documentsRoom(inv, existing, card)
-		if err != nil {
-			return domain.CreditNote{}, nil, err
-		}
-		cn.CommitRetiredCents = hold.takes(hold.worth(subtotal), subtotal, room)
-		return cn, lines, nil
-	})
-	if err != nil {
-		return domain.CreditNote{}, err
-	}
-	if linkRow != nil {
-		if _, err := s.refunds.LinkStripeRefundTx(ctx, tx, linkRow.ID, cn.ID); err != nil {
-			return domain.CreditNote{}, err
-		}
-	}
-	if s.audit != nil {
-		if err := s.audit.LogInTx(ctx, tx, audit.Entry{
-			Action:        domain.AuditActionCreate,
-			ResourceType:  "credit_note",
-			ResourceID:    cn.ID,
-			ResourceLabel: cn.CreditNoteNumber,
-			Metadata: map[string]any{
-				"invoice_id":              cn.InvoiceID,
-				"customer_id":             cn.CustomerID,
-				"total_cents":             cn.TotalCents,
-				"reason":                  cn.Reason,
-				"currency":                cn.Currency,
-				"stripe_refund_id":        cn.StripeRefundID,
-				"credit_taken_back_cents": cn.CommitRetiredCents,
-			},
-		}); err != nil {
-			return domain.CreditNote{}, fmt.Errorf("audit emission: %w", err)
-		}
-	}
-	return cn, nil
 }
 
 // blockedAction words refundBlockedByStripeRefund's refusal for the action it
@@ -915,7 +805,7 @@ var (
 // read takes no second connection under it; nil reads on one of its own.
 func (s *Service) refundBlockedByStripeRefund(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, action blockedAction) error {
 	if s.refunds == nil {
-		return nil
+		return fmt.Errorf("the guard against refunding twice is not wired: it needs the Stripe-refund store (call SetStripeRefundRecording)")
 	}
 	var rows []domain.InvoiceStripeRefund
 	var err error
@@ -932,11 +822,11 @@ func (s *Service) refundBlockedByStripeRefund(ctx context.Context, tx *sql.Tx, t
 		case domain.StripeRefundNeedsReview:
 			return errs.InvalidState(fmt.Sprintf(
 				"A refund of %s was made in Stripe on this invoice (%s) and is not recorded here. %s",
-				domain.FormatMoneyMinor(r.AmountCents, r.Currency), r.StripeRefundID, action.unrecorded)).WithCode("stripe_refund_unresolved")
+				moneyText(r.AmountCents, r.Currency), r.StripeRefundID, action.unrecorded)).WithCode("stripe_refund_unresolved")
 		case domain.StripeRefundAwaiting:
 			return errs.InvalidState(fmt.Sprintf(
 				"A refund of %s made in Stripe on this invoice (%s) is still in flight. %s",
-				domain.FormatMoneyMinor(r.AmountCents, r.Currency), r.StripeRefundID, action.inFlight)).WithCode("stripe_refund_unresolved")
+				moneyText(r.AmountCents, r.Currency), r.StripeRefundID, action.inFlight)).WithCode("stripe_refund_unresolved")
 		}
 	}
 	return nil
@@ -983,7 +873,7 @@ func (s *Service) AttachStripeRefund(ctx context.Context, tenantID, creditNoteID
 	if facts.AmountCents != cn.RefundAmountCents {
 		return domain.CreditNote{}, errs.Invalid("stripe_refund_id", fmt.Sprintf(
 			"this refund is %s and the credit note's card refund is %s; attach only a refund of the same amount",
-			domain.FormatMoneyMinor(facts.AmountCents, inv.Currency), domain.FormatMoneyMinor(cn.RefundAmountCents, inv.Currency)))
+			moneyText(facts.AmountCents, inv.Currency), moneyText(cn.RefundAmountCents, inv.Currency)))
 	}
 
 	tx, err := s.store.BeginTx(ctx, tenantID)
