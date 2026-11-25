@@ -251,6 +251,58 @@ WHERE i.status = 'paid' AND (i.billing_reason IS NULL OR i.billing_reason = 'man
 
 **You see:** one row for each, or `(0 rows)`.
 
+### Migration 00252: a cancel on a chosen date is removed
+
+The release with migration `00252_remove_cancel_at` removes the cancel on a
+chosen date (`cancel_at`). A subscription is canceled now, or at the end of
+the period it is in. The migration does two things:
+
+- An active subscription whose cancel date is the end of its current period
+  keeps its cancel, as a cancel at the period's end. Nothing else about it
+  changes.
+- Every other cancel date is removed, and its subscription goes on billing.
+  The migration cannot cancel it: a cancel needs Hardcount to make the final
+  invoice and give back the unused part of a fee paid in advance. No webhook
+  is sent and no audit log entry is written.
+
+Before you upgrade, on the release you run now, deal with each subscription
+whose cancel date is not the end of its current period:
+
+1. List them in the database shell
+   (`docker compose exec postgres psql -U hardcount -d hardcount` on one
+   VM).
+
+   ```sql
+   SET app.bypass_rls = 'on';
+   SELECT id, tenant_id, livemode, code, cancel_at, current_billing_period_end
+   FROM subscriptions
+   WHERE status = 'active' AND cancel_at IS NOT NULL
+     AND cancel_at IS DISTINCT FROM current_billing_period_end
+   ORDER BY cancel_at;
+   ```
+
+   **You see:** one row for each such subscription, with its cancel date
+   (`cancel_at`) and the end of its current period, or `(0 rows)`.
+2. Cancel now each one whose cancel date has come: **Cancel**, then
+   **Immediately**, on the subscription's page, or
+   `POST /v1/subscriptions/{id}/cancel` with an API key of its account and
+   mode. This bills the part of the period used.
+
+   **You see:** the subscription's status is `canceled`.
+3. Note the id and the cancel date of each one left. After the upgrade,
+   cancel it on that date (**Immediately**), or at the end of the period
+   that holds the date: once that period is the current one, **Cancel**,
+   then **At period end**, or `POST /v1/subscriptions/{id}/schedule-cancel`.
+
+A subscription you leave keeps billing after the upgrade, period after
+period, until you cancel it. Hardcount no longer holds its cancel date:
+only your note does. This includes one whose date had come but that the
+previous version had not canceled yet.
+
+Run one version at a time for this upgrade. A copy of the previous version
+that keeps running fails on every subscription it reads: the migration drops
+`cancel_at`, which it reads.
+
 ### Coming from Velox
 
 Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it

@@ -317,3 +317,11 @@ invoice.
   compare-and-swap that exactly-once billing rests on.
 - Migration `0176_subscription_billing_failure`.
 - Runbook: [14. Subscriptions whose billing is failing](../ops/runbook/billing-failing.md).
+
+## Amendment 2026-11-25: the due instant is next_billing_at
+
+A cancel on a chosen date is removed, so the due instant is `next_billing_at`
+alone: `domain.DueInstant`, `domain.SubscriptionDueInstantSQL`, both due
+scans, the gauges and the `billing_failed_for` column comment (re-issued by
+migration `00252`). A record an earlier release keyed to a `cancel_at` no
+longer matches the due instant after the upgrade, and reads as stale.

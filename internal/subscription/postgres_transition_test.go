@@ -362,9 +362,10 @@ func seedActiveSubscription(t *testing.T, db *postgres.DB, tenantID, custExt, pl
 
 // TestScheduleAndFireCancellation_Roundtrip exercises the full schedule →
 // clear → re-schedule → fire pipeline against postgres. The contract tested:
-// (1) ScheduleCancellation persists CancelAt and CancelAtPeriodEnd and a
-// SELECT round-trips the same values, (2) ClearScheduledCancellation wipes
-// both fields, (3) FireScheduledCancellation flips status to canceled,
+// (1) ScheduleCancellation persists CancelAtPeriodEnd, derives
+// CancelEffectiveAt from the period end, and a SELECT round-trips the same
+// values, (2) ClearScheduledCancellation wipes them, (3)
+// FireScheduledCancellationTx flips status to canceled,
 // stamps canceled_at to the supplied `at`, nulls out
 // next_billing_at, and clears the schedule fields, (4) firing on an
 // already-canceled sub returns ErrWatermarkMoved — the engine's retry then
@@ -379,18 +380,16 @@ func TestScheduleAndFireCancellation_Roundtrip(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Sub Schedule Cancel")
 	subID := seedActiveSubscription(t, db, tenantID, "cus_sched", "plan_sched", "sub-sched")
 
-	cancelAt := time.Now().UTC().Add(30 * 24 * time.Hour).Truncate(time.Microsecond)
-
-	// 1. Schedule with timestamp + flag both set so we exercise both columns.
-	scheduled, err := store.ScheduleCancellation(ctx, tenantID, subID, &cancelAt, true, domain.SubscriptionActive)
+	// 1. Schedule.
+	scheduled, err := store.ScheduleCancellation(ctx, tenantID, subID)
 	if err != nil {
 		t.Fatalf("schedule: %v", err)
 	}
 	if !scheduled.CancelAtPeriodEnd {
 		t.Error("CancelAtPeriodEnd should round-trip true")
 	}
-	if scheduled.CancelAt == nil || !scheduled.CancelAt.Equal(cancelAt) {
-		t.Errorf("CancelAt round-trip: got %v, want %v", scheduled.CancelAt, cancelAt)
+	if scheduled.CancelEffectiveAt == nil || scheduled.CurrentBillingPeriodEnd == nil || !scheduled.CancelEffectiveAt.Equal(*scheduled.CurrentBillingPeriodEnd) {
+		t.Errorf("CancelEffectiveAt: got %v, want the period end %v", scheduled.CancelEffectiveAt, scheduled.CurrentBillingPeriodEnd)
 	}
 
 	// SELECT path: another Get hits the read columns directly.
@@ -398,21 +397,21 @@ func TestScheduleAndFireCancellation_Roundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get after schedule: %v", err)
 	}
-	if !read.CancelAtPeriodEnd || read.CancelAt == nil {
+	if !read.CancelAtPeriodEnd || read.CancelEffectiveAt == nil {
 		t.Errorf("schedule fields not visible to Get: %+v", read)
 	}
 
-	// 2. Clear wipes both columns.
+	// 2. Clear wipes the schedule.
 	cleared, err := store.ClearScheduledCancellation(ctx, tenantID, subID)
 	if err != nil {
 		t.Fatalf("clear: %v", err)
 	}
-	if cleared.CancelAtPeriodEnd || cleared.CancelAt != nil {
+	if cleared.CancelAtPeriodEnd || cleared.CancelEffectiveAt != nil {
 		t.Errorf("clear left schedule fields set: %+v", cleared)
 	}
 
 	// 3. Re-schedule and fire.
-	if _, err := store.ScheduleCancellation(ctx, tenantID, subID, nil, true, domain.SubscriptionActive); err != nil {
+	if _, err := store.ScheduleCancellation(ctx, tenantID, subID); err != nil {
 		t.Fatalf("re-schedule: %v", err)
 	}
 	fireAt := time.Now().UTC().Truncate(time.Microsecond)
@@ -429,7 +428,7 @@ func TestScheduleAndFireCancellation_Roundtrip(t *testing.T) {
 	if fired.NextBillingAt != nil {
 		t.Error("next_billing_at must be nil on canceled sub")
 	}
-	if fired.CancelAtPeriodEnd || fired.CancelAt != nil {
+	if fired.CancelAtPeriodEnd || fired.CancelEffectiveAt != nil {
 		t.Errorf("schedule fields not cleared on fire: %+v", fired)
 	}
 
@@ -444,15 +443,15 @@ func TestScheduleAndFireCancellation_Roundtrip(t *testing.T) {
 	// 5. A schedule the caller validated while the row was active lands
 	// after the cancel: the status no longer matches, so it is refused and
 	// the canceled row keeps no schedule.
-	if _, err := store.ScheduleCancellation(ctx, tenantID, subID, &cancelAt, false, domain.SubscriptionActive); !errors.Is(err, errs.ErrInvalidState) {
+	if _, err := store.ScheduleCancellation(ctx, tenantID, subID); !errors.Is(err, errs.ErrInvalidState) {
 		t.Fatalf("schedule on a row canceled since it was read: got %v, want ErrInvalidState", err)
 	}
 	after, err := store.Get(ctx, tenantID, subID)
 	if err != nil {
 		t.Fatalf("get after the refused schedule: %v", err)
 	}
-	if after.Status != domain.SubscriptionCanceled || after.CancelAt != nil || after.CancelAtPeriodEnd {
-		t.Errorf("after the refused schedule: status %s cancel_at %v at_period_end %v, want canceled with no schedule", after.Status, after.CancelAt, after.CancelAtPeriodEnd)
+	if after.Status != domain.SubscriptionCanceled || after.CancelAtPeriodEnd {
+		t.Errorf("after the refused schedule: status %s cancel_at_period_end %v, want canceled with no schedule", after.Status, after.CancelAtPeriodEnd)
 	}
 }
 
@@ -623,7 +622,7 @@ func TestClearPauseCollection_CASOneWinner(t *testing.T) {
 // scheduled cancel, exactly one changes the row and so may announce
 // subscription.cancel_cleared; every other gets ErrNoScheduledCancel. A clear
 // with no schedule does not write the row. Mutation-verify: drop
-// `AND (cancel_at IS NOT NULL OR cancel_at_period_end)` → 20 winners.
+// `AND cancel_at_period_end` → 20 winners.
 func TestClearScheduledCancellation_CASOneWinner(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -631,7 +630,7 @@ func TestClearScheduledCancellation_CASOneWinner(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Cancel Clear Race")
 	subID := seedActiveSubscription(t, db, tenantID, "cus_clear_race", "plan_clear_race", "sub-clear-race")
 
-	if _, err := store.ScheduleCancellation(ctx, tenantID, subID, nil, true, domain.SubscriptionActive); err != nil {
+	if _, err := store.ScheduleCancellation(ctx, tenantID, subID); err != nil {
 		t.Fatalf("schedule cancel: %v", err)
 	}
 
@@ -664,8 +663,8 @@ func TestClearScheduledCancellation_CASOneWinner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if before.CancelAt != nil || before.CancelAtPeriodEnd {
-		t.Fatalf("schedule left after the clear: cancel_at=%v at_period_end=%v", before.CancelAt, before.CancelAtPeriodEnd)
+	if before.CancelAtPeriodEnd {
+		t.Fatalf("schedule left after the clear: cancel_at_period_end=%v", before.CancelAtPeriodEnd)
 	}
 	if _, err := store.ClearScheduledCancellation(ctx, tenantID, subID); !errors.Is(err, subscription.ErrNoScheduledCancel) {
 		t.Fatalf("clear with none scheduled: got %v, want ErrNoScheduledCancel", err)

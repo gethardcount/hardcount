@@ -141,22 +141,6 @@ func TestRecordBillingFailure_Guards(t *testing.T) {
 			t.Fatalf("got %+v, want parked at 8", bf)
 		}
 	})
-
-	t.Run("due through the cancel arm", func(t *testing.T) {
-		// next_billing_at is a month out; the due work is the mid-period
-		// cancel at cancel_at, and that is the key.
-		cancelAt := s.now.Add(-time.Hour)
-		id := s.sub(bfRow{id: "sub_rec_cancelarm", nextBilling: s.now.Add(20 * 24 * time.Hour), cancelAt: &cancelAt})
-		if s.record(id, write(s.now.Add(20*24*time.Hour), 0)) {
-			t.Fatal("a write keyed on next_billing_at landed while the due instant is cancel_at")
-		}
-		if !s.record(id, write(cancelAt, 0)) {
-			t.Fatal("a failing mid-period cancel was not recorded")
-		}
-		if bf := s.get(id).BillingFailure; bf == nil || bf.Attempts != 1 {
-			t.Fatalf("got %+v", bf)
-		}
-	})
 }
 
 // TestDueInstantWriters_VoidOrKeepTheRecord is the site-set table of ADR-119:
@@ -176,9 +160,7 @@ func TestDueInstantWriters_VoidOrKeepTheRecord(t *testing.T) {
 		t.Fatalf("plan: %v", err)
 	}
 	day := 24 * time.Hour
-	due := s.now.Add(-2 * day)       // a close that is overdue
-	future := s.now.Add(20 * day)    // a close that is not due yet
-	cancelDue := s.now.Add(-3 * day) // a mid-period cancel that is overdue
+	due := s.now.Add(-2 * day) // a close that is overdue
 	parked := func(r bfRow, key time.Time) bfRow {
 		r.failedFor, r.count = &key, 8
 		return r
@@ -200,14 +182,6 @@ func TestDueInstantWriters_VoidOrKeepTheRecord(t *testing.T) {
 		{"ClosePeriodTx advancing the period", parked(bfRow{nextBilling: due}, due), func(id string) error {
 			return closeTo(id, due, due.Add(30*day))
 		}, false},
-		{"ClearScheduledCancellation on a failing mid-period cancel", parked(bfRow{nextBilling: future, cancelAt: &cancelDue}, cancelDue), func(id string) error {
-			_, err := s.store.ClearScheduledCancellation(s.ctx, s.tenantID, id)
-			return err
-		}, false},
-		{"ScheduleCancellation moving a failing mid-period cancel", parked(bfRow{nextBilling: future, cancelAt: &cancelDue}, cancelDue), func(id string) error {
-			_, err := s.store.ScheduleCancellation(s.ctx, s.tenantID, id, &future, false, domain.SubscriptionActive)
-			return err
-		}, false},
 		// --- void: the row leaves active; the columns stay as evidence ---
 		{"CancelAtomicWithBill", parked(bfRow{nextBilling: due}, due), func(id string) error {
 			_, err := subscriptiontest.Cancel(s.ctx, s.store, s.tenantID, id)
@@ -219,10 +193,6 @@ func TestDueInstantWriters_VoidOrKeepTheRecord(t *testing.T) {
 				_, err := s.store.FireScheduledCancellationTx(s.ctx, tx, s.tenantID, id, subscription.SnapshotOf(sub), s.now)
 				return err
 			})
-		}, false},
-		{"FireScheduledCancellationWithBill", parked(bfRow{nextBilling: future, cancelAt: &cancelDue}, cancelDue), func(id string) error {
-			_, err := s.store.FireScheduledCancellationWithBill(s.ctx, s.tenantID, id, subscription.SnapshotOf(s.get(id)), cancelDue, nil)
-			return err
 		}, false},
 
 		// --- keep: the same work is still due ---
@@ -253,14 +223,10 @@ func TestDueInstantWriters_VoidOrKeepTheRecord(t *testing.T) {
 			return err
 		}, true},
 		{"ScheduleCancellation at period end on a failing close", parked(bfRow{nextBilling: due}, due), func(id string) error {
-			_, err := s.store.ScheduleCancellation(s.ctx, s.tenantID, id, nil, true, domain.SubscriptionActive)
+			_, err := s.store.ScheduleCancellation(s.ctx, s.tenantID, id)
 			return err
 		}, true},
-		{"ScheduleCancellation at a later instant on a failing close", parked(bfRow{nextBilling: due}, due), func(id string) error {
-			_, err := s.store.ScheduleCancellation(s.ctx, s.tenantID, id, &future, false, domain.SubscriptionActive)
-			return err
-		}, true},
-		{"ClearScheduledCancellation on a failing close", parked(bfRow{nextBilling: due, cancelAt: &future}, due), func(id string) error {
+		{"ClearScheduledCancellation on a failing close", parked(bfRow{nextBilling: due, cancelAtPeriodEnd: true}, due), func(id string) error {
 			_, err := s.store.ClearScheduledCancellation(s.ctx, s.tenantID, id)
 			return err
 		}, true},

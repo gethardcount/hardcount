@@ -37,8 +37,8 @@ import (
 // Period [2026-06-01, 2026-07-01), 30 days. The day-1 invoice is paid. The
 // cancel lands on 2026-06-16: 15 of 30 days unused, so the relief is a credit
 // note of 4900 × 15/30 = 2450c on the paid day-1 invoice, credited to the
-// balance. Both cancel paths run: the immediate Cancel and the scheduled
-// cancel's FireDueScheduledCancel, wired as internal/api/router.go wires them.
+// balance. The immediate Cancel runs, wired as internal/api/router.go wires
+// it.
 //
 // Before the fix the final invoice was collected before the relief was
 // issued: with a card, the card was charged the whole final invoice and the
@@ -270,40 +270,6 @@ func (r *reliefCancelRig) cancelImmediately(t *testing.T) {
 	}
 }
 
-// scheduleCancel schedules the cancel for cancelAt.
-func (r *reliefCancelRig) scheduleCancel(t *testing.T) {
-	t.Helper()
-	tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer postgres.Rollback(tx)
-	if _, err := tx.ExecContext(r.ctx, `UPDATE subscriptions SET cancel_at = $1 WHERE id = $2`, r.cancelAt, r.subID); err != nil {
-		t.Fatalf("schedule cancel: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-}
-
-// fire is the billing run firing the scheduled cancel an hour after cancelAt.
-func (r *reliefCancelRig) fire() error {
-	return r.subSvc.FireDueScheduledCancel(clock.WithEffectiveNow(r.ctx, r.cancelAt.Add(time.Hour)), r.tenantID, r.subID, r.cancelAt)
-}
-
-// fireScheduledCancel is scheduleCancel then fire, checked.
-func (r *reliefCancelRig) fireScheduledCancel(t *testing.T) {
-	t.Helper()
-	r.scheduleCancel(t)
-	if err := r.fire(); err != nil {
-		t.Fatalf("fire scheduled cancel: %v", err)
-	}
-	sub, err := subscription.NewPostgresStore(r.db).Get(r.ctx, r.tenantID, r.subID)
-	if err != nil || sub.Status != domain.SubscriptionCanceled {
-		t.Fatalf("after the fire: %v status=%s, want canceled", err, sub.Status)
-	}
-}
-
 func (r *reliefCancelRig) finalInvoice(t *testing.T) domain.Invoice {
 	t.Helper()
 	invs, _, err := r.invStore.List(r.ctx, invoice.ListFilter{TenantID: r.tenantID})
@@ -358,7 +324,6 @@ func TestCancel_ReliefReducesFinalInvoice_CardOrNoCard(t *testing.T) {
 		run  func(*reliefCancelRig, *testing.T)
 	}{
 		{"immediate cancel", (*reliefCancelRig).cancelImmediately},
-		{"scheduled cancel", (*reliefCancelRig).fireScheduledCancel},
 	}
 
 	for _, c := range cancels {

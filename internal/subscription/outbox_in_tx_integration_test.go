@@ -265,7 +265,7 @@ func TestLifecycleEvents_ContextEndsAfterCommit_EventIsQueued(t *testing.T) {
 	sub := []string{"id", r.subID}
 	operator := map[string]any{"triggered_by": "operator"}
 
-	checkStatus(t, "schedule cancel", r.call(t, proNow, (*Handler).scheduleCancel, map[string]any{"at_period_end": true}, sub...), http.StatusOK)
+	checkStatus(t, "schedule cancel", r.call(t, proNow, (*Handler).scheduleCancel, nil, sub...), http.StatusOK)
 	r.checkOneEvent(t, domain.EventSubscriptionCancelScheduled, r.subID, nil)
 
 	checkStatus(t, "clear scheduled cancel", r.call(t, proNow, (*Handler).clearScheduledCancel, nil, sub...), http.StatusOK)

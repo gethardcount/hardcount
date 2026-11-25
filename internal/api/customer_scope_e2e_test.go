@@ -453,9 +453,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		{"subscription item pending change cancel [path item]", "DELETE", func(o, f scopeRefs) string {
 			return "/v1/subscriptions/" + o.sub + "/items/" + f.item + "/pending-change"
 		}, none, 404, "", 0},
-		{"subscription schedule cancel [path subscription]", "POST", at("/v1/subscriptions/%s/schedule-cancel", sub), func(_, _ scopeRefs) any {
-			return map[string]any{"at_period_end": true}
-		}, 404, "", 0},
+		{"subscription schedule cancel [path subscription]", "POST", at("/v1/subscriptions/%s/schedule-cancel", sub), none, 404, "", 0},
 		{"subscription scheduled cancel clear [path subscription]", "DELETE", at("/v1/subscriptions/%s/scheduled-cancel", sub), none, 404, "", 0},
 		{"subscription pause collection [path subscription]", "PUT", at("/v1/subscriptions/%s/pause-collection", sub), func(_, _ scopeRefs) any {
 			return map[string]any{"behavior": "keep_as_draft"}

@@ -184,7 +184,7 @@ A subscription puts a customer on a plan.
 | `DELETE` | `/v1/subscriptions/{id}/items/{itemID}` | Remove a plan from the subscription |
 | `PUT` | `/v1/subscriptions/{id}/pause-collection` | Keep the billing cycle, but leave new invoices as drafts |
 | `DELETE` | `/v1/subscriptions/{id}/pause-collection` | Resume collection |
-| `POST` | `/v1/subscriptions/{id}/schedule-cancel` | Cancel later: send `{"at_period_end": true}`, or a `cancel_at` time |
+| `POST` | `/v1/subscriptions/{id}/schedule-cancel` | Cancel at the end of the current period. Takes no body. |
 | `DELETE` | `/v1/subscriptions/{id}/scheduled-cancel` | Remove a scheduled cancel |
 | `POST` | `/v1/subscriptions/{id}/cancel` | Cancel now |
 | `POST` | `/v1/subscriptions/{id}/retry-billing` | Clear a billing failure (an ended period that could not be invoiced) and bill now |

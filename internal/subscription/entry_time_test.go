@@ -115,17 +115,15 @@ func subEntries() []subEntry {
 			}
 			return *out.CanceledAt
 		}},
-		{"ScheduleCancel", func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
-			at := base.Add(35 * 24 * time.Hour)
-			out, err := svc.ScheduleCancel(ctx, "t1", sub.ID, ScheduleCancelInput{CancelAt: &at})
+		{"ScheduleCancel", func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
+			out, err := svc.ScheduleCancel(ctx, "t1", sub.ID)
 			if err != nil {
 				t.Fatalf("ScheduleCancel: %v", err)
 			}
 			return out.UpdatedAt
 		}},
 		{"ClearScheduledCancel", func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
-			at := base.Add(35 * 24 * time.Hour)
-			if _, err := svc.ScheduleCancel(clock.WithEffectiveNow(ctx, base.Add(-time.Hour)), "t1", sub.ID, ScheduleCancelInput{CancelAt: &at}); err != nil {
+			if _, err := svc.ScheduleCancel(clock.WithEffectiveNow(ctx, base.Add(-time.Hour)), "t1", sub.ID); err != nil {
 				t.Fatalf("seed the schedule: %v", err)
 			}
 			out, _, err := svc.ClearScheduledCancel(ctx, "t1", sub.ID)
@@ -264,30 +262,19 @@ func (b *reliefTimeBiller) FinishRelief(ctx context.Context, sub domain.Subscrip
 // its credit note through the biller's FinishRelief.
 type reliefEntry struct {
 	name string
-	run  func(t *testing.T, ctx context.Context, svc *Service, store *writeSpyStore, sub domain.Subscription, base time.Time)
+	run  func(t *testing.T, ctx context.Context, svc *Service, sub domain.Subscription)
 }
 
 func reliefEntries() []reliefEntry {
 	return []reliefEntry{
-		{"Cancel (the cancel route; dunning's final cancel through Cancel)", func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) {
+		{"Cancel (the cancel route; dunning's final cancel through Cancel)", func(t *testing.T, ctx context.Context, svc *Service, sub domain.Subscription) {
 			if _, _, err := svc.Cancel(ctx, "t1", sub.ID); err != nil {
 				t.Fatalf("Cancel: %v", err)
 			}
 		}},
-		{"CancelForDunning", func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) {
+		{"CancelForDunning", func(t *testing.T, ctx context.Context, svc *Service, sub domain.Subscription) {
 			if _, _, err := svc.CancelForDunning(ctx, "t1", sub.ID); err != nil {
 				t.Fatalf("CancelForDunning: %v", err)
-			}
-		}},
-		{"FireDueScheduledCancel (the billing run)", func(t *testing.T, ctx context.Context, svc *Service, store *writeSpyStore, sub domain.Subscription, base time.Time) {
-			cancelAt := base.Add(-time.Hour)
-			due := store.subs[sub.ID]
-			due.CancelAt = &cancelAt
-			due.BillingTime = domain.BillingTimeCalendar
-			due.NextBillingAt = due.CurrentBillingPeriodEnd
-			store.subs[sub.ID] = due
-			if err := svc.FireDueScheduledCancel(ctx, "t1", sub.ID, cancelAt); err != nil {
-				t.Fatalf("FireDueScheduledCancel: %v", err)
 			}
 		}},
 	}
@@ -303,15 +290,15 @@ func withReliefBiller(svc *Service) *reliefTimeBiller {
 }
 
 // A cancel's relief credit note is issued on the time its caller bound: the
-// cancel route's (its request's), dunning's final action's (its run) or the
-// billing run's. The server's clock is not read.
+// cancel route's (its request's) or dunning's final action's (its run). The
+// server's clock is not read.
 func TestSubscriptionRelief_IsIssuedOnTheDecidedTime(t *testing.T) {
 	for _, e := range reliefEntries() {
 		t.Run(e.name, func(t *testing.T) {
 			server := &subSteppingClock{at: subDecidedAt.Add(30 * 24 * time.Hour)}
-			svc, store, sub := newSubTimeSvc(t, subDecidedAt, server)
+			svc, _, sub := newSubTimeSvc(t, subDecidedAt, server)
 			b := withReliefBiller(svc)
-			e.run(t, subAtDecidedTime(), svc, store, sub, subDecidedAt)
+			e.run(t, subAtDecidedTime(), svc, sub)
 			if len(b.at) != 1 || !b.at[0].Equal(subDecidedAt) || server.reads != 0 {
 				t.Errorf("relief issued at %v; server clock reads %d; want once at %v, none", b.at, server.reads, subDecidedAt)
 			}

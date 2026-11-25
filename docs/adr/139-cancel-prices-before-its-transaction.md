@@ -65,3 +65,10 @@ An immediate cancel, a scheduled mid-period cancel and dunning's cancel now pric
 - `internal/subscription/service.go`: `cancel`, `cancelOnce`, `FireDueScheduledCancel`, `sameIntervals`
 - `internal/subscription/postgres.go`: `CancelAtomicWithBill`, `FireScheduledCancellationWithBill`
 - Tests: `internal/billing/cancel_plans_before_tx_integration_test.go`, `internal/api/cancel_replan_e2e_test.go`
+
+## Amendment 2026-11-25: no scheduled cancel is priced here
+
+A cancel on a chosen date is removed, so the scheduled cancel this record
+prices beside the immediate cancel (its `at` at `cancel_at`, and its
+compare-and-set on `cancel_at`) no longer exists. The immediate cancel and
+dunning's cancel are the only callers of this planning.

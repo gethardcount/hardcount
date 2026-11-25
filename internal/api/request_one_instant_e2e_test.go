@@ -205,7 +205,7 @@ func TestScheduleCancel_TheCloseAndTheScheduleShareOneInstant(t *testing.T) {
 			r := newInstantRig(t, live)
 			subID := r.subscribe("sched")
 			r.clk.stepFrom(lagB.Add(time.Hour))
-			r.must(http.MethodPost, "/v1/subscriptions/"+subID+"/schedule-cancel", time.Time{}, map[string]any{"at_period_end": true}, http.StatusOK)
+			r.must(http.MethodPost, "/v1/subscriptions/"+subID+"/schedule-cancel", time.Time{}, nil, http.StatusOK)
 			_, reads := r.clk.count()
 			invs := r.cycleInvoices()
 			if reads != 1 || len(invs) != 1 || !invs[0][0].Equal(lagB) {

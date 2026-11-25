@@ -310,6 +310,9 @@ func cancelWhy(meta map[string]any) string {
 }
 
 // cancelScheduledWhen is S-4's meta: when the scheduled cancellation lands.
+// A schedule is at the end of the current period. cancel_at is a date an
+// earlier release could schedule a cancel on; only rows written by those
+// releases carry it, and they still read with their date.
 func cancelScheduledWhen(meta map[string]any) activity.Segment {
 	if t, ok := metaTime(meta, "cancel_at"); ok {
 		return activity.Segment{activity.T("On "), activity.At(t)}

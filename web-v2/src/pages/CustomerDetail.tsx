@@ -138,17 +138,12 @@ function subIsTerminal(status: Subscription['status']): boolean {
 }
 
 function subMeta(sub: Subscription): string {
-  // A scheduled cancel must beat the "Renews …" arm below, and the guard
-  // has to hold for the COMMON shape: cancelling at period end sets
-  // cancel_at_period_end + cancel_effective_at but leaves cancel_at unset
-  // (that one is only for an explicit future-dated cancel). Requiring
-  // cancel_at meant this branch never fired for a period-end cancel, so a
-  // subscription that stops on Sep 1 advertised "Renews Sep 1".
-  // cancel_effective_at is the backend's authoritative answer and is what
-  // SubscriptionDetail's timeline already uses.
-  const cancelAt = sub.cancel_at_period_end || sub.cancel_at ? sub.cancel_effective_at || sub.cancel_at : null
-  if (cancelAt) {
-    return `Cancels ${formatDate(cancelAt)}`
+  // A scheduled cancel beats the "Renews …" arm below: a subscription that
+  // stops on Sep 1 does not renew then. cancel_effective_at is the backend's
+  // authoritative answer and is what SubscriptionDetail's timeline uses.
+  const cancelEffectiveAt = sub.cancel_at_period_end ? sub.cancel_effective_at : undefined
+  if (cancelEffectiveAt) {
+    return `Cancels ${formatDate(cancelEffectiveAt)}`
   }
   if (sub.status === 'active' && sub.next_billing_at) {
     return `Renews ${formatDate(sub.next_billing_at)}`

@@ -85,7 +85,6 @@ export interface SubscriptionStatusInput {
   status: SubscriptionStatus
   pause_collection?: { behavior?: string; resumes_at?: string | null } | null
   cancel_at_period_end?: boolean
-  cancel_at?: string | null
 }
 
 // subscriptionStatus is the main badge for a subscription.
@@ -119,7 +118,7 @@ export function subscriptionFlags(sub: SubscriptionStatusInput, nowMs: number | 
   const flags: StatusDisplay[] = []
   const paused = collectionPausedFlag(sub, nowMs)
   if (paused) flags.push(paused)
-  if (sub.cancel_at_period_end || sub.cancel_at) flags.push({ label: 'Cancel scheduled', tone: 'warning' })
+  if (sub.cancel_at_period_end) flags.push({ label: 'Cancel scheduled', tone: 'warning' })
   return flags
 }
 

@@ -583,3 +583,10 @@ planned after the billing-engine changes now in progress.
   `internal/subscription/postgres.go` `GetDueBilling`,
   `GetDueBillingForTenant`; `internal/api/middleware/metrics.go`;
   `internal/domain/credit_expiry.go` `CreditDrawOwedSQL`.
+
+## Amendment 2026-11-25: no cancel_at arm
+
+A cancel on a chosen date is removed, so the due scans and `billSubscription`
+wait the grace after `next_billing_at` only. A subscription scheduled to
+cancel at the period's end waits the same grace: its last invoice is that
+period's close.

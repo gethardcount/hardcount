@@ -19,7 +19,6 @@ export interface SubscriptionPeriodInput {
   current_billing_period_end?: string
   next_billing_at?: string
   cancel_at_period_end?: boolean
-  cancel_at?: string | null
   cancel_effective_at?: string
   canceled_at?: string
   pause_collection?: { resumes_at?: string } | null
@@ -61,10 +60,9 @@ export function periodLabels(sub: SubscriptionPeriodInput, fmt: PeriodDateFormat
 
   const accessThrough = live && sub.current_billing_period_end ? fmt.lastDay(sub.current_billing_period_end) : null
 
-  // cancel_effective_at is the server's answer: cancel_at when set, else the
-  // end of the current period.
-  const cancelAt = scheduled ? (sub.cancel_effective_at || sub.cancel_at || sub.current_billing_period_end) : undefined
-  const cancelsOn = cancelAt ? fmt.date(cancelAt) : null
+  // cancel_effective_at is the server's answer: the end of the current period.
+  const cancelEffectiveAt = scheduled ? (sub.cancel_effective_at || sub.current_billing_period_end) : undefined
+  const cancelsOn = cancelEffectiveAt ? fmt.date(cancelEffectiveAt) : null
 
   const renewAt = live && !scheduled ? (sub.next_billing_at || sub.current_billing_period_end) : undefined
   const renewsOn = renewAt ? fmt.date(renewAt) : null

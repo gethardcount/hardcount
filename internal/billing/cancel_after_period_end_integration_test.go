@@ -72,7 +72,6 @@ func newCancelRig(t *testing.T, name string) *cancelRig {
 	f.engine.SetInvoiceVoider(invoice.NewService(f.invStore, clock.Real(), f.settings))
 	f.engine.SetCreditNoteAdjuster(creditNoteSvc)
 	f.engine.SetCreditHeadroomReader(creditNoteSvc)
-	f.engine.SetScheduledCancelExecutor(f.subSvc)
 	f.subSvc.SetBiller(f.engine)
 	f.subSvc.SetDueBiller(f.engine)
 	return r
@@ -636,7 +635,7 @@ func TestImmediateCancel_AlreadyCanceled_StillRefused(t *testing.T) {
 func TestImmediateCancel_AtPeriodEndFlag_AfterBoundary_ReturnsCanceledRow(t *testing.T) {
 	r := newCancelRig(t, "991 cancel after a scheduled boundary")
 	p0, p1 := r.f.cycleStart, r.f.cycleEnd
-	if _, err := r.f.subSvc.ScheduleCancel(r.at(p0.Add(24*time.Hour)), r.f.tenantID, r.f.subID, subscription.ScheduleCancelInput{AtPeriodEnd: true}); err != nil {
+	if _, err := r.f.subSvc.ScheduleCancel(r.at(p0.Add(24*time.Hour)), r.f.tenantID, r.f.subID); err != nil {
 		t.Fatalf("schedule cancel at period end: %v", err)
 	}
 

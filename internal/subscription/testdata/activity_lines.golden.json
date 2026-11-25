@@ -712,9 +712,9 @@
     ]
   },
   {
-    "case": "update/cancel_scheduled/on a date",
+    "case": "update/cancel_scheduled/on a date, from an earlier release",
     "line": {
-      "id": "update/cancel_scheduled/on a date",
+      "id": "update/cancel_scheduled/on a date, from an earlier release",
       "kind": "subscription.cancel_scheduled",
       "title": "Cancellation scheduled",
       "detail": [

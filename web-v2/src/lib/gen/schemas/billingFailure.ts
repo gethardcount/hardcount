@@ -14,9 +14,10 @@
 
 /**
  * Present on a subscription while the billing run is failing on the
- * work that subscription has due now (a period close, or a scheduled
- * mid-period cancel). Absent otherwise: a subscription that bills
- * cleanly, or whose due work changed, carries no `billing_failure`.
+ * work that subscription has due now: the close of its current period,
+ * which also cancels it when a cancel is scheduled. Absent otherwise: a
+ * subscription that bills cleanly, or whose due work changed, carries
+ * no `billing_failure`.
  *
  * After each failed attempt the billing run waits before the next one:
  * 15 minutes, 1 hour, 4 hours, 12 hours, then 24 hours three times.

@@ -68,7 +68,7 @@ func TestActivityParity_SubscriptionOperatorScenarios(t *testing.T) {
 	call("PATCH", base+"/items/"+itemID, flowReq{body: map[string]any{"new_plan_id": pro, "immediate": true}}).want(t, 200, "change plan now")
 	call("PATCH", base+"/items/"+itemID, flowReq{body: map[string]any{"new_plan_id": basic, "immediate": false}}).want(t, 200, "schedule plan change")
 	call("DELETE", base+"/items/"+itemID+"/pending-change", flowReq{}).want(t, 200, "cancel scheduled plan change")
-	call("POST", base+"/schedule-cancel", flowReq{body: map[string]any{"at_period_end": true}}).want(t, 200, "schedule cancel")
+	call("POST", base+"/schedule-cancel", flowReq{}).want(t, 200, "schedule cancel")
 	call("DELETE", base+"/scheduled-cancel", flowReq{}).want(t, 200, "undo scheduled cancel")
 	call("PUT", base+"/pause-collection", flowReq{body: map[string]any{"behavior": "keep_as_draft"}}).want(t, 200, "pause collection")
 	call("DELETE", base+"/pause-collection", flowReq{}).want(t, 200, "resume collection")

@@ -35,7 +35,7 @@ All the routes are under `/v1/subscriptions`. Each change sends a
 | (new) | `POST /` | `subscription.created` | `active` |
 | `active` | `POST /{id}/cancel` | `subscription.canceled` | `canceled` |
 | `active` | `POST /{id}/schedule-cancel` | `subscription.cancel_scheduled` | no change yet |
-| `active` | Hardcount, when the scheduled cancel is due | `subscription.canceled` | `canceled` |
+| `active` | Hardcount, when the period a cancel is scheduled for ends | `subscription.canceled` | `canceled` |
 | `active` | `DELETE /{id}/scheduled-cancel` | `subscription.cancel_cleared` | no change |
 | `active` | Hardcount, when the payment retries for an unpaid invoice (dunning) run out and the dunning policy says cancel | `subscription.canceled` | `canceled` |
 
@@ -150,14 +150,14 @@ $50.00 of base fee.
   left are given back. The share already paid goes to the customer's
   credit balance. The share not paid yet lowers what the open invoice asks
   for.
-- **Later:** `POST /v1/subscriptions/{id}/schedule-cancel`, with
-  `{"at_period_end": true}` or `{"cancel_at": "2026-09-30T00:00:00Z"}`.
-  Until then the subscription bills as usual.
-  - `cancel_at` must be in the future, and on or after the end of the
-    current period: the period in progress cannot be shortened.
-  - A `cancel_at` inside a later period is accepted. That period is billed
-    up to it, prorated.
-  - Any other date is refused with `422`.
+- **At the end of the period:** `POST /v1/subscriptions/{id}/schedule-cancel`,
+  with no body. Until then the subscription bills as usual. The period's
+  invoice is its last: it bills the period as usual, and a base fee billed
+  in advance is not billed for the next period. The customer gave notice,
+  and what they paid for the period is used up.
+  - `DELETE /v1/subscriptions/{id}/scheduled-cancel` undoes it, until the
+    period ends.
+  - A body is refused with `422`.
 
 ## Pause collection
 

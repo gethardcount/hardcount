@@ -361,7 +361,7 @@ func TestCloseLag_ScheduleCancelAtPeriodEnd_InGap(t *testing.T) {
 	r.ingest(lagP0.AddDate(0, 0, 19), 100)
 	r.ingest(lagB.Add(time.Hour), 50)
 
-	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", lagB.Add(2*time.Hour), map[string]any{"at_period_end": true}, http.StatusOK)
+	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", lagB.Add(2*time.Hour), nil, http.StatusOK)
 	r.run(lagB.Add(3 * time.Hour))
 
 	s := r.sub()
@@ -383,7 +383,7 @@ func TestCloseLag_ScheduleCancelAtPeriodEnd_InGap(t *testing.T) {
 // subscription is canceled at B and May is not billed.
 func TestCloseLag_ClearScheduledCancel_InGap(t *testing.T) {
 	r := newLagRig(t, "in_advance", false)
-	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", lagP0.AddDate(0, 0, 9), map[string]any{"at_period_end": true}, http.StatusOK)
+	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", lagP0.AddDate(0, 0, 9), nil, http.StatusOK)
 
 	code, raw := r.do(http.MethodDelete, "/v1/subscriptions/"+r.subID+"/scheduled-cancel", lagB.Add(2*time.Hour), nil)
 	// The answer must say the clear did not happen: a 200 would show the

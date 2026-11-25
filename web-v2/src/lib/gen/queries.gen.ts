@@ -216,7 +216,6 @@ import type {
   RotateCustomerCostDashboardToken200,
   RunBilling200,
   RunBilling206,
-  ScheduleSubscriptionCancelBody,
   SendCreditNote200,
   SendCreditNoteBody,
   SendCustomerPaymentSetupEmail202,
@@ -6283,10 +6282,10 @@ export const getCancelSubscriptionUrl = (id: string,) => {
  * final invoice is collected, so that credit reduces it.
  *
  * If a billing period has already ended, it is billed first. If a
- * scheduled cancel was already due, that cancel takes effect at its
- * scheduled time and the canceled subscription is returned. The
- * canceled subscription keeps its last `current_billing_period_*`
- * and `next_billing_at`; nothing is billed at that time.
+ * cancel was scheduled at the end of that period, it takes effect then
+ * and the canceled subscription is returned. The canceled
+ * subscription keeps its last `current_billing_period_*` and
+ * `next_billing_at`; nothing is billed at that time.
  *
  * Sends the `subscription.canceled` webhook event.
  * @summary Cancel a subscription now
@@ -6360,29 +6359,26 @@ export const getScheduleSubscriptionCancelUrl = (id: string,) => {
 }
 
 /**
- * Schedules the subscription to cancel later. Set exactly one of
- * `at_period_end` or `cancel_at`. A new call replaces any earlier
- * schedule. If a billing period has ended and is not invoiced yet,
- * it is billed first, so "the current period" is the one running.
+ * Schedules the subscription to cancel at the end of the current
+ * period. Takes no body. If a billing period has ended and is not
+ * invoiced yet, it is billed first, so "the current period" is the one
+ * running. That period's invoice is the subscription's last: an
+ * in-advance base fee for the next period is not billed.
  *
- * `at_period_end` cancels at the end of the current period.
- * `cancel_at` must be on or after the end of the current period. A
- * date inside a later period is allowed, and that period is billed up
- * to the date.
- *
- * The response's `cancel_effective_at` says when the cancel takes
- * effect. Sends the `subscription.cancel_scheduled` webhook event.
+ * Calling it on a subscription already scheduled leaves the schedule
+ * as it is. The response's `cancel_effective_at` says when the cancel
+ * takes effect. Sends the `subscription.cancel_scheduled` webhook
+ * event.
  * @summary Schedule a cancel
  */
-export const scheduleSubscriptionCancel = async (id: string,
-    scheduleSubscriptionCancelBody: ScheduleSubscriptionCancelBody, options?: RequestInit): Promise<Subscription> => {
+export const scheduleSubscriptionCancel = async (id: string, options?: RequestInit): Promise<Subscription> => {
 
   return orvalClient<Subscription>(getScheduleSubscriptionCancelUrl(id),
   {
     ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(scheduleSubscriptionCancelBody)
+    method: 'POST'
+
+
   }
 );}
 
@@ -6390,9 +6386,9 @@ export const scheduleSubscriptionCancel = async (id: string,
 
 
 
-export const getScheduleSubscriptionCancelMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, TError,{id: string;data: ScheduleSubscriptionCancelBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, TError,{id: string;data: ScheduleSubscriptionCancelBody}, TContext> => {
+export const getScheduleSubscriptionCancelMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, TError,{id: string}, TContext> => {
 
 const mutationKey = ['scheduleSubscriptionCancel'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -6404,10 +6400,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, {id: string;data: ScheduleSubscriptionCancelBody}> = (props) => {
-          const {id,data} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
 
-          return  scheduleSubscriptionCancel(id,data,requestOptions)
+          return  scheduleSubscriptionCancel(id,requestOptions)
         }
 
 
@@ -6418,18 +6414,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type ScheduleSubscriptionCancelMutationResult = NonNullable<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>>
-    export type ScheduleSubscriptionCancelMutationBody = ScheduleSubscriptionCancelBody
-    export type ScheduleSubscriptionCancelMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
+
+    export type ScheduleSubscriptionCancelMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Schedule a cancel
  */
-export const useScheduleSubscriptionCancel = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, TError,{id: string;data: ScheduleSubscriptionCancelBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+export const useScheduleSubscriptionCancel = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof scheduleSubscriptionCancel>>,
         TError,
-        {id: string;data: ScheduleSubscriptionCancelBody},
+        {id: string},
         TContext
       > => {
       return useMutation(getScheduleSubscriptionCancelMutationOptions(options), queryClient);
@@ -6449,8 +6445,8 @@ export const getClearSubscriptionScheduledCancelUrl = (id: string,) => {
  * subscription with no schedule returns the subscription unchanged
  * and sends no event.
  *
- * If the scheduled date has already passed, the cancel has taken
- * effect and the request answers 409.
+ * If the period the cancel was scheduled for has already ended, the
+ * cancel has taken effect and the request answers 409.
  * @summary Clear a scheduled cancel
  */
 export const clearSubscriptionScheduledCancel = async (id: string, options?: RequestInit): Promise<Subscription> => {
@@ -12191,9 +12187,8 @@ export const getRunBillingUrl = () => {
 /**
  * Runs the billing run now for this account and mode, the same run
  * the scheduler makes. It invoices every subscription that is due:
- * an `active` subscription whose period ended, or whose
- * scheduled mid-period cancel came, more than the invoice grace ago
- * (`INVOICE_GRACE_PERIOD`, 1 hour by default), so usage that arrives
+ * an `active` subscription whose period ended more than the invoice
+ * grace ago (`INVOICE_GRACE_PERIOD`, 1 hour by default), so usage that arrives
  * late still makes its invoice. A subscription overdue for several
  * periods gets one invoice per period.
  *

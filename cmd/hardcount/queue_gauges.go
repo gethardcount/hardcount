@@ -52,14 +52,14 @@ func registerQueueDepthGauges(reg prometheus.Registerer, invoiceGrace time.Durat
 	// each other on real rows.
 	const billingFailing = `status = 'active'
 		AND billing_failed_for IS NOT NULL
-		AND billing_failed_for IS NOT DISTINCT FROM LEAST(next_billing_at, CASE WHEN status = 'active' THEN cancel_at END)`
-	dueHelp := "Subscriptions due for billing now whose billing is not failing. A subscription is due once INVOICE_GRACE_PERIOD has passed after its period end or mid-period cancel. Spikes on busy billing days and falls as the scheduler drains it. Subscriptions with a saved billing failure are in hardcount_billing_failing_subscriptions. -1 = metric query failed."
-	ageHelp := "Seconds since the oldest due subscription whose billing is not failing became due (its period end or mid-period cancel plus INVOICE_GRACE_PERIOD); 0 when there is none. Alert when it exceeds 2x the billing interval: billing is behind, or a subscription's attempts are interrupted or hit connection errors on every tick. -1 = metric query failed."
+		AND billing_failed_for IS NOT DISTINCT FROM next_billing_at`
+	dueHelp := "Subscriptions due for billing now whose billing is not failing. A subscription is due once INVOICE_GRACE_PERIOD has passed after its period end. Spikes on busy billing days and falls as the scheduler drains it. Subscriptions with a saved billing failure are in hardcount_billing_failing_subscriptions. -1 = metric query failed."
+	ageHelp := "Seconds since the oldest due subscription whose billing is not failing became due (its period end plus INVOICE_GRACE_PERIOD); 0 when there is none. Alert when it exceeds 2x the billing interval: billing is behind, or a subscription's attempts are interrupted or hit connection errors on every tick. -1 = metric query failed."
 	// dueBy is now() less the grace, in whole microseconds (Postgres's
 	// timestamp resolution).
 	dueBy := fmt.Sprintf("(now() - interval '%d microseconds')", invoiceGrace.Microseconds())
 	duePredicate := `status = 'active' AND livemode = %t
-		AND (next_billing_at <= ` + dueBy + ` OR (cancel_at IS NOT NULL AND cancel_at <= ` + dueBy + `))
+		AND next_billing_at <= ` + dueBy + `
 		AND NOT (` + billingFailing + `)`
 	for _, m := range []struct {
 		label string
@@ -68,11 +68,7 @@ func registerQueueDepthGauges(reg prometheus.Registerer, invoiceGrace time.Durat
 		pred := fmt.Sprintf(duePredicate, m.live)
 		for _, g := range []struct{ name, help, query string }{
 			{"hardcount_billing_due_subscriptions", dueHelp, `SELECT COUNT(*) FROM subscriptions WHERE ` + pred},
-			// The due instant is the earlier of the arms that admit the row
-			// (LEAST skips the NULL of an arm that doesn't).
-			{"hardcount_billing_oldest_due_age_seconds", ageHelp, `SELECT COALESCE(EXTRACT(EPOCH FROM ` + dueBy + ` - MIN(LEAST(
-				CASE WHEN next_billing_at <= ` + dueBy + ` THEN next_billing_at END,
-				CASE WHEN cancel_at <= ` + dueBy + ` THEN cancel_at END))), 0)
+			{"hardcount_billing_oldest_due_age_seconds", ageHelp, `SELECT COALESCE(EXTRACT(EPOCH FROM ` + dueBy + ` - MIN(next_billing_at)), 0)
 				FROM subscriptions WHERE ` + pred},
 		} {
 			q := g.query

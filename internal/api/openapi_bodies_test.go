@@ -82,7 +82,6 @@ var requestBodies = map[string]requestBody{
 	"PATCH /v1/plans/{id}/prices/{price_id}":                            {body: domain.PriceShape{}},
 	"POST /v1/price-overrides":                                          {body: pricing.CreateOverrideInput{}},
 	"POST /v1/subscriptions":                                            {body: subscription.CreateInput{}},
-	"POST /v1/subscriptions/{id}/schedule-cancel":                       {body: subscription.ScheduleCancelInput{}},
 	"PUT /v1/subscriptions/{id}/pause-collection":                       {body: subscription.PauseCollectionInput{}},
 	"PUT /v1/subscriptions/{id}/billing-thresholds":                     {body: subscription.BillingThresholdsInput{}},
 	"POST /v1/subscriptions/{id}/items":                                 {body: subscription.AddItemInput{}},

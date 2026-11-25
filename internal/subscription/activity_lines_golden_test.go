@@ -416,7 +416,9 @@ func goldenActionCases(t *testing.T) []actionCase {
 		case domain.SubAuditCancelScheduled:
 			add(name+"/at period end", parent, m(map[string]any{"cancel_at_period_end": true, "cancel_effective_at": at(30)}))
 			add(name+"/at period end legacy", parent, m(map[string]any{"cancel_at_period_end": true}))
-			add(name+"/on a date", parent, m(map[string]any{"cancel_at_period_end": false, "cancel_at": at(45), "cancel_effective_at": at(45)}))
+			// Only earlier releases wrote cancel_at: they could schedule a
+			// cancel on a date, and their rows still read with it.
+			add(name+"/on a date, from an earlier release", parent, m(map[string]any{"cancel_at_period_end": false, "cancel_at": at(45), "cancel_effective_at": at(45)}))
 			add(name+"/no date", parent, m(map[string]any{}))
 		case domain.SubAuditCollectionPaused:
 			add(name+"/by dunning", parent, m(map[string]any{"triggered_by": "dunning", "behavior": "keep_as_draft"}))

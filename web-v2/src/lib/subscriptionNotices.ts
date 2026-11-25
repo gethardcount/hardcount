@@ -7,7 +7,7 @@
 // under the header, each keeping its own button. Order, most urgent first:
 //   1. billing failure: no invoice is being written, money is not billed;
 //   2. no payment method: renewals will be billed but can't be charged;
-//   3. scheduled cancel: billing ends on a date the operator chose;
+//   3. scheduled cancel: billing ends at the end of the current period;
 //   4. collection paused: a choice the operator made, invoices stay drafts.
 export type SubscriptionNoticeKind = 'billing_failure' | 'no_card' | 'cancel_scheduled' | 'collection_paused'
 
@@ -43,9 +43,9 @@ export function subscriptionNoticeLayout(s: SubscriptionNoticeSignals): Subscrip
   return { box: shown[0] ?? null, rows: shown.slice(1) }
 }
 
-// A scheduled cancel is either the at-period-end flag or an explicit date.
-export function hasScheduledCancel(sub: { cancel_at_period_end?: boolean; cancel_at?: string | null }): boolean {
-  return !!(sub.cancel_at_period_end || sub.cancel_at)
+// A scheduled cancel is the at-period-end flag.
+export function hasScheduledCancel(sub: { cancel_at_period_end?: boolean }): boolean {
+  return !!sub.cancel_at_period_end
 }
 
 // The billing-failure notice. The attempt count goes in the title; the
@@ -72,20 +72,16 @@ export function billingFailureNextLine(f: { parked: boolean; attempts: number },
 export const NO_CARD_TITLE = 'No payment method'
 export const NO_CARD_SENTENCE = "Renewals can't be charged until the customer adds a card."
 
-// The scheduled-cancel sentence. An at-period-end cancel names the last day
-// with access and the renewal that won't happen, the convention every date on
-// the page follows (lib/subscriptionPeriod): "through Nov 15", "doesn't renew
-// on Nov 16". An explicit cancel_at can fall mid-day, so it keeps its time:
-// effectiveLabel is the server's cancel_effective_at, formatted.
+// The scheduled-cancel sentence. It names the last day with access and the
+// renewal that won't happen, the convention every date on the page follows
+// (lib/subscriptionPeriod): "through Nov 15", "doesn't renew on Nov 16".
 export function cancelScheduledSentence(
   sub: { cancel_at_period_end?: boolean },
-  d: { effectiveLabel?: string; accessThrough?: string | null; cancelsOn?: string | null },
+  d: { accessThrough?: string | null; cancelsOn?: string | null },
 ): string | null {
-  if (sub.cancel_at_period_end) {
-    if (d.accessThrough && d.cancelsOn) return `The customer keeps access through ${d.accessThrough}; it doesn't renew on ${d.cancelsOn}.`
-    return d.cancelsOn ? `It doesn't renew on ${d.cancelsOn}.` : null
-  }
-  return d.effectiveLabel ? `Cancels on ${d.effectiveLabel}.` : null
+  if (!sub.cancel_at_period_end) return null
+  if (d.accessThrough && d.cancelsOn) return `The customer keeps access through ${d.accessThrough}; it doesn't renew on ${d.cancelsOn}.`
+  return d.cancelsOn ? `It doesn't renew on ${d.cancelsOn}.` : null
 }
 
 // The collection-paused sentence. resumesLabel is the formatted resumes_at.

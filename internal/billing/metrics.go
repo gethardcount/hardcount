@@ -16,7 +16,7 @@ var (
 	invoicesGenerated = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "hardcount_invoices_generated_total",
-			Help: "Invoices built by the scheduled billing run's period closes, both modes, including a close that ends a subscription canceled at its period end. Not counted: the final invoice of a cancel scheduled inside a period, spend-threshold invoices, cancels that take effect at once, POST /v1/billing/run and invoices created through the API.",
+			Help: "Invoices built by the scheduled billing run's period closes, both modes, including a close that ends a subscription canceled at its period end. Not counted: spend-threshold invoices, cancels that take effect at once, POST /v1/billing/run and invoices created through the API.",
 		},
 	)
 

@@ -1191,7 +1191,7 @@ func eventTypes(events []capturedEvent) []string {
 }
 
 // TestHandler_ScheduleCancel_SetsTheSchedule covers the soft-cancel handler
-// surface: the at_period_end body is accepted, the row picks up
+// surface: a request with no body is accepted, the row picks up
 // CancelAtPeriodEnd=true, and status remains active (schedule must not flip
 // status). Audit logging is wired in handler.go and exercised in the
 // integration tests; here we focus on the contract a UI client depends on.
@@ -1205,8 +1205,7 @@ func TestHandler_ScheduleCancel_SetsTheSchedule(t *testing.T) {
 	svc := NewService(store, nil)
 	h := NewHandler(svc)
 
-	body := bytes.NewBufferString(`{"at_period_end": true}`)
-	req := httptest.NewRequest(http.MethodPost, "/subscriptions/"+subID+"/schedule-cancel", body)
+	req := httptest.NewRequest(http.MethodPost, "/subscriptions/"+subID+"/schedule-cancel", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", subID)
 	req = req.WithContext(auth.WithTenantID(
@@ -1232,28 +1231,21 @@ func TestHandler_ScheduleCancel_SetsTheSchedule(t *testing.T) {
 	}
 }
 
-// TestHandler_ScheduleCancel_RejectsBadInput verifies the validation chain
-// surfaces 400 cleanly: empty body and both fields together both fail at the
-// service layer, and the handler must translate that into a 4xx — never a
-// silent 200 with an unset schedule.
-func TestHandler_ScheduleCancel_RejectsBadInput(t *testing.T) {
+// TestHandler_ScheduleCancel_RefusesABody: schedule-cancel takes no body, so
+// a body that names a cancel date or the at-period-end choice is a 422 naming
+// that field, and nothing is scheduled.
+func TestHandler_ScheduleCancel_RefusesABody(t *testing.T) {
 	ctx := context.Background()
 	tenantID := "t1"
 	store := newMemStore()
 	subID, _ := seedSubWithItem(t, store, tenantID, "cus_1", "plan_old")
-	svc := NewService(store, nil)
-	h := NewHandler(svc)
+	h := NewHandler(NewService(store, nil))
 
-	cases := []struct {
-		name string
-		body string
-	}{
-		{"empty input", `{}`},
-		{"both fields set", `{"at_period_end": true, "cancel_at": "2099-01-01T00:00:00Z"}`},
-		{"past timestamp", `{"cancel_at": "2020-01-01T00:00:00Z"}`},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, tc := range []struct{ body, param string }{
+		{`{"cancel_at": "2099-01-01T00:00:00Z"}`, "cancel_at"},
+		{`{"at_period_end": true}`, "at_period_end"},
+	} {
+		t.Run(tc.body, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/subscriptions/"+subID+"/schedule-cancel", bytes.NewBufferString(tc.body))
 			rctx := chi.NewRouteContext()
 			rctx.URLParams.Add("id", subID)
@@ -1263,8 +1255,22 @@ func TestHandler_ScheduleCancel_RejectsBadInput(t *testing.T) {
 			))
 			rr := httptest.NewRecorder()
 			h.scheduleCancel(rr, req)
-			if rr.Code < 400 || rr.Code >= 500 {
-				t.Errorf("status: got %d, want 4xx. body=%s", rr.Code, rr.Body.String())
+			if rr.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("status: got %d, want 422. body=%s", rr.Code, rr.Body.String())
+			}
+			var env struct {
+				Error struct {
+					Param string `json:"param"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if env.Error.Param != tc.param {
+				t.Errorf("param: got %q, want %q", env.Error.Param, tc.param)
+			}
+			if store.subs[subID].CancelAtPeriodEnd {
+				t.Error("a refused request scheduled the cancel")
 			}
 		})
 	}
@@ -1399,7 +1405,7 @@ func TestHandler_ClearScheduledCancel_ClearsTheSchedule(t *testing.T) {
 	store := newMemStore()
 	subID, _ := seedSubWithItem(t, store, tenantID, "cus_1", "plan_old")
 	svc := NewService(store, nil)
-	if _, err := svc.ScheduleCancel(ctx, tenantID, subID, ScheduleCancelInput{AtPeriodEnd: true}); err != nil {
+	if _, err := svc.ScheduleCancel(ctx, tenantID, subID); err != nil {
 		t.Fatalf("seed schedule: %v", err)
 	}
 	h := NewHandler(svc)

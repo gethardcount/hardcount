@@ -488,7 +488,7 @@ func TestE2E_WebhookPayloads_Subscription(t *testing.T) {
 	base := "/v1/subscriptions/" + subID
 	checkEventResource(t, "subscription.created", events.next("create", domain.EventSubscriptionCreated)[domain.EventSubscriptionCreated], getSub(subID))
 
-	ev := step("schedule cancel", domain.EventSubscriptionCancelScheduled, "POST", base+"/schedule-cancel", map[string]any{"at_period_end": true}, 200)
+	ev := step("schedule cancel", domain.EventSubscriptionCancelScheduled, "POST", base+"/schedule-cancel", nil, 200)
 	checkEventResource(t, "subscription.cancel_scheduled", ev, getSub(subID))
 	ev = step("clear scheduled cancel", domain.EventSubscriptionCancelCleared, "DELETE", base+"/scheduled-cancel", nil, 200)
 	checkEventResource(t, "subscription.cancel_cleared", ev, getSub(subID))
@@ -660,7 +660,7 @@ func TestE2E_WebhookPayloads_SubscriptionSchedule(t *testing.T) {
 	call("PATCH", "/v1/subscriptions/"+flowStr(changing, "id")+"/items/"+changeItem,
 		map[string]any{"new_plan_id": pro, "immediate": false}).want(t, 200, "schedule plan change")
 	ending := newSub("wps-ending")
-	call("POST", "/v1/subscriptions/"+flowStr(ending, "id")+"/schedule-cancel", map[string]any{"at_period_end": true}).want(t, 200, "schedule cancel")
+	call("POST", "/v1/subscriptions/"+flowStr(ending, "id")+"/schedule-cancel", nil).want(t, 200, "schedule cancel")
 	events.next("setup")
 
 	// Past the first period end: the plan change applies and the scheduled

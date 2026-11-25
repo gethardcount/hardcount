@@ -199,8 +199,7 @@ Read two fields of the retry response:
 
 `invoices_generated` is not the success test. It counts only the invoices
 built when a period closes, at the end of a billing period. It is 0 when
-the retry fired a scheduled cancel (the subscription comes back `canceled`,
-with its final invoice), or closed a period with nothing to bill.
+the retry closed a period with nothing to bill.
 
 `hardcount_billing_failing_subscriptions` falls on the next scrape.
 

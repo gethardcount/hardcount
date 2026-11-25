@@ -502,7 +502,7 @@ func TestUsageAfterClose_HeldReleaseInTheGrace(t *testing.T) {
 func TestUsageAfterClose_HeldReleaseInTheGrace_CancelAtPeriodEnd(t *testing.T) {
 	r, planT := newTokensRig(t)
 	r.newSub("held", planT, lagP0)
-	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", lagP0.AddDate(0, 0, 9), map[string]any{"at_period_end": true}, http.StatusOK)
+	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", lagP0.AddDate(0, 0, 9), nil, http.StatusOK)
 	out := r.heldRelease(lagB.Add(10*time.Minute), lagB.Add(20*time.Minute))
 	if count(out, "released") != 2 || count(out, "outside_open_period") != 2 || count(out, "in_open_period") != 0 {
 		t.Errorf("release answer = %v, want released 2, outside_open_period 2", out)

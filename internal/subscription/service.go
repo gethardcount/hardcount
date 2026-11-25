@@ -1902,95 +1902,6 @@ func CancelOrigin(ctx context.Context) string {
 	return origin
 }
 
-// FireDueScheduledCancel executes a scheduled cancel whose cancel_at fell
-// strictly inside a billing period (ADR-097) — the billing engine detects
-// due-ness through the cycle scans' cancel arm and delegates the transition
-// here via its ScheduledCancelExecutor seam, keeping the domain boundary:
-// the engine knows WHEN, this domain owns HOW.
-//
-// The composition is Cancel's, with three deltas: the flip rides
-// FireScheduledCancellationWithBill (CAS on status, the period AND
-// cancel_at = at, so a concurrent unschedule/re-schedule defeats the fire),
-// canceled_at is the contracted instant `at` rather than now, and
-// provenance is "schedule". A row read as no longer active, or with another
-// cancel_at, returns nil before anything is priced, and so do the store's
-// two benign race outcomes (already terminated; schedule changed): whichever
-// writer won has left the sub in a state the scans resolve on their own.
-//
-// The bill is planned before the transaction (ADR-139), so the tax call
-// holds no lock. A period or item change that commits in between returns
-// ErrWatermarkMoved with nothing written; billSubscription re-reads once and
-// fires again.
-func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id string, at time.Time) error {
-	sub, err := s.store.Get(ctx, tenantID, id)
-	if err != nil {
-		return err
-	}
-	if sub.Status != domain.SubscriptionActive || sub.CancelAt == nil || !sub.CancelAt.Equal(at) {
-		slog.InfoContext(ctx, "due scheduled cancel: benign race, skipping",
-			"subscription_id", id, "tenant_id", tenantID, "status", sub.Status,
-			"reason", "the subscription is no longer active with this cancel scheduled")
-		return nil
-	}
-	plan, err := s.planCancel(ctx, tenantID, sub, at)
-	if err != nil {
-		return fmt.Errorf("scheduled cancel: %w", err)
-	}
-
-	var finalInv domain.Invoice
-	afterBillCommit := func() {}
-	var relief domain.Relief
-	canceled, err := s.store.FireScheduledCancellationWithBill(ctx, tenantID, id, SnapshotOf(sub), at, func(tx *sql.Tx, c domain.Subscription) error {
-		emitAudit := func(r domain.Relief, currency string) error {
-			if s.audit == nil {
-				return nil
-			}
-			meta := map[string]any{
-				"customer_id": c.CustomerID,
-				"plan_ids":    planIDsFromItems(c.Items),
-				"canceled_by": "schedule",
-			}
-			addReliefMeta(meta, r, currency)
-			if auditErr := s.audit.LogInTx(ctx, tx, audit.Entry{
-				Action:        domain.AuditActionCancel,
-				ResourceType:  "subscription",
-				ResourceID:    c.ID,
-				ResourceLabel: c.Code,
-				Metadata:      meta,
-			}); auditErr != nil {
-				return fmt.Errorf("audit emission: %w", auditErr)
-			}
-			return nil
-		}
-		inv, r, afterCommit, billErr := plan.writeTx(ctx, tx, s.store, c)
-		if billErr != nil {
-			return fmt.Errorf("scheduled cancel: %w", billErr)
-		}
-		finalInv, relief, afterBillCommit = inv, r, afterCommit
-		return emitAudit(r, inv.Currency)
-	})
-	if err != nil {
-		// Only the fire's own race outcomes are benign. A relief or billing
-		// refusal is also an InvalidState, and skipping it silently left the
-		// subscription active past its cancel_at; it is returned, so the
-		// billing run reports it and saves it as a billing failure (ADR-119).
-		// ErrWatermarkMoved is returned too: billSubscription fires again.
-		if errs.Code(err) == ScheduledCancelSuperseded {
-			slog.InfoContext(ctx, "due scheduled cancel: benign race, skipping",
-				"subscription_id", id, "tenant_id", tenantID, "reason", err.Error())
-			return nil
-		}
-		return err
-	}
-
-	afterBillCommit()
-
-	// Post-commit legs, as in Cancel: the relief first, so its credit reduces
-	// the final invoice, then the final invoice's tax commit and collection.
-	s.finishReliefThenCollect(ctx, canceled, relief, finalInv)
-	return nil
-}
-
 // closeEndedPeriods closes the periods of an active subscription that have
 // ended and that the billing run has not closed yet. The billing run closes a
 // period on its first tick after the boundary (up to an hour today, longer
@@ -2337,8 +2248,8 @@ type RetryBillingResult struct {
 	// is set when the attempt failed and the failure was saved.
 	Subscription domain.Subscription
 	// InvoicesGenerated counts the period-close invoices the attempt created.
-	// A scheduled cancel's final invoice is not counted, so 0 does not mean
-	// failure.
+	// A period with nothing to bill closes with no invoice, so 0 does not
+	// mean failure.
 	InvoicesGenerated int
 	// StillDue is true when, after the attempt, the subscription has no saved
 	// failure and is still due: the attempt did not complete and nothing was
@@ -2432,37 +2343,13 @@ func (s *Service) RetryBilling(ctx context.Context, tenantID, id string) (RetryB
 	return res, nil
 }
 
-// ScheduleCancelInput carries the soft-cancel intent. Exactly one of
-// AtPeriodEnd or CancelAt must be set on a single call. AtPeriodEnd defers
-// the cancel to current_billing_period_end. CancelAt is an explicit
-// timestamp the cycle scan compares against the run's instant. The
-// mutually-exclusive split forces unambiguous caller intent — Stripe's
-// update endpoint accepts both fields together but the resulting precedence
-// is surprising; rejecting the combination here keeps the API obvious. The
-// derived read-only cancel_effective_at on the subscription answers "when
-// does it actually cancel" for consumers.
-type ScheduleCancelInput struct {
-	AtPeriodEnd bool       `json:"at_period_end,omitempty"`
-	CancelAt    *time.Time `json:"cancel_at,omitempty"`
-}
-
-// ScheduleCancel persists the soft-cancel intent. CancelAt must be >=
-// current_billing_period_end so the period bills normally and the cancel
-// lands on a clean cycle boundary (the shorten-current-period + proration
-// variant needs the proration generator wired into the engine cancel path).
-//
-// Re-scheduling is idempotent: a second call with the same intent leaves
-// the row unchanged but for updated_at. Toggling between modes (e.g.
-// AtPeriodEnd → CancelAt) is allowed because each call is a full
-// replacement of the row's schedule fields.
-func (s *Service) ScheduleCancel(ctx context.Context, tenantID, id string, input ScheduleCancelInput) (domain.Subscription, error) {
-	if !input.AtPeriodEnd && input.CancelAt == nil {
-		return domain.Subscription{}, errs.Invalid("body", "one of at_period_end or cancel_at must be set")
-	}
-	if input.AtPeriodEnd && input.CancelAt != nil {
-		return domain.Subscription{}, errs.Invalid("body", "at_period_end and cancel_at cannot be set together; pick one")
-	}
-
+// ScheduleCancel schedules the subscription to cancel at the end of the
+// period that is running: that period's close bills it and cancels the
+// subscription (the store's FireScheduledCancellationTx), and skips the next
+// period's in-advance base fee. Calling it again on a subscription already
+// scheduled leaves the schedule as it is, and only updated_at moves. A
+// canceled subscription is refused with InvalidState.
+func (s *Service) ScheduleCancel(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
 	// "Period end" is the end of the period that is running. In the gap
 	// after a boundary the row still holds the ended period, and a flag set
 	// there would cancel retroactively at that boundary.
@@ -2470,33 +2357,10 @@ func (s *Service) ScheduleCancel(ctx context.Context, tenantID, id string, input
 	if err != nil {
 		return domain.Subscription{}, err
 	}
-
-	// cancel_at must be after this time.
-	now := s.clock.Now(ctx)
-	var cancelAt *time.Time
-	if input.CancelAt != nil {
-		ts := input.CancelAt.UTC()
-		if !ts.After(now) {
-			return domain.Subscription{}, errs.Invalid("cancel_at", "must be in the future")
-		}
-		if sub.CurrentBillingPeriodEnd != nil && ts.Before(*sub.CurrentBillingPeriodEnd) {
-			// The message must name the ACTUAL constraint: only the period
-			// already in progress is closed. A cancel_at landing mid-period in
-			// a LATER period is accepted and prorates correctly — ADR-097
-			// shipped that firing path, and FLOW TC8 walks it (cancel_at on the
-			// 16th of a future month produces a final invoice for
-			// [period_start, cancel_at] at 15/30 of the base). The previous
-			// wording, "mid-period cancel with proration is not yet supported",
-			// described a capability gap that no longer exists and sent
-			// operators looking for a workaround they don't need.
-			return domain.Subscription{}, errs.Invalid("cancel_at", fmt.Sprintf(
-				"must be on or after current_billing_period_end (%s) — the period already in progress can't be shortened; a date inside a later period is fine and bills that period prorated up to it",
-				sub.CurrentBillingPeriodEnd.UTC().Format(time.RFC3339)))
-		}
-		cancelAt = &ts
+	if sub.Status != domain.SubscriptionActive {
+		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("A %s subscription can't be scheduled to cancel.", sub.Status))
 	}
-
-	return s.store.ScheduleCancellation(ctx, tenantID, id, cancelAt, input.AtPeriodEnd, sub.Status)
+	return s.store.ScheduleCancellation(ctx, tenantID, id)
 }
 
 // ClearScheduledCancel undoes any prior schedule. The store queues

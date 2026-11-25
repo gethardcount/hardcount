@@ -172,7 +172,7 @@ test('activity shots: spend thresholds, a cancellation undone, collection paused
   const sub = await subscribe(customer.id, plan.id)
 
   await api('PUT', `/subscriptions/${sub.id}/billing-thresholds`, { amount_gte: 50000 })
-  await asPerson(page, 'POST', `/subscriptions/${sub.id}/schedule-cancel`, { at_period_end: true })
+  await asPerson(page, 'POST', `/subscriptions/${sub.id}/schedule-cancel`)
   await asPerson(page, 'DELETE', `/subscriptions/${sub.id}/scheduled-cancel`)
   await api('PUT', `/subscriptions/${sub.id}/pause-collection`, { behavior: 'keep_as_draft' })
   await asPerson(page, 'DELETE', `/subscriptions/${sub.id}/pause-collection`)

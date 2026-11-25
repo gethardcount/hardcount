@@ -1175,13 +1175,6 @@ components:
           type: string
           format: date-time
           description: When the subscription was canceled. Absent until then.
-        cancel_at:
-          type: string
-          format: date-time
-          description: |
-            The instant a cancel is scheduled for, when it was scheduled
-            with `cancel_at`. Absent when none is set, and after the
-            subscription is canceled.
         cancel_at_period_end:
           type: boolean
           description: |
@@ -1191,10 +1184,9 @@ components:
           type: string
           format: date-time
           description: |
-            When a scheduled cancel takes effect: `cancel_at` when set;
-            otherwise, with `cancel_at_period_end`,
-            `current_billing_period_end`. Absent when no cancel is
-            scheduled.
+            When a scheduled cancel takes effect: with
+            `cancel_at_period_end`, `current_billing_period_end`. Absent
+            when no cancel is scheduled.
         pause_collection:
           $ref: "#/components/schemas/SubscriptionPauseCollection"
         billing_thresholds:
@@ -1277,9 +1269,10 @@ components:
       required: [attempts, max_attempts, last_error, failed_at, parked]
       description: |
         Present on a subscription while the billing run is failing on the
-        work that subscription has due now (a period close, or a scheduled
-        mid-period cancel). Absent otherwise: a subscription that bills
-        cleanly, or whose due work changed, carries no `billing_failure`.
+        work that subscription has due now: the close of its current period,
+        which also cancels it when a cancel is scheduled. Absent otherwise: a
+        subscription that bills cleanly, or whose due work changed, carries
+        no `billing_failure`.
 
         After each failed attempt the billing run waits before the next one:
         15 minutes, 1 hour, 4 hours, 12 hours, then 24 hours three times.
@@ -15488,8 +15481,8 @@ paths:
                   invoices_generated:
                     type: integer
                     description: |
-                      Period-close invoices this call created. The final
-                      invoice of a scheduled cancel is not counted, so 0
+                      Period-close invoices this call created. A period
+                      with nothing to bill closes with no invoice, so 0
                       does not mean the retry failed. Read success from
                       `subscription.billing_failure` and `still_due`.
                   still_due:
@@ -15662,10 +15655,10 @@ paths:
         final invoice is collected, so that credit reduces it.
 
         If a billing period has already ended, it is billed first. If a
-        scheduled cancel was already due, that cancel takes effect at its
-        scheduled time and the canceled subscription is returned. The
-        canceled subscription keeps its last `current_billing_period_*`
-        and `next_billing_at`; nothing is billed at that time.
+        cancel was scheduled at the end of that period, it takes effect then
+        and the canceled subscription is returned. The canceled
+        subscription keeps its last `current_billing_period_*` and
+        `next_billing_at`; nothing is billed at that time.
 
         Sends the `subscription.canceled` webhook event.
       parameters:
@@ -15776,18 +15769,16 @@ paths:
       summary: Schedule a cancel
       operationId: scheduleSubscriptionCancel
       description: |
-        Schedules the subscription to cancel later. Set exactly one of
-        `at_period_end` or `cancel_at`. A new call replaces any earlier
-        schedule. If a billing period has ended and is not invoiced yet,
-        it is billed first, so "the current period" is the one running.
+        Schedules the subscription to cancel at the end of the current
+        period. Takes no body. If a billing period has ended and is not
+        invoiced yet, it is billed first, so "the current period" is the one
+        running. That period's invoice is the subscription's last: an
+        in-advance base fee for the next period is not billed.
 
-        `at_period_end` cancels at the end of the current period.
-        `cancel_at` must be on or after the end of the current period. A
-        date inside a later period is allowed, and that period is billed up
-        to the date.
-
-        The response's `cancel_effective_at` says when the cancel takes
-        effect. Sends the `subscription.cancel_scheduled` webhook event.
+        Calling it on a subscription already scheduled leaves the schedule
+        as it is. The response's `cancel_effective_at` says when the cancel
+        takes effect. Sends the `subscription.cancel_scheduled` webhook
+        event.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
@@ -15796,22 +15787,6 @@ paths:
           description: The subscription's ID (`hc_sub_…`).
           schema:
             type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                at_period_end:
-                  type: boolean
-                  description: Cancel at the end of the current period.
-                cancel_at:
-                  type: string
-                  format: date-time
-                  description: Cancel at this instant. Must be in the future.
-            example:
-              at_period_end: true
       responses:
         "200":
           description: The subscription with the schedule set.
@@ -15845,17 +15820,7 @@ paths:
                 created_at: "2026-10-01T09:12:44Z"
                 updated_at: "2026-10-20T16:45:00Z"
         "400":
-          description: The body is not valid JSON, a field has a value of the wrong JSON type, or `cancel_at` is not an RFC 3339 date-time.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: invalid_request
-                  message: invalid JSON body
-                  request_id: req_dbjg652q3gpgqfoq5cd0
+          $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -15874,8 +15839,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "409":
           description: |
-            Code `invalid_state`: the subscription is `canceled`, or its
-            status changed while the request ran (read
+            Code `invalid_state`: the subscription is `canceled`, or it was
+            canceled while the request ran (read
             it again and retry). Code `unbilled_period`: a billing period
             ended and could not be invoiced; retry billing first.
           content:
@@ -15892,10 +15857,8 @@ paths:
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
-            Code `validation_error`: neither or both of `at_period_end` and
-            `cancel_at` are set (`param: body`), or `cancel_at` is in the
-            past or breaks the date rules above (`param: cancel_at`).
-            Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
+            The request has a body with a field (`param` names it). This
+            route takes no body: send none, `{}` or `null`.
           content:
             application/json:
               schema:
@@ -15904,9 +15867,9 @@ paths:
                 error:
                   type: invalid_request_error
                   code: validation_error
-                  message: one of at_period_end or cancel_at must be set
+                  message: unknown field "cancel_at"
                   request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: body
+                  param: cancel_at
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -15921,8 +15884,8 @@ paths:
         subscription with no schedule returns the subscription unchanged
         and sends no event.
 
-        If the scheduled date has already passed, the cancel has taken
-        effect and the request answers 409.
+        If the period the cancel was scheduled for has already ended, the
+        cancel has taken effect and the request answers 409.
       parameters:
         - name: id
           in: path
@@ -23210,9 +23173,8 @@ paths:
       description: |
         Runs the billing run now for this account and mode, the same run
         the scheduler makes. It invoices every subscription that is due:
-        an `active` subscription whose period ended, or whose
-        scheduled mid-period cancel came, more than the invoice grace ago
-        (`INVOICE_GRACE_PERIOD`, 1 hour by default), so usage that arrives
+        an `active` subscription whose period ended more than the invoice
+        grace ago (`INVOICE_GRACE_PERIOD`, 1 hour by default), so usage that arrives
         late still makes its invoice. A subscription overdue for several
         periods gets one invoice per period.
 

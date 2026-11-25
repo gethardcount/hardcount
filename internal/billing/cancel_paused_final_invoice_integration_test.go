@@ -15,7 +15,7 @@ import (
 // operator resumes collection (TestCanceledPausedSub_PauseStillHoldsItsInvoices
 // in internal/invoice covers the sweep and the tax retry).
 //
-// Mutation: clear the pause in the cancel and both cases fail.
+// Mutation: clear the pause in the cancel and the case fails.
 func TestCancel_PausedSub_FinalInvoiceStaysDraft(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 
@@ -24,7 +24,6 @@ func TestCancel_PausedSub_FinalInvoiceStaysDraft(t *testing.T) {
 		run  func(*reliefCancelRig, *testing.T)
 	}{
 		{"immediate cancel", (*reliefCancelRig).cancelImmediately},
-		{"scheduled cancel", (*reliefCancelRig).fireScheduledCancel},
 	}
 	for _, c := range cancels {
 		t.Run(c.name, func(t *testing.T) {

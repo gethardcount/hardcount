@@ -474,23 +474,20 @@ func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
 	h.respondSub(w, r, http.StatusOK, sub)
 }
 
-// scheduleCancel records a soft-cancel intent. Body must set exactly one of
-// {at_period_end:true, cancel_at:<RFC3339>}. The current period is
-// unaffected and the billing engine flips the sub to canceled at the
-// boundary; the response's derived cancel_effective_at states when the
-// cancel lands. Re-calling
-// replaces any prior schedule (so a caller can switch modes with a new
-// request); a 409 means the sub's status changed mid-flight — re-read.
+// scheduleCancel schedules the subscription to cancel at the end of the
+// current period. It takes no body. The current period is unaffected: its
+// close bills it and cancels the subscription, and the response's derived
+// cancel_effective_at states when. Calling it again on a scheduled
+// subscription changes nothing; a 409 means the subscription is canceled,
+// or was canceled while the request ran (re-read).
 func (h *Handler) scheduleCancel(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
-	var input ScheduleCancelInput
-	if !respond.DecodeStrict(w, r, &input) {
-		return
-	}
-
-	sub, err := h.svc.ScheduleCancel(r.Context(), tenantID, id, input)
+	sub, err := h.svc.ScheduleCancel(r.Context(), tenantID, id)
 	if err != nil {
 		respond.FromError(w, r, err, "subscription")
 		return
@@ -501,9 +498,6 @@ func (h *Handler) scheduleCancel(w http.ResponseWriter, r *http.Request) {
 			"action":               domain.SubAuditCancelScheduled,
 			"customer_id":          sub.CustomerID,
 			"cancel_at_period_end": sub.CancelAtPeriodEnd,
-		}
-		if sub.CancelAt != nil {
-			meta["cancel_at"] = sub.CancelAt.UTC()
 		}
 		// When it lands; the activity line shows it.
 		if sub.CancelEffectiveAt != nil {

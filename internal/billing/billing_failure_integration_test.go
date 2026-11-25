@@ -564,52 +564,6 @@ func TestBillingFailure_MultiPeriodCatchupRecordsTheFailingPeriod(t *testing.T) 
 	}
 }
 
-// TestBillingFailure_MidPeriodCancelFails_ClearingTheCancelVoids: the failing
-// work is a mid-period cancel at cancel_at, not the close at next_billing_at.
-// Un-scheduling the cancel removes that work, so the record is void and the
-// close bills when it comes due. A record keyed on next_billing_at alone would
-// still gate that close.
-func TestBillingFailure_MidPeriodCancelFails_ClearingTheCancelVoids(t *testing.T) {
-	env := newBillFailureEnv(t, "Billing Failure Mid-period Cancel")
-	apr, may := env.periodEnd, env.periodEnd.AddDate(0, 1, 0)
-	// The clock sits in the April period; the close at May 1 is not due.
-	env.clock.Set(apr.AddDate(0, 0, 10))
-	a := env.subWith(t, domain.Subscription{Code: "sub-cancel", Status: domain.SubscriptionActive}, env.planOK, apr, may, may)
-	cancelAt := apr.AddDate(0, 0, 5)
-	if _, err := env.subs.ScheduleCancellation(env.ctx, env.tenantID, a.ID, &cancelAt, false, domain.SubscriptionActive); err != nil {
-		t.Fatalf("schedule cancel: %v", err)
-	}
-	// This engine has no ScheduledCancelExecutor wired, so the due cancel
-	// fails loud on every attempt: a deterministic failure of the cancel.
-	for n := 1; n <= domain.MaxBillingAttempts; n++ {
-		env.mustFail(t, a.ID)
-		if n < domain.MaxBillingAttempts {
-			env.clock.Advance(billLadder[n-1])
-		}
-	}
-	bf := env.get(t, a.ID).BillingFailure
-	if bf == nil || !bf.Parked {
-		t.Fatalf("setup: %+v, want the failing cancel parked", bf)
-	}
-	if cols := env.billingColumns(t, a.ID); !strings.HasPrefix(cols, cancelAt.UTC().Format("2006-01-02 15:04:05")+"|8|") {
-		t.Fatalf("record = %s, want it keyed to cancel_at %s", cols, cancelAt)
-	}
-
-	if _, err := env.subs.ClearScheduledCancellation(env.ctx, env.tenantID, a.ID); err != nil {
-		t.Fatalf("clear cancel: %v", err)
-	}
-	if bf := env.get(t, a.ID).BillingFailure; bf != nil {
-		t.Fatalf("clearing the failing cancel left the record live: %+v", bf)
-	}
-	env.clock.Set(may.Add(time.Second))
-	if _, errs := env.engine.RunCycle(env.ctx, 50, nil); len(errs) != 0 {
-		t.Fatalf("close after the cancel was cleared: %v", errs)
-	}
-	if n := env.invoiceCount(t, a.ID); n != 1 {
-		t.Fatalf("%d invoices for the April period, want 1: a park for the cancel must not gate the close", n)
-	}
-}
-
 // TestBillingFailure_UncountedFailuresSaveNothing: an interrupted run and a
 // database error that took the connection or the transaction away say nothing
 // about the subscription. Nothing is saved, no wait starts, and the very next

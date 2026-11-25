@@ -214,7 +214,7 @@ export default function SubscriptionDetailPage() {
   })
 
   const scheduleCancelMutation = useMutation({
-    mutationFn: () => api.scheduleSubscriptionCancel(id!, { at_period_end: true }),
+    mutationFn: () => api.scheduleSubscriptionCancel(id!),
     onSuccess: (updated) => {
       invalidateAll()
       const t = scheduleCancelToast(updated?.cancel_effective_at ? formatDate(updated.cancel_effective_at) : undefined)
@@ -352,10 +352,7 @@ export default function SubscriptionDetailPage() {
             {clearScheduledCancelMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Undoing…</> : 'Undo'}
           </Button>
         )
-        // cancel_effective_at is the backend's authoritative answer:
-        // cancel_at when set, else the end of the current period.
         const sentence = cancelScheduledSentence(sub, {
-          effectiveLabel: sub.cancel_effective_at ? formatDateTime(sub.cancel_effective_at) : undefined,
           accessThrough: labels.accessThrough,
           cancelsOn: labels.cancelsOn,
         })

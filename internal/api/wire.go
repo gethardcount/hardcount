@@ -467,7 +467,6 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	engine.SetDunningStarter(&dunningStarterAdapter{dunning: dunningSvc})
 	engine.SetStripeReadiness(stripeClients)
 	engine.SetInvoiceEmailer(invoiceH.Emailer())
-	engine.SetScheduledCancelExecutor(subSvc)
 	engine.SetDunningResolver(dunningSvc)
 	engine.SetTaxProviderResolver(tax.NewResolver(stripeClients))
 	engine.SetTaxCalculationStore(tax.NewPostgresStore(db))

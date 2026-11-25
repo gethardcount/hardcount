@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -86,9 +84,9 @@ func (r *liveStateRig) seed(code string) domain.Subscription {
 	return sub
 }
 
-func (r *liveStateRig) schedule(sub domain.Subscription, at *time.Time, atPeriodEnd bool) {
+func (r *liveStateRig) schedule(sub domain.Subscription) {
 	r.t.Helper()
-	if _, err := r.store.ScheduleCancellation(r.ctx, r.tenantID, sub.ID, at, atPeriodEnd, sub.Status); err != nil {
+	if _, err := r.store.ScheduleCancellation(r.ctx, r.tenantID, sub.ID); err != nil {
 		r.t.Fatalf("schedule cancel: %v", err)
 	}
 }
@@ -111,8 +109,8 @@ func (r *liveStateRig) requireRetired(label string, sub domain.Subscription) {
 	if sub.Status != domain.SubscriptionCanceled {
 		r.t.Fatalf("%s: status %s, want canceled", label, sub.Status)
 	}
-	if sub.CancelAt != nil || sub.CancelAtPeriodEnd {
-		r.t.Errorf("%s: cancel schedule left on a canceled subscription: cancel_at=%v at_period_end=%v", label, sub.CancelAt, sub.CancelAtPeriodEnd)
+	if sub.CancelAtPeriodEnd {
+		r.t.Errorf("%s: cancel schedule left on a canceled subscription: cancel_at_period_end=%v", label, sub.CancelAtPeriodEnd)
 	}
 	if sub.PauseCollection == nil {
 		r.t.Errorf("%s: the cancel cleared the pause: it still holds the subscription's unpaid invoices", label)
@@ -158,7 +156,7 @@ func TestCancelWriters_RetireLiveOnlyState(t *testing.T) {
 	}
 	writers := []writer{
 		{"CancelAtomicWithBill", func(t *testing.T, sub domain.Subscription) (domain.Subscription, *domain.Subscription) {
-			r.schedule(sub, nil, true)
+			r.schedule(sub)
 			var saw *domain.Subscription
 			got, err := r.store.CancelAtomicWithBill(r.ctx, r.tenantID, sub.ID, SnapshotOf(sub), r.now, billSaw(&saw))
 			if err != nil {
@@ -166,18 +164,8 @@ func TestCancelWriters_RetireLiveOnlyState(t *testing.T) {
 			}
 			return got, saw
 		}},
-		{"FireScheduledCancellationWithBill", func(t *testing.T, sub domain.Subscription) (domain.Subscription, *domain.Subscription) {
-			at := r.now.Add(-time.Minute)
-			r.schedule(sub, &at, false)
-			var saw *domain.Subscription
-			got, err := r.store.FireScheduledCancellationWithBill(r.ctx, r.tenantID, sub.ID, SnapshotOf(sub), at, billSaw(&saw))
-			if err != nil {
-				t.Fatalf("fire: %v", err)
-			}
-			return got, saw
-		}},
 		{"FireScheduledCancellationTx", func(t *testing.T, sub domain.Subscription) (domain.Subscription, *domain.Subscription) {
-			r.schedule(sub, nil, true)
+			r.schedule(sub)
 			var got domain.Subscription
 			if err := r.store.WithTenantTx(r.ctx, r.tenantID, func(tx *sql.Tx) error {
 				var err error
@@ -260,96 +248,4 @@ func (r *liveStateRig) canceledEvent(subID string) json.RawMessage {
 		r.t.Fatalf("decode subscription.canceled: %v", err)
 	}
 	return payload.Subscription
-}
-
-// TestMigration_ClearsLiveOnlyStateOnCanceledSubs: every cancel before this
-// release left its schedule and pending plan change on the row. The
-// migration clears them on canceled subscriptions, keeps their pause, and
-// leaves a live one untouched. (It also cleared archived ones; migration 201
-// removed that status.)
-func TestMigration_ClearsLiveOnlyStateOnCanceledSubs(t *testing.T) {
-	r := newLiveStateRig(t, "Migration Clears Live State")
-	canceled := r.seed("sub-mig-canceled")
-	live := r.seed("sub-mig-live")
-	r.schedule(live, nil, true)
-
-	// The rows an earlier cancel left: terminal status, every field kept.
-	tx, err := r.db.BeginTx(r.ctx, postgres.TxBypass, "")
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer postgres.Rollback(tx)
-	if _, err := tx.ExecContext(r.ctx, `UPDATE subscriptions SET status = 'canceled',
-		canceled_at = now(), cancel_at_period_end = true WHERE id = $1`, canceled.ID); err != nil {
-		t.Fatalf("seed terminal rows: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-
-	applyMigrationUp(t, r.ctx, r.db, "clear_canceled_subscription_live_state")
-
-	for _, id := range []string{canceled.ID} {
-		got, err := r.store.Get(r.ctx, r.tenantID, id)
-		if err != nil {
-			t.Fatalf("get %s: %v", id, err)
-		}
-		if got.CancelAtPeriodEnd || got.CancelAt != nil || got.Items[0].PendingPlanID != "" || got.Items[0].PendingPlanEffectiveAt != nil {
-			t.Errorf("%s (%s) keeps live-only state: at_period_end=%v cancel_at=%v pending=%q",
-				id, got.Status, got.CancelAtPeriodEnd, got.CancelAt, got.Items[0].PendingPlanID)
-		}
-		if got.PauseCollection == nil {
-			t.Errorf("%s (%s): the migration cleared the pause, which still holds its unpaid invoices", id, got.Status)
-		}
-	}
-	got, err := r.store.Get(r.ctx, r.tenantID, live.ID)
-	if err != nil {
-		t.Fatalf("get live: %v", err)
-	}
-	if !got.CancelAtPeriodEnd || got.PauseCollection == nil || got.Items[0].PendingPlanID != r.planB.ID {
-		t.Errorf("the migration changed a live subscription: at_period_end=%v pause=%v pending=%q", got.CancelAtPeriodEnd, got.PauseCollection, got.Items[0].PendingPlanID)
-	}
-}
-
-// applyMigrationUp runs the Up section of the migration *_<suffix>.sql on
-// rows the test seeded after the test database was migrated. It runs as the
-// app role in a plain transaction (no tenant, no bypass), a user row-level
-// security applies to, so the file's own bypass line is what lets it see the
-// rows. A check first proves the transaction sees no subscription without it.
-func applyMigrationUp(t *testing.T, ctx context.Context, db *postgres.DB, suffix string) {
-	t.Helper()
-	files, err := filepath.Glob(filepath.Join("..", "platform", "migrate", "sql", "*_"+suffix+".sql"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files) != 1 {
-		t.Fatalf("migration *_%s.sql: found %d files, want 1", suffix, len(files))
-	}
-	body, err := os.ReadFile(files[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	up, _, found := strings.Cut(string(body), "-- +goose Down")
-	if !found {
-		t.Fatalf("%s: no Down section", files[0])
-	}
-	up = strings.Replace(up, "-- +goose Up", "", 1)
-	tx, err := db.Pool.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer postgres.Rollback(tx)
-	var visible int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM subscriptions`).Scan(&visible); err != nil {
-		t.Fatal(err)
-	}
-	if visible != 0 {
-		t.Fatalf("setup: the migration's transaction sees %d subscriptions before its own bypass line; it must run as a user row-level security applies to", visible)
-	}
-	if _, err := tx.ExecContext(ctx, up); err != nil {
-		t.Fatalf("%s: %v", files[0], err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
 }

@@ -97,11 +97,6 @@ func TestClassify(t *testing.T) {
 	reachBack.Plans = map[string]PriceSet{"pln": modelA, "pln2": everyEvent("m")}
 	reachBack.Stretches = []Stretch{{PlanID: "pln", From: opMay, To: opMay.Add(time.Hour)}, {PlanID: "pln2", From: opMay, To: opJun}}
 	reachBack.Windows = map[string][]Window{"m": {{PlanID: "pln", From: opMay, To: opMay.Add(time.Hour)}, {PlanID: "pln2", From: opMay.Add(time.Hour), To: opJun}}}
-	// A cancel is scheduled for May 11.
-	canceling := may
-	canceling.Ends = opAt(opMay.AddDate(0, 0, 10))
-	cancelInGrace := may
-	cancelInGrace.Ends = opAt(opJun.Add(time.Hour))
 	// Another subscription stopped covering m at 10:00 on May 1.
 	covered := may
 	covered.Windows = map[string][]Window{"m": {{PlanID: "pln", From: opMay.Add(10 * time.Hour), To: opJun}}}
@@ -133,10 +128,7 @@ func TestClassify(t *testing.T) {
 		{"first-day reach-back: the earlier item's window", opMay.Add(time.Minute), "m", nil, []OpenPeriod{reachBack}, sum, NoPrice},
 		{"first-day reach-back: the earlier item's window, a price takes it", opMay.Add(time.Minute), "m", a, []OpenPeriod{reachBack}, sum, InOpen},
 		{"first-day reach-back: the added item's window", opMay.Add(2 * time.Hour), "m", nil, []OpenPeriod{reachBack}, sum, InOpen},
-		{"before a scheduled cancel", opMay.AddDate(0, 0, 9), "m", nil, []OpenPeriod{canceling}, sum, InOpen},
-		{"after a scheduled cancel", opMay.AddDate(0, 0, 10).Add(20 * time.Minute), "m", nil, []OpenPeriod{canceling}, sum, Outside},
-		{"grace: after a cancel scheduled in it", opJun.Add(2 * time.Hour), "m", nil, []OpenPeriod{cancelInGrace}, sum, Outside},
-		{"grace: before a cancel scheduled in it", opJun.Add(10 * time.Minute), "m", nil, []OpenPeriod{cancelInGrace}, sum, Later},
+		{"before a cancel scheduled at the period end", opMay.AddDate(0, 0, 9), "m", nil, []OpenPeriod{ending}, sum, InOpen},
 		{"before another subscription's coverage end", opMay.Add(9 * time.Hour), "m", nil, []OpenPeriod{covered}, sum, Outside},
 		{"before another subscription's coverage end, meter not priced", opMay.Add(9 * time.Hour), "x", nil, []OpenPeriod{covered}, sum, NotOnPlan},
 		{"after another subscription's coverage end", opMay.Add(11 * time.Hour), "m", nil, []OpenPeriod{covered}, sum, InOpen},
@@ -312,11 +304,6 @@ func TestOpenPeriodOf(t *testing.T) {
 	atEnd.CancelAtPeriodEnd = true
 	if p, _ := OpenPeriodOf(atEnd, stretches, windows, plans, opAt(opApr), ThresholdWatermark{}); p.Ends == nil || !p.Ends.Equal(opJun) {
 		t.Errorf("cancel at period end: ends %v, want the period end", p.Ends)
-	}
-	cancelAt := base
-	cancelAt.CancelAt = opAt(opJun)
-	if p, _ := OpenPeriodOf(cancelAt, stretches, windows, plans, opAt(opApr), ThresholdWatermark{}); p.Ends == nil || !p.Ends.Equal(opJun) {
-		t.Errorf("cancel_at at the end: ends %v, want the cancel", p.Ends)
 	}
 
 	wm := ThresholdWatermark{BilledThrough: opAt(opMay.AddDate(0, 0, 19)), PaidThrough: opAt(opMay.AddDate(0, 0, 9))}

@@ -246,9 +246,9 @@ type OpenPeriod struct {
 	// after_close.
 	Floor *time.Time
 	// Ends is where the subscription's scheduled cancel takes effect
-	// (Subscription.CancelEffectiveAt): cancel_at, or the period end for a
-	// cancel at period end. No invoice bills its usage from it on. Nil when
-	// no cancel is scheduled.
+	// (Subscription.CancelEffectiveAt): End, when the subscription is
+	// scheduled to cancel at the end of the period. No invoice bills its
+	// usage from it on. Nil when no cancel is scheduled.
 	Ends *time.Time
 	// Plans holds, by plan id, each plan's prices at its pin of the period.
 	Plans map[string]PriceSet
@@ -334,8 +334,8 @@ func BucketsOf(meter domain.Meter) MeterBuckets {
 // meter.
 //
 // For each period:
-//   - at or after Ends (a scheduled cancel): Outside. The final invoice
-//     bills usage only to the cancel.
+//   - at or after Ends (a cancel scheduled at the period's end): Outside.
+//     The period's close is the subscription's last invoice.
 //   - at >= End (the grace before End's invoice, or a close running late):
 //     Later, not checked. Never AfterClose: a later close bills it.
 //   - Start <= at < End: inPeriod. When InOpen and the meter is additive:

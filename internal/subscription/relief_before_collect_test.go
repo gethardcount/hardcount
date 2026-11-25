@@ -5,7 +5,6 @@ import (
 	"errors"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
 )
@@ -18,7 +17,7 @@ import (
 //
 // The money outcome is proven on real Postgres in
 // internal/billing/cancel_relief_reduces_final_invoice_integration_test.go;
-// these pin the order on each of the three callers.
+// these pin the order on each of the two callers.
 
 var wantReliefThenFinalize = []string{"relief", "finalize:inv_final"}
 
@@ -40,28 +39,8 @@ func TestCancel_IssuesReliefBeforeCollectingFinalInvoice(t *testing.T) {
 	}
 }
 
-func TestFireDueScheduledCancel_IssuesReliefBeforeCollectingFinalInvoice(t *testing.T) {
-	store := newMemStore()
-	cancelAt := time.Date(2027, 8, 16, 0, 0, 0, 0, time.UTC)
-	dueCancelSub(t, store, cancelAt)
-	fb := &fakeBiller{
-		finalCancelInv: domain.Invoice{ID: "inv_final", Currency: "USD"},
-		draftIDs:       []string{"cn_relief"},
-		draftCredit:    2450,
-	}
-	svc := NewService(store, nil)
-	svc.SetBiller(fb)
-
-	if err := svc.FireDueScheduledCancel(context.Background(), "t1", "sub_due", cancelAt); err != nil {
-		t.Fatalf("FireDueScheduledCancel: %v", err)
-	}
-	if !slices.Equal(fb.postCommit, wantReliefThenFinalize) {
-		t.Errorf("post-commit legs = %v, want %v: the relief must be issued before the final invoice is collected", fb.postCommit, wantReliefThenFinalize)
-	}
-}
-
-// The swap already ran in this order; it now shares the helper with both
-// cancels, so this keeps it there.
+// The swap already ran in this order; it now shares the helper with the
+// cancel, so this keeps it there.
 func TestFinalizeCrossIntervalSwap_IssuesReliefBeforeCollectingNewInvoice(t *testing.T) {
 	fb := &fakeBiller{}
 	svc := NewService(newMemStore(), nil)
@@ -78,8 +57,7 @@ func TestFinalizeCrossIntervalSwap_IssuesReliefBeforeCollectingNewInvoice(t *tes
 }
 
 // The caller's context can end right after the change commits: the API
-// request's timeout or a client disconnect for Cancel, the billing run
-// stopping (shutdown, lost lease) for a scheduled cancel, the dunning tick
+// request's timeout or a client disconnect for Cancel, the dunning tick
 // stopping for dunning's cancel. The post-commit legs must still run in full.
 // Collection already ignores the caller's cancellation (CollectInvoice); if
 // the relief does not, its Issue fails on the first database call, the note
@@ -108,29 +86,6 @@ func TestCancel_PostCommitLegsOutliveCallerContext(t *testing.T) {
 	}
 }
 
-func TestFireDueScheduledCancel_PostCommitLegsOutliveCallerContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	store := newMemStore()
-	cancelAt := time.Date(2027, 8, 16, 0, 0, 0, 0, time.UTC)
-	dueCancelSub(t, store, cancelAt)
-	fb := &fakeBiller{
-		finalCancelInv: domain.Invoice{ID: "inv_final", Currency: "USD"},
-		draftIDs:       []string{"cn_relief"},
-		draftCredit:    2450,
-		onAfterCommit:  cancel, // the billing run stops as the cancel commits
-	}
-	svc := NewService(store, nil)
-	svc.SetBiller(fb)
-
-	if err := svc.FireDueScheduledCancel(ctx, "t1", "sub_due", cancelAt); err != nil {
-		t.Fatalf("FireDueScheduledCancel: %v", err)
-	}
-	if !slices.Equal(fb.postCommit, wantReliefThenFinalize) || !slices.Equal(fb.postCommitCtxErr, wantLegsLive) {
-		t.Errorf("post-commit legs %v saw ctx.Err() = %v, want %v: the caller's cancellation must not reach them", fb.postCommit, fb.postCommitCtxErr, wantLegsLive)
-	}
-}
-
 func TestFinalizeCrossIntervalSwap_PostCommitLegsOutliveCallerContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // the swap's request ended after its transaction committed
@@ -152,7 +107,7 @@ func TestFinalizeCrossIntervalSwap_PostCommitLegsOutliveCallerContext(t *testing
 // change's invoice must then not be collected in the call: collection would
 // charge the card the whole of it, and the credit would land on the balance
 // later. The billing run issues the note and then collects the invoice.
-// On each of the three callers.
+// On each of the two callers.
 func TestReliefNotIssued_TheChangesInvoiceIsNotCollectedInTheCall(t *testing.T) {
 	wantReliefOnly := []string{"relief"}
 	notIssued := errors.New("issue relief credit note cn_relief: database is shutting down")
@@ -173,27 +128,6 @@ func TestReliefNotIssued_TheChangesInvoiceIsNotCollectedInTheCall(t *testing.T) 
 		}
 		if !slices.Equal(fb.postCommit, wantReliefOnly) {
 			t.Errorf("post-commit legs = %v, want %v: the final invoice must wait for the relief", fb.postCommit, wantReliefOnly)
-		}
-	})
-
-	t.Run("scheduled cancel", func(t *testing.T) {
-		store := newMemStore()
-		cancelAt := time.Date(2027, 8, 16, 0, 0, 0, 0, time.UTC)
-		dueCancelSub(t, store, cancelAt)
-		fb := &fakeBiller{
-			finalCancelInv: domain.Invoice{ID: "inv_final", Currency: "USD"},
-			draftIDs:       []string{"cn_relief"},
-			draftCredit:    2450,
-			finishErr:      notIssued,
-		}
-		svc := NewService(store, nil)
-		svc.SetBiller(fb)
-
-		if err := svc.FireDueScheduledCancel(context.Background(), "t1", "sub_due", cancelAt); err != nil {
-			t.Fatalf("FireDueScheduledCancel: %v", err)
-		}
-		if !slices.Equal(fb.postCommit, wantReliefOnly) {
-			t.Errorf("post-commit legs = %v, want %v", fb.postCommit, wantReliefOnly)
 		}
 	})
 

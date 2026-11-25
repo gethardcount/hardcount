@@ -1,9 +1,11 @@
 # ADR-097: A due mid-period `cancel_at` fires as an immediate cancel at that instant
 
-**Status**: Accepted 2026-07-18. Amended by [ADR-118](118-cancel-and-swap-relief-in-the-change-transaction.md) on 2026-10-12 and 2026-11-09, by [ADR-120](120-invoice-grace-period-for-late-usage.md) on 2026-10-14, and by [ADR-139](139-cancel-prices-before-its-transaction.md) on 2026-11-10.
+**Status**: Deprecated (2026-11-25: a cancel on a chosen date is removed, and this decision with it; see the amendment at the end). Accepted 2026-07-18. Amended by [ADR-118](118-cancel-and-swap-relief-in-the-change-transaction.md) on 2026-10-12 and 2026-11-09, by [ADR-120](120-invoice-grace-period-for-late-usage.md) on 2026-10-14, and by [ADR-139](139-cancel-prices-before-its-transaction.md) on 2026-11-10.
 **Context**: FLOW TC8 walkthrough live-find; fixes the stranded-cancel money bug.
 
 ## Summary
+
+**Not in force since 2026-11-25:** a cancel on a chosen date (`cancel_at`) is removed, so nothing below is in the code. It is kept as the record of what was decided.
 
 A scheduled cancel whose `cancel_at` falls inside a billing period fires as an immediate cancel at that instant. Before this, the billing scans looked only at period ends, so such a subscription renewed past its own cancel date. One transaction cancels it, bills usage and any in-arrears base fee up to `cancel_at`, and writes relief for the unused prepaid part, never as a cash refund. `canceled_at` and the final invoice's period end are the `cancel_at` instant, even when the fire runs late. Status: active, amended: all relief is written in the cancel transaction ([ADR-118](118-cancel-and-swap-relief-in-the-change-transaction.md)), wall-clock runs fire after the invoice grace period ([ADR-120](120-invoice-grace-period-for-late-usage.md)), and the fire is priced before its transaction ([ADR-139](139-cancel-prices-before-its-transaction.md)).
 
@@ -137,3 +139,12 @@ period); the mid-period branch requires `cancel_at` strictly before
 - **Bill-then-flip ("fire last")**: both billers hard-require a canceled
   sub (`Status == canceled`, `CanceledAt` set) and no-op silently
   otherwise; synthetic-snapshot workarounds would fork the money path.
+
+## Amendment 2026-11-25
+
+A cancel on a chosen date is removed, and this decision with it. A scheduled
+cancel is at the end of the current period only (`cancel_at_period_end`),
+and the period's close carries it out, so the billing run has no mid-period
+cancel and no `cancel_at` arm in its due scans. Migration `00252` turned a
+`cancel_at` on the current period's end into the flag, and dropped every
+other one with the column.

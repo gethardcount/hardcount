@@ -302,3 +302,11 @@ before the fix, on the commit that added them alone (#1305, CI run
 the hold, the clock query's hold, the `status = 'draft'` or
 `auto_charge_pending` arm, or the draw at `issued_at`. Those mutations
 were checked by reading the tests, not run.
+
+## Amendment 2026-11-25
+
+A cancel on a chosen date (`cancel_at`) is removed, so the residual about a
+scheduled cancel's final invoice (§2, and "A mid-period `cancel_at` invoice"
+above) no longer arises. The due instant the hold reads is `next_billing_at`
+alone, and a cancel scheduled at the period's end is billed by that period's
+close.

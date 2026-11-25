@@ -51,11 +51,3 @@ test('the cancel dialog on an active subscription names the renewal that stops',
   )
 })
 
-// cancel_effective_at is the server's answer, so an explicit cancel date
-// inside a later period is the day it cancels, not the current period's end.
-test('a cancel scheduled for a date cancels on that date', () => {
-  const l = periodLabels({ ...active, cancel_at: '2026-12-10T15:00:00Z', cancel_effective_at: '2026-12-10T15:00:00Z' }, fmt)
-  assert.equal(l.renewsOn, null)
-  assert.equal(l.cancelsOn, '2026-12-10')
-  assert.deepEqual(l.next, { label: 'Cancels', value: '2026-12-10', tone: 'scheduled' })
-})

@@ -51,7 +51,6 @@ func TestCancel_ReliefNotIssued_FinalInvoiceWaitsForTheSweeps(t *testing.T) {
 		run  func(*reliefCancelRig, *testing.T)
 	}{
 		{"immediate cancel", (*reliefCancelRig).cancelImmediately},
-		{"scheduled cancel", (*reliefCancelRig).fireScheduledCancel},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			const usageCents, wantDue = 3000, 3000 - reliefCents

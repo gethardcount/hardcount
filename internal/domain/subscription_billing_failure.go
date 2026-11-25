@@ -32,27 +32,18 @@ type BillingFailure struct {
 }
 
 // DueInstant is the instant the billing run next owes work for sub: the close
-// at next_billing_at, or a mid-period cancel at cancel_at, whichever is first.
-// It is the Go form of the expression the due scans test,
-//
-//	LEAST(next_billing_at, CASE WHEN status = 'active' THEN cancel_at END)
-//
-// and, like LEAST, it ignores a missing side. Nil means no work can come due.
+// of its period at next_billing_at. It is the Go form of
+// SubscriptionDueInstantSQL. Nil means no work can come due.
 //
 // A billing-failure record is keyed to this value. Any statement that makes
 // the failing work stop being due moves the due instant in that same
 // statement, which voids the record with no clear.
 func DueInstant(sub Subscription) *time.Time {
-	var due *time.Time
-	if sub.NextBillingAt != nil {
-		t := *sub.NextBillingAt
-		due = &t
+	if sub.NextBillingAt == nil {
+		return nil
 	}
-	if sub.Status == SubscriptionActive && sub.CancelAt != nil && (due == nil || sub.CancelAt.Before(*due)) {
-		t := *sub.CancelAt
-		due = &t
-	}
-	return due
+	t := *sub.NextBillingAt
+	return &t
 }
 
 // BillingDueAt reports whether sub owes work to the billing run at now: it can
@@ -69,7 +60,7 @@ func BillingDueAt(sub Subscription, now time.Time) bool {
 // SubscriptionDueInstantSQL is the SQL form of DueInstant for the
 // subscriptions row aliased as alias.
 func SubscriptionDueInstantSQL(alias string) string {
-	return strings.ReplaceAll(`LEAST(a.next_billing_at, CASE WHEN a.status = 'active' THEN a.cancel_at END)`, "a.", alias+".")
+	return alias + ".next_billing_at"
 }
 
 // SubscriptionBillingFailingSQL is the one predicate that says a

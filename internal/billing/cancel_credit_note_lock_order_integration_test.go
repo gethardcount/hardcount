@@ -104,7 +104,7 @@ func operatorCreditNote(ctx context.Context, cn *creditnote.Service, tenantID, i
 // day-1's credit-note lock and numbers a note).
 //
 // Mutations: in writePlanned, write the relief after the final invoice, or
-// number the final invoice before the relief → all four
+// number the final invoice before the relief → both
 // cases abort one writer with 40P01.
 func TestCancel_ConcurrentCreditNoteOnFundingInvoice_BothCommit(t *testing.T) {
 	db := testutil.SetupTestDB(t)
@@ -117,10 +117,6 @@ func TestCancel_ConcurrentCreditNoteOnFundingInvoice_BothCommit(t *testing.T) {
 	}{
 		{"immediate cancel", func(r *reliefCancelRig, _ *testing.T) func() error {
 			return func() error { _, _, err := r.cancel(); return err }
-		}},
-		{"scheduled cancel", func(r *reliefCancelRig, t *testing.T) func() error {
-			r.scheduleCancel(t)
-			return r.fire
 		}},
 	}
 	writers := []struct {

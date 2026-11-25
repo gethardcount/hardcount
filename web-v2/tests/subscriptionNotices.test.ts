@@ -63,11 +63,10 @@ test('never more than one box', () => {
   }
 })
 
-test('a scheduled cancel is the flag or an explicit date', () => {
+test('a scheduled cancel is the at-period-end flag', () => {
   assert.equal(hasScheduledCancel({}), false)
   assert.equal(hasScheduledCancel({ cancel_at_period_end: true }), true)
-  assert.equal(hasScheduledCancel({ cancel_at: '2026-11-01T00:00:00Z' }), true)
-  assert.equal(hasScheduledCancel({ cancel_at_period_end: false, cancel_at: null }), false)
+  assert.equal(hasScheduledCancel({ cancel_at_period_end: false }), false)
 })
 
 test('billing failure: attempt count in the title, next try or stop after the reason', () => {
@@ -85,13 +84,13 @@ test('no-card notice: one title on both pages, no "manual follow-up" promise', (
   assert.doesNotMatch(NO_CARD_SENTENCE, /manual/)
 })
 
-test('scheduled cancel: period end names the last day and the renewal that stops; a date keeps its time', () => {
+test('scheduled cancel: names the last day and the renewal that stops', () => {
   assert.equal(
     cancelScheduledSentence({ cancel_at_period_end: true }, { accessThrough: 'Oct 31', cancelsOn: 'Nov 1' }),
     "The customer keeps access through Oct 31; it doesn't renew on Nov 1.",
   )
   assert.equal(cancelScheduledSentence({ cancel_at_period_end: true }, { cancelsOn: 'Nov 1' }), "It doesn't renew on Nov 1.")
-  assert.equal(cancelScheduledSentence({ cancel_at_period_end: false }, { effectiveLabel: 'Nov 1, 3:00 PM' }), 'Cancels on Nov 1, 3:00 PM.')
+  assert.equal(cancelScheduledSentence({ cancel_at_period_end: false }, { accessThrough: 'Oct 31', cancelsOn: 'Nov 1' }), null)
   assert.equal(cancelScheduledSentence({ cancel_at_period_end: true }, {}), null)
 })
 
