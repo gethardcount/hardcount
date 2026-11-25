@@ -55,19 +55,19 @@ func assertSeeded(t *testing.T, svc *dunning.Service, tenantID string) {
 	}
 }
 
-// TestBootstrap_SeedsDefaultDunningPolicy is #1152: a new account retries a
+// TestBootstrap_SeedsDunningPolicy is #1152: a new account retries a
 // failed payment without anyone first creating a policy.
 //
 // Mutation checks: drop SeedDunningTx from RunBootstrap (no policies);
 // make its error non-fatal (the failure subtest leaks rows).
-func TestBootstrap_SeedsDefaultDunningPolicy(t *testing.T) {
+func TestBootstrap_SeedsDunningPolicy(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	dunSvc := dunning.NewService(dunning.NewPostgresStore(db), nil, nil)
 
 	t.Run("one enabled default per mode, and a failed payment starts a run on it", func(t *testing.T) {
-		res, err := tenant.RunBootstrap(ctx, db, bootstrapDeps(db, dunSvc.SeedDefaultPoliciesTx), tenant.BootstrapOpts{
+		res, err := tenant.RunBootstrap(ctx, db, bootstrapDeps(db, dunSvc.SeedPoliciesTx), tenant.BootstrapOpts{
 			TenantName: "Seeded Co", OwnerEmail: "owner@seeded.test",
 		})
 		if err != nil {

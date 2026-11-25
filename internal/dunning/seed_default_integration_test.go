@@ -24,7 +24,7 @@ func seedAccount(t *testing.T, db *postgres.DB, svc *dunning.Service, tenantID s
 		t.Fatalf("begin: %v", err)
 	}
 	defer postgres.Rollback(tx)
-	if err := svc.SeedDefaultPoliciesTx(ctx, tx, tenantID, nil); err != nil {
+	if err := svc.SeedPoliciesTx(ctx, tx, tenantID, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -37,14 +37,14 @@ func modePolicy(svc *dunning.Service, tenantID string, livemode bool) (domain.Du
 	return svc.GetPolicy(postgres.WithLivemode(context.Background(), livemode), tenantID)
 }
 
-// TestSeedDefaultPolicies_OnePerMode pins what a new account starts with
+// TestSeedPolicies_OnePerMode pins what a new account starts with
 // (ADR-123): one enabled policy per mode, with the exact seed values, and
 // each mode sees only its own row.
 //
 // Mutation checks: drop one mode from the seed loop (that mode has no
 // policy); seed an empty final action (it normalizes to pause and the value
 // check fails).
-func TestSeedDefaultPolicies_OnePerMode(t *testing.T) {
+func TestSeedPolicies_OnePerMode(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	svc := dunning.NewService(dunning.NewPostgresStore(db), nil, nil)
 	tenantID := testutil.CreateTestTenant(t, db, "Seed One Per Mode")
@@ -70,10 +70,10 @@ func TestSeedDefaultPolicies_OnePerMode(t *testing.T) {
 	}
 }
 
-// TestSeedDefaultPolicies_ExistingAccountsUntouched: an account made without
+// TestSeedPolicies_ExistingAccountsUntouched: an account made without
 // the seed (before ADR-123) has no policy, and nothing adds one. A failed
 // payment there is a quiet skip, not a run.
-func TestSeedDefaultPolicies_ExistingAccountsUntouched(t *testing.T) {
+func TestSeedPolicies_ExistingAccountsUntouched(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	svc := dunning.NewService(dunning.NewPostgresStore(db), nil, nil)
 	tenantID := testutil.CreateTestTenant(t, db, "Pre-existing Account")

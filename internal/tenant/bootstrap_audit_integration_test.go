@@ -31,7 +31,7 @@ func TestBootstrap_AuditsItsProvisioning(t *testing.T) {
 		HashPassword:  user.HashPassword,
 		CreateUserTx:  userStore.CreateInTx,
 		CreateKeyTx:   auth.NewService(db, logger).CreateKeyTx,
-		SeedDunningTx: dunning.NewService(dunning.NewPostgresStore(db), nil, nil).SeedDefaultPoliciesTx,
+		SeedDunningTx: dunning.NewService(dunning.NewPostgresStore(db), nil, nil).SeedPoliciesTx,
 		Audit:         logger,
 	}, tenant.BootstrapOpts{
 		TenantName: "Bootstrap Audit Co",

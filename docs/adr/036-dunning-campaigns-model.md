@@ -1,7 +1,7 @@
 # ADR-036: Dunning campaigns model (multi-policy-per-tenant)
 
 **Date:** 2026-05-16
-**Status:** Accepted (amended 2026-05-16 — terminal-action set + pause-semantics fix; amended 2026-07-05 — initial-default-at-first-create + no-policy = deliberate skip; amended 2026-10-17 — new accounts start with a seeded default, [ADR-123](123-new-accounts-start-with-a-default-dunning-policy.md); amended 2026-10-22 — a collection pause does not stop open runs; amended 2026-10-22 — a dunning pause lifts when its invoice is paid; amended 2026-10-23 — the schedule is one list of days, `retry_days`; **the terminal-action half is SUPERSEDED by [ADR-112](112-dunning-exhaustion-settles-two-questions.md), 2026-08-05**; see Amendment sections below)
+**Status:** Accepted (amended 2026-05-16 — terminal-action set + pause-semantics fix; amended 2026-07-05 — initial-default-at-first-create + no-policy = deliberate skip; amended 2026-10-17 — new accounts start with a seeded default, [ADR-123](123-new-accounts-start-with-a-default-dunning-policy.md); amended 2026-10-22 — a collection pause does not stop open runs; amended 2026-10-22 — a dunning pause lifts when its invoice is paid; amended 2026-10-23 — the schedule is one list of days, `retry_days`; **the terminal-action half is SUPERSEDED by [ADR-112](112-dunning-exhaustion-settles-two-questions.md), 2026-08-05**; see Amendment sections below); amended 2026-11-25: one policy per account and mode, no named policies and no per-customer assignment
 
 > ⚠️ **The 2026-05-16 amendment below describes a `final_action` column that no
 > longer exists.** [ADR-112](112-dunning-exhaustion-settles-two-questions.md)
@@ -571,6 +571,7 @@ per-customer assignment (`customers.dunning_policy_id`) are gone, and a run
 no longer stores a policy: each step reads the account's policy for the
 run's mode. The API is `GET` and `PUT /v1/dunning/policy`. Migration 00248
 kept each account's default in each mode (the oldest where there was none)
-and deleted the others. Nothing in the product's flows assigned a policy:
-recipes, the demo and the seed never did. The rest of this record (the
+and deleted the others. Only the customer page and `PATCH /v1/customers`
+could assign a policy; no recipe, demo or seed ever did, and the job the
+product serves has one schedule for every customer. The rest of this record (the
 schedule, the final actions, the no-policy skip) stands.

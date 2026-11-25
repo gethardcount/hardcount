@@ -254,7 +254,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		r.activeSub, r.activeItem = id(sub), id(sub["items"].([]any)[0].(map[string]any))
 		// The policy comes first: finalizing an unpaid invoice starts a
 		// dunning run only when the tenant has one.
-		create("PUT", "/v1/dunning/policy", map[string]any{"enabled": true, "retry_days": []int{3, 3}})
+		create("PUT", "/v1/dunning/policy", map[string]any{"final_subscription_action": "pause", "final_invoice_action": "none", "enabled": true, "retry_days": []int{3, 3}})
 		r.draftInv = id(create("POST", "/v1/invoices", map[string]any{"customer_id": r.cus, "line_items": line}))
 		r.finalInv = id(create("POST", "/v1/invoices", map[string]any{"customer_id": cus2, "line_items": line}))
 		create("POST", "/v1/invoices/"+r.finalInv+"/finalize", nil)

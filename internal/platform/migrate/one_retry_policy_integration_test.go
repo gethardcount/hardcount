@@ -23,10 +23,18 @@ INSERT INTO invoices (id, tenant_id, customer_id, invoice_number, status, paymen
 	VALUES ('inv_orp', 'ten_orp', 'cus_orp', 'ORP-1', 'finalized', 'failed', 'USD', 1000, 1000, 1000, now() - interval '30 days', now());
 INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, attempt_count)
 	VALUES ('drun_orp', 'ten_orp', 'inv_orp', 'cus_orp', 'dpol_orp_other', 'active', 1);
+INSERT INTO tenants (id, name) VALUES ('ten_orp2', 'No default');
+INSERT INTO dunning_policies (id, tenant_id, name, retry_days, is_default, created_at)
+	VALUES ('dpol_orp2_old', 'ten_orp2', 'Old', '[2]', false, now() - interval '3 days'),
+	       ('dpol_orp2_new', 'ten_orp2', 'New', '[5]', false, now() - interval '1 day');
+SELECT set_config('app.livemode', 'off', true);
+INSERT INTO dunning_policies (id, tenant_id, name, retry_days, is_default, created_at)
+	VALUES ('dpol_orp2_test', 'ten_orp2', 'Test', '[9]', false, now());
 `
 
 // TestOneRetryPolicy_KeepsTheDefault: the Up keeps one policy per account
-// and mode, the default even when another is older, and deletes the other.
+// and mode, the default even when another is older, the oldest where there is
+// no default, and deletes the others.
 // The customer assigned to the deleted policy and the run on it stay, and no
 // longer name a policy. The policy's naming columns go, and a second policy
 // in the mode is refused. The Down puts the columns back with the kept policy
@@ -46,6 +54,11 @@ func TestOneRetryPolicy_KeepsTheDefault(t *testing.T) {
 	}
 	if got := noDraftScalar[string](t, db, `SELECT string_agg(id, ',' ORDER BY id) FROM dunning_policies WHERE tenant_id = 'ten_orp'`); got != "dpol_orp_default" {
 		t.Errorf("policies after Up = %s, want only the default dpol_orp_default", got)
+	}
+	// An account with no default keeps its oldest policy, and each mode is
+	// ranked alone: the test-mode policy stays beside the live one.
+	if got := noDraftScalar[string](t, db, `SELECT string_agg(id || ':' || livemode::text, ',' ORDER BY id) FROM dunning_policies WHERE tenant_id = 'ten_orp2'`); got != "dpol_orp2_old:true,dpol_orp2_test:false" {
+		t.Errorf("policies of the account with no default after Up = %s, want the oldest live one and the test one", got)
 	}
 	if got := noDraftScalar[string](t, db, `SELECT state || ':' || attempt_count FROM invoice_dunning_runs WHERE id = 'drun_orp'`); got != "active:1" {
 		t.Errorf("run after Up = %s, want active:1, unchanged", got)

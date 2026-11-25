@@ -7057,15 +7057,13 @@ components:
       type: object
       description: |
         The body of `PUT /v1/dunning/policy`. It replaces every setting, so
-        send the full policy. `id`, `tenant_id`, `created_at` and
-        `updated_at` are set by the server; sending one is refused with
-        422.
-      required: [retry_days]
+        all four are required. `tenant_id`, `created_at` and `updated_at`
+        are set by the server; sending one is refused with 422.
+      required: [enabled, retry_days, final_subscription_action, final_invoice_action]
       properties:
         enabled:
           type: boolean
-          default: false
-          description: A disabled policy starts no dunning.
+          description: A disabled policy starts no dunning for a payment that fails from then on. Runs already started keep retrying.
         retry_days:
           type: array
           minItems: 1
@@ -7086,7 +7084,6 @@ components:
         final_subscription_action:
           type: string
           enum: [none, pause, cancel]
-          default: pause
           description: |
             What happens to the subscription when retries run out. `pause`
             pauses collection and sends `subscription.collection_paused`
@@ -7101,7 +7098,6 @@ components:
         final_invoice_action:
           type: string
           enum: [none, mark_uncollectible]
-          default: none
           description: |
             What happens to the invoice when retries run out.
             `mark_uncollectible` writes it off as bad debt; `none` leaves it
@@ -25471,13 +25467,14 @@ paths:
       description: |
         Creates the account's dunning policy for this mode, or replaces
         every setting of the one it has with the body. This is not a
-        partial update: an omitted field takes its default (`enabled`
-        false, pause the subscription, leave the invoice open), and
-        `retry_days` is required. Send the full policy.
+        partial update: all four settings are required, and a body that
+        leaves one out is refused with 422, `param` naming it.
 
-        A disabled policy starts no dunning, so send `enabled: true` for
-        retries to run. Runs already started follow the new settings from
-        their next step.
+        A disabled policy starts no dunning for a payment that fails from
+        then on; runs already started keep retrying. Runs already started
+        follow a new schedule and new final actions from their next step,
+        so a schedule shorter than the retries a run has made ends that run
+        with the final actions.
       operationId: putDunningPolicy
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"

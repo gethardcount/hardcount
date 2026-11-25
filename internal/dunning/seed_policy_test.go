@@ -13,7 +13,7 @@ import (
 // runs.
 func useSeedAsDefault(t *testing.T, store *memStore) domain.DunningPolicy {
 	t.Helper()
-	seed, err := normalizeAndValidatePolicy(DefaultSeedPolicy())
+	seed, err := normalizeAndValidatePolicy(NewAccountPolicy())
 	if err != nil {
 		t.Fatalf("the seed policy must pass validation: %v", err)
 	}
@@ -22,11 +22,11 @@ func useSeedAsDefault(t *testing.T, store *memStore) domain.DunningPolicy {
 	return seed
 }
 
-// TestDefaultSeedPolicy_SurvivesNormalize: an empty final action normalizes
+// TestNewAccountPolicy_SurvivesNormalize: an empty final action normalizes
 // to pause, so the seed must name none explicitly. If it ever relies on the
 // defaults, every new account would pause subscriptions it never chose to.
-func TestDefaultSeedPolicy_SurvivesNormalize(t *testing.T) {
-	got, err := normalizeAndValidatePolicy(DefaultSeedPolicy())
+func TestNewAccountPolicy_SurvivesNormalize(t *testing.T) {
+	got, err := normalizeAndValidatePolicy(NewAccountPolicy())
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
@@ -38,13 +38,13 @@ func TestDefaultSeedPolicy_SurvivesNormalize(t *testing.T) {
 	}
 }
 
-// TestSeedDefaultPoliciesTx_PassesTheSeed: the service hands the store the
+// TestSeedPoliciesTx_PassesTheSeed: the service hands the store the
 // validated seed and forwards the per-insert callback.
-func TestSeedDefaultPoliciesTx_PassesTheSeed(t *testing.T) {
+func TestSeedPoliciesTx_PassesTheSeed(t *testing.T) {
 	store := &memStore{runs: map[string]domain.InvoiceDunningRun{}}
 	svc := NewService(store, nil, nil)
 	var called int
-	if err := svc.SeedDefaultPoliciesTx(context.Background(), nil, "t1", func(p domain.DunningPolicy, _ bool) error {
+	if err := svc.SeedPoliciesTx(context.Background(), nil, "t1", func(p domain.DunningPolicy, _ bool) error {
 		called++
 		if !p.Enabled || len(p.RetryDays) != 3 {
 			t.Errorf("callback got %+v", p)

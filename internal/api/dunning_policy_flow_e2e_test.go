@@ -68,12 +68,12 @@ func TestE2E_DunningPolicy_PutCreatesThenReplaces(t *testing.T) {
 	}
 
 	call("PUT", "/v1/dunning/policy", flowReq{body: map[string]any{
-		"retry_days": []int{5}, "final_subscription_action": "cancel", "final_invoice_action": "mark_uncollectible",
+		"enabled": false, "retry_days": []int{5}, "final_subscription_action": "cancel", "final_invoice_action": "mark_uncollectible",
 	}}).want(t, 200, "replace the policy")
 	got = call("GET", "/v1/dunning/policy", flowReq{}).want(t, 200, "get the replaced policy").body
 	if got["enabled"] != false || fmt.Sprint(got["retry_days"]) != "[5]" ||
 		got["final_subscription_action"] != "cancel" || got["final_invoice_action"] != "mark_uncollectible" {
-		t.Fatalf("replaced policy = %v, want every field from the second PUT (enabled left out is false)", got)
+		t.Fatalf("replaced policy = %v, want every field from the second PUT", got)
 	}
 	if got["created_at"] != created["created_at"] {
 		t.Errorf("created_at %v after the replace, want %v: the same policy, not a new one", got["created_at"], created["created_at"])
@@ -91,17 +91,27 @@ func TestE2E_DunningPolicy_PutCreatesThenReplaces(t *testing.T) {
 }
 
 // TestE2E_DunningPolicy_PutRefusesABadBody: a body that fails validation,
-// one with a field the policy does not have and one with a field the server
-// sets are refused with 422 naming the field, and nothing is written.
+// one that leaves a setting out, one with a field the policy does not have
+// and one with a field the server sets are refused with 422 naming the field,
+// and nothing is written.
 func TestE2E_DunningPolicy_PutRefusesABadBody(t *testing.T) {
 	call, _ := policyFlow(t, "Dunning Policy Refuse Co")
+	// whole is a full, valid policy with with's fields on top.
+	whole := func(with map[string]any) map[string]any {
+		body := map[string]any{"enabled": true, "retry_days": []int{3}, "final_subscription_action": "none", "final_invoice_action": "none"}
+		for k, v := range with {
+			body[k] = v
+		}
+		return body
+	}
 	for name, tc := range map[string]struct {
 		body  map[string]any
 		param string
 	}{
-		"a wait over 30 days":     {map[string]any{"enabled": true, "retry_days": []int{3, 45}}, "retry_days"},
-		"an unknown field":        {map[string]any{"enabled": true, "retry_days": []int{3}, "name": "Strict"}, "name"},
-		"a field the server sets": {map[string]any{"enabled": true, "retry_days": []int{3}, "id": "hc_dpol_other"}, "id"},
+		"a wait over 30 days":     {whole(map[string]any{"retry_days": []int{3, 45}}), "retry_days"},
+		"a setting left out":      {map[string]any{"retry_days": []int{3}, "final_subscription_action": "none", "final_invoice_action": "none"}, "enabled"},
+		"an unknown field":        {whole(map[string]any{"name": "Strict"}), "name"},
+		"a field the server sets": {whole(map[string]any{"created_at": "2026-11-25T10:00:00Z"}), "created_at"},
 	} {
 		res := call("PUT", "/v1/dunning/policy", flowReq{body: tc.body}).want(t, 422, name)
 		if got := flowStr(res.body, "error", "param"); got != tc.param {
@@ -117,11 +127,11 @@ func TestE2E_DunningPolicy_ModesHoldSeparatePolicies(t *testing.T) {
 	call, key := policyFlow(t, "Dunning Policy Modes Co")
 	test, live := flowReq{bearer: key(false)}, flowReq{bearer: key(true)}
 
-	test.body = map[string]any{"enabled": true, "retry_days": []int{2}}
+	test.body = map[string]any{"enabled": true, "retry_days": []int{2}, "final_subscription_action": "none", "final_invoice_action": "none"}
 	call("PUT", "/v1/dunning/policy", test).want(t, 200, "put in test mode")
 	call("GET", "/v1/dunning/policy", flowReq{bearer: live.bearer}).want(t, 404, "live mode has none after a test-mode put")
 
-	live.body = map[string]any{"enabled": true, "retry_days": []int{7, 7}}
+	live.body = map[string]any{"final_subscription_action": "pause", "final_invoice_action": "none", "enabled": true, "retry_days": []int{7, 7}}
 	call("PUT", "/v1/dunning/policy", live).want(t, 200, "put in live mode")
 	if got := call("GET", "/v1/dunning/policy", flowReq{bearer: test.bearer}).want(t, 200, "get in test mode").body; fmt.Sprint(got["retry_days"]) != "[2]" {
 		t.Errorf("test-mode retry_days = %v after a live-mode put, want [2]", got["retry_days"])

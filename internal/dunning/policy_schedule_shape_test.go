@@ -40,7 +40,7 @@ func errorParam(resp map[string]any) (param, message string) {
 // The number of retries is the length of the list, so the policy carries no
 // separate count and no separate wait before the first retry.
 func TestPutPolicy_RetryDaysIsTheSchedule(t *testing.T) {
-	code, resp := putPolicy(t, `{"enabled":true,"retry_days":[3,4,7]}`)
+	code, resp := putPolicy(t, `{"enabled":true,"final_subscription_action":"none","final_invoice_action":"none","retry_days":[3,4,7]}`)
 	if code != http.StatusOK {
 		t.Fatalf("status %d, want 200: %v", code, resp)
 	}
@@ -66,7 +66,7 @@ func TestPutPolicy_OldScheduleFieldsRefused(t *testing.T) {
 		"grace_period_days":  `3`,
 	} {
 		t.Run(field, func(t *testing.T) {
-			code, resp := putPolicy(t, `{"enabled":true,"retry_days":[3,4,7],"`+field+`":`+value+`}`)
+			code, resp := putPolicy(t, `{"enabled":true,"final_subscription_action":"none","final_invoice_action":"none","retry_days":[3,4,7],"`+field+`":`+value+`}`)
 			param, msg := errorParam(resp)
 			if code != http.StatusUnprocessableEntity || param != field || !strings.Contains(msg, "retry_days") {
 				t.Errorf("status %d param %q message %q, want 422 naming %s and pointing at retry_days", code, param, msg, field)
@@ -93,7 +93,7 @@ func TestPutPolicy_RetryDaysRefused(t *testing.T) {
 		"not a list":    `,"retry_days":3`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			code, resp := putPolicy(t, `{"enabled":true`+days+`}`)
+			code, resp := putPolicy(t, `{"enabled":true,"final_subscription_action":"none","final_invoice_action":"none"`+days+`}`)
 			if param, msg := errorParam(resp); code != http.StatusUnprocessableEntity || param != "retry_days" {
 				t.Errorf("status %d param %q (%s), want 422 on retry_days", code, param, msg)
 			}
@@ -101,8 +101,39 @@ func TestPutPolicy_RetryDaysRefused(t *testing.T) {
 	}
 	// The bounds themselves are allowed.
 	for _, days := range []string{`[1]`, `[30]`, `[1,1,1,1,1,1,1,1,1,1,1,1,1,1,30]`} {
-		if code, resp := putPolicy(t, `{"enabled":true,"retry_days":`+days+`}`); code != http.StatusOK {
+		if code, resp := putPolicy(t, `{"enabled":true,"final_subscription_action":"none","final_invoice_action":"none","retry_days":`+days+`}`); code != http.StatusOK {
 			t.Errorf("retry_days %s: status %d, want 200: %v", days, code, resp)
 		}
+	}
+}
+
+// TestPutPolicy_EverySettingIsRequired: PUT replaces the whole policy, so a
+// body that leaves a setting out is refused naming it. A missing `enabled`
+// read as false would turn retries off for every customer.
+func TestPutPolicy_EverySettingIsRequired(t *testing.T) {
+	settings := map[string]string{
+		"enabled":                   `true`,
+		"retry_days":                `[3,4,7]`,
+		"final_subscription_action": `"none"`,
+		"final_invoice_action":      `"none"`,
+	}
+	for missing := range settings {
+		t.Run("without "+missing, func(t *testing.T) {
+			var fields []string
+			for name, value := range settings {
+				if name != missing {
+					fields = append(fields, `"`+name+`":`+value)
+				}
+			}
+			code, resp := putPolicy(t, `{`+strings.Join(fields, ",")+`}`)
+			if param, msg := errorParam(resp); code != http.StatusUnprocessableEntity || param != missing {
+				t.Errorf("status %d param %q (%s), want 422 on %s", code, param, msg, missing)
+			}
+		})
+	}
+	// The policy's id is not a field of the body or of the answer.
+	code, resp := putPolicy(t, `{"id":"hc_dpol_x","enabled":true,"retry_days":[3],"final_subscription_action":"none","final_invoice_action":"none"}`)
+	if param, msg := errorParam(resp); code != http.StatusUnprocessableEntity || param != "id" || !strings.Contains(msg, "unknown field") {
+		t.Errorf("a body with id: status %d param %q (%s), want 422 unknown field id", code, param, msg)
 	}
 }

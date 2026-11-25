@@ -57,17 +57,27 @@ function outcomeSentence(sub: string, inv: string): string {
   return `${subPart} ${invPart}`
 }
 
+// What the form starts from when the mode has no policy: the policy a new
+// account is created with (dunning.NewAccountPolicy), which retries three
+// times and then changes nothing.
+const NEW_ACCOUNT_POLICY = {
+  enabled: true,
+  retry_days: [3, 4, 7],
+  final_subscription_action: 'none',
+  final_invoice_action: 'none',
+} as const
+
 /**
  * The Payment retries page's Policy tab: one form for the account's retry
  * policy in this mode, which governs every failed payment. With no policy
- * the form starts empty and Save creates it.
+ * the form starts from the policy a new account gets, and Save creates it.
  */
 export function DunningPolicyTab() {
   const { data: policy, isLoading, error, refetch } = useDunningPolicy()
   return (
     <div className="mt-4 space-y-6">
       <p className="max-w-3xl text-sm text-muted-foreground">
-        This policy sets how many days to wait before each retry of a failed payment, and what happens if every retry fails. It applies to every customer.
+        This policy sets how many days to wait before each retry of a failed payment, and what happens if every retry fails. It applies to every customer. Test mode and live mode each have their own. A change reaches retries already under way from their next step.
       </p>
       {isLoading && <FeedSkeleton rows={3} />}
       {!isLoading && error && <LoadError what="the retry policy" error={error} onRetry={() => refetch()} />}
@@ -80,10 +90,10 @@ export function DunningPolicyTab() {
 function PolicyForm({ policy }: { policy: DunningPolicy | null }) {
   const queryClient = useQueryClient()
   const [form, setForm] = useState({
-    enabled: policy?.enabled ?? true,
-    retry_days: (policy?.retry_days ?? []).join(', '),
-    final_subscription_action: policy?.final_subscription_action || 'pause',
-    final_invoice_action: policy?.final_invoice_action || 'none',
+    enabled: policy?.enabled ?? NEW_ACCOUNT_POLICY.enabled,
+    retry_days: (policy?.retry_days ?? NEW_ACCOUNT_POLICY.retry_days).join(', '),
+    final_subscription_action: policy?.final_subscription_action ?? NEW_ACCOUNT_POLICY.final_subscription_action,
+    final_invoice_action: policy?.final_invoice_action ?? NEW_ACCOUNT_POLICY.final_invoice_action,
   })
   const [saving, setSaving] = useState(false)
   const schedule = parseRetryDays(form.retry_days)
@@ -120,7 +130,7 @@ function PolicyForm({ policy }: { policy: DunningPolicy | null }) {
         <CardContent className="p-4">
           <form onSubmit={handleSubmit} noValidate className="space-y-4" aria-label="Retry policy">
             <div className="flex items-center justify-between">
-              <Label>Enabled</Label>
+              <Label>Retry failed payments</Label>
               <Switch checked={form.enabled} onCheckedChange={(val) => setForm(f => ({ ...f, enabled: val }))} />
             </div>
             <div className="space-y-2">

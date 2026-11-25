@@ -12,7 +12,7 @@ import (
 // DunningSeedFunc writes the dunning policy a new account starts with, one
 // per mode, on the account-creation tx (ADR-123). The tenant
 // package may not import its peer dunning, so the composition root wires
-// dunning.Service.SeedDefaultPoliciesTx in. onSeeded runs after each
+// dunning.Service.SeedPoliciesTx in. onSeeded runs after each
 // insert, with app.livemode still set to that insert's mode.
 type DunningSeedFunc func(ctx context.Context, tx *sql.Tx, tenantID string, onSeeded func(p domain.DunningPolicy, livemode bool) error) error
 

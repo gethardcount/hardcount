@@ -184,6 +184,7 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 		}).want(t, 201, "usage event")
 	}
 	call("PUT", "/v1/dunning/policy", map[string]any{
+		"final_subscription_action": "pause", "final_invoice_action": "none",
 		"enabled": true, "retry_days": []int{3, 3},
 	}).want(t, 200, "dunning policy")
 	line := []map[string]any{{"description": "work", "quantity": 1, "unit_amount_cents": 1000}}

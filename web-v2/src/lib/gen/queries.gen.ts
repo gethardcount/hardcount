@@ -14918,13 +14918,14 @@ export const getPutDunningPolicyUrl = () => {
 /**
  * Creates the account's dunning policy for this mode, or replaces
  * every setting of the one it has with the body. This is not a
- * partial update: an omitted field takes its default (`enabled`
- * false, pause the subscription, leave the invoice open), and
- * `retry_days` is required. Send the full policy.
+ * partial update: all four settings are required, and a body that
+ * leaves one out is refused with 422, `param` naming it.
  *
- * A disabled policy starts no dunning, so send `enabled: true` for
- * retries to run. Runs already started follow the new settings from
- * their next step.
+ * A disabled policy starts no dunning for a payment that fails from
+ * then on; runs already started keep retrying. Runs already started
+ * follow a new schedule and new final actions from their next step,
+ * so a schedule shorter than the retries a run has made ends that run
+ * with the final actions.
  * @summary Set the dunning policy
  */
 export const putDunningPolicy = async (dunningPolicyInput: DunningPolicyInput, options?: RequestInit): Promise<DunningPolicy> => {

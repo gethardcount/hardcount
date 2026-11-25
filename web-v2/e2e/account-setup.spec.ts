@@ -575,7 +575,7 @@ test('install a recipe: the preview lists what it will create, the install creat
 // The account's one retry policy is shared by every spec running at once, so
 // this test answers the policy route itself: first with no policy, then with
 // whatever the form saved.
-test('retry policy: with none the tab says retries are not set up and Save creates it; the saved policy fills the form', async ({ page }) => {
+test('retry policy: with none the tab says retries are not set up, the form starts from a new account\'s policy and Save creates it; the saved policy fills the form', async ({ page }) => {
   let stored: DunningPolicy | null = null
   const puts: unknown[] = []
   await page.route(url => url.pathname === '/v1/dunning/policy', async route => {
@@ -595,8 +595,10 @@ test('retry policy: with none the tab says retries are not set up and Save creat
   await expect(page.getByText('Retries are not set up', { exact: true }).first()).toBeVisible()
   const form = page.getByRole('form', { name: 'Retry policy' })
   const days = field(form, 'Days before each retry').getByRole('textbox')
-  await expect(days).toHaveValue('')
-  await expect(form.getByRole('button', { name: 'Save' })).toBeDisabled()
+  // With no policy the form starts from the one a new account gets: three
+  // retries, then nothing changes.
+  await expect(days).toHaveValue('3, 4, 7')
+  await expect(form.getByText(/^The subscription keeps billing as normal\. The unpaid invoice stays open and due\./)).toBeVisible()
 
   // One list of waits in days: the first after the failed payment, each next
   // one after the retry before it. A wait that is not whole days is refused
@@ -606,8 +608,10 @@ test('retry policy: with none the tab says retries are not set up and Save creat
   await expect(form.getByRole('button', { name: 'Save' })).toBeDisabled()
   await days.fill('2, 3, 5')
   await expect(form.getByText('3 retries, on day 2, 5 and 10 after the failed payment or missing card.', { exact: true })).toBeVisible()
-  // The default, pause, keeps new invoices as drafts; runs already open on
-  // other unpaid invoices keep retrying, so it must not say charging stops.
+  // Pause keeps new invoices as drafts; runs already open on other unpaid
+  // invoices keep retrying, so it must not say charging stops.
+  await field(form, 'Do this to the subscription').getByRole('combobox').click()
+  await page.getByRole('option', { name: 'Pause collection (keep drafting invoices)' }).click()
   await expect(form.getByText(/^Invoices created while collection is paused stay drafts, so nothing charges them\. Retries already running on other unpaid invoices continue\./)).toBeVisible()
   await field(form, 'Do this to the subscription').getByRole('combobox').click()
   await page.getByRole('option', { name: 'Leave it active' }).click()

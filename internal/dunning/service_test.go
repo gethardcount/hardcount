@@ -125,10 +125,10 @@ func (m *memStore) PutPolicy(_ context.Context, tenantID string, p domain.Dunnin
 	return p, nil
 }
 
-// SeedDefaultPoliciesTx records the policy it was handed (one mode only —
+// SeedPoliciesTx records the policy it was handed (one mode only —
 // the in-memory store has no modes) so a unit test can check what the
 // service passed down; the per-mode writes are pinned against Postgres.
-func (m *memStore) SeedDefaultPoliciesTx(_ context.Context, _ *sql.Tx, tenantID string, p domain.DunningPolicy, onSeeded func(domain.DunningPolicy, bool) error) error {
+func (m *memStore) SeedPoliciesTx(_ context.Context, _ *sql.Tx, tenantID string, p domain.DunningPolicy, onSeeded func(domain.DunningPolicy, bool) error) error {
 	p.ID = "dpol_1"
 	p.TenantID = tenantID
 	m.policy = &p
@@ -893,15 +893,12 @@ func TestStartDunning_CauseStamped(t *testing.T) {
 // dun", so both must be the same DELIBERATE-SKIP class the enrollment sweeps
 // swallow — never a raw error that fails a sweep.
 //
-// PUT /v1/dunning/policy decodes straight into the domain struct, so
-// omitting `enabled` stores a DISABLED policy: no error, no dunning run, and
-// without the log line this skip writes, no trace either, while the no-policy
-// path next door logs a WARN. The dashboard's form sends enabled, so this is
-// the API caller's trap.
+// A policy turned off starts no run and raises no error, so the log line this
+// skip writes is its only trace, as the no-policy path next door logs a WARN.
 func TestStartDunning_DisabledPolicy_SkipsSameClassAsNoPolicy(t *testing.T) {
 	store := newMemStore()
 	p := *store.policy
-	p.Enabled = false // the shape PUT /v1/dunning/policy stores without `enabled`
+	p.Enabled = false
 	store.policy = &p
 	svc := NewService(store, &noopRetrier{}, nil)
 

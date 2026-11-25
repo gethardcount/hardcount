@@ -152,7 +152,7 @@ func newZeroDueDunningRig(t *testing.T, name string) *zeroDueDunningRig {
 	r := &zeroDueDunningRig{t: t, ctx: clock.WithoutInstant(ctx), db: db, srv: NewServer(db, clock.Real(), nil),
 		tenantID: testutil.CreateTestTenant(t, db, name), invoices: invoice.NewPostgresStore(db), runs: dunning.NewPostgresStore(db)}
 
-	policy, err := r.srv.DunningSvc.PutPolicy(ctx, r.tenantID, dunning.DefaultSeedPolicy())
+	policy, err := r.srv.DunningSvc.PutPolicy(ctx, r.tenantID, dunning.NewAccountPolicy())
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}

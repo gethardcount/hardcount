@@ -136,7 +136,7 @@ The `upgrade` CI job runs steps 1 to 5 and 7 on every pull request ([What CI run
 5. Open the invoice from step 1.
    **You see:** the same number, total and line amounts. Its PDF has the same lines and amounts as the one you downloaded. The "Generated on" time at the bottom differs, because each PDF is made when you open it. A release that changes what the PDF prints says so in its notes.
 6. Open **Payment retries → Policy**.
-   **You see:** the same policy as before the upgrade. An upgrade never adds a retry policy to an existing account.
+   **You see:** the account's retry policy, with the settings it had before the upgrade. An upgrade never adds a retry policy to an account that has none.
 7. Run `./quickstart.sh demo` again.
    **You see:** a second finalized invoice for a new demo customer.
 8. Run `./quickstart.sh destroy --yes` when you are done.

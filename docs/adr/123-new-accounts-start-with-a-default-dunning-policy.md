@@ -1,7 +1,7 @@
 # ADR-123: New accounts start with a default dunning policy that retries three times and changes nothing
 
 **Date:** 2026-10-17
-**Status:** Accepted; amended 2026-10-26 by [ADR-130](130-usage-prices-belong-to-the-plan.md): recipes no longer create a dunning policy ([amendment](#amendment-2026-10-26-recipes-create-no-dunning-policy)).
+**Status:** Accepted; amended 2026-10-26 by [ADR-130](130-usage-prices-belong-to-the-plan.md): recipes no longer create a dunning policy ([amendment](#amendment-2026-10-26-recipes-create-no-dunning-policy)).; amended 2026-11-25: the seeded policy is the account's one policy, and nothing takes its place
 
 **Amended 2026-10-26 ([ADR-130](130-usage-prices-belong-to-the-plan.md), built in #1389).** A recipe no longer creates a dunning policy, so only an operator's first enabled policy takes over the seeded default. Where this ADR says "by hand or from a recipe", read "by hand". The seeded default and its takeover rule stay.
 

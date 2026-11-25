@@ -15,10 +15,10 @@ type Store interface {
 	// PutPolicy creates the account's policy for the mode on ctx, or
 	// replaces the one it has, and returns it as stored.
 	PutPolicy(ctx context.Context, tenantID string, policy domain.DunningPolicy) (domain.DunningPolicy, error)
-	// SeedDefaultPoliciesTx writes the policy a new account starts with,
+	// SeedPoliciesTx writes the policy a new account starts with,
 	// once per mode (ADR-123). onSeeded runs after each insert with
 	// app.livemode still set to that mode.
-	SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, tenantID string, policy domain.DunningPolicy, onSeeded func(p domain.DunningPolicy, livemode bool) error) error
+	SeedPoliciesTx(ctx context.Context, tx *sql.Tx, tenantID string, policy domain.DunningPolicy, onSeeded func(p domain.DunningPolicy, livemode bool) error) error
 
 	// Runs
 	//

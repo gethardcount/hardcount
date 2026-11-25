@@ -337,10 +337,7 @@ func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, 
 	if !policy.Enabled {
 		// Logged at the same volume as the no-policy skip above: both end
 		// with "this invoice will never dun", and an operator debugging that
-		// needs the same evidence either way. PUT /v1/dunning/policy without
-		// `enabled` stores a policy that is turned off, with no error and no
-		// run; this log is the trace of it. The dashboard's form sends
-		// enabled explicitly.
+		// needs the same evidence either way.
 		slog.WarnContext(ctx, "dunning policy is disabled — skipping enrollment; the invoice will not dun",
 			"tenant_id", tenantID, "invoice_id", invoiceID, "customer_id", customerID)
 		return domain.InvoiceDunningRun{}, errs.InvalidState("dunning is disabled (the account's policy is not enabled)")
@@ -567,8 +564,9 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// when a one-line resolve is all that remains. Honest provenance: the
 	// original ordering was surfaced by a 2026-08-02 walk fixture that was
 	// itself malformed (a cross-mode run RLS makes unconstructible through real
-	// flows), and no REAL path to an unloadable policy is known today — the FK
-	// is RESTRICT and runs bind same-mode policies. The reorder stays because
+	// flows), and no REAL path to an unloadable policy is known today: no route
+	// deletes a policy, and a mode with runs had one when they started. The
+	// reorder stays because
 	// it is correct on principle (robustness against a class, not an instance)
 	// and costs nothing; TestProcessDueRuns_TerminalInvoiceResolvesWithoutPolicy
 	// pins it via a bypass-constructed fixture.
@@ -1922,7 +1920,7 @@ func (s *Service) PutPolicy(ctx context.Context, tenantID string, policy domain.
 	return s.store.PutPolicy(ctx, tenantID, policy)
 }
 
-// DefaultSeedPolicy is the policy every new account starts with, once per
+// NewAccountPolicy is the policy every new account starts with, once per
 // mode (ADR-123, #1152). Three retries on day 3, 7 and 14 after the failed
 // payment (or the collection that found no card): Stripe's recommended two-week window, and its limit of three
 // retries on a custom schedule. When retries run out it changes nothing:
@@ -1931,7 +1929,7 @@ func (s *Service) PutPolicy(ctx context.Context, tenantID string, policy domain.
 // cancel or write off on an account's behalf before the operator has chosen
 // to. Both final actions are written explicitly, because an empty value
 // normalizes to pause.
-func DefaultSeedPolicy() domain.DunningPolicy {
+func NewAccountPolicy() domain.DunningPolicy {
 	return domain.DunningPolicy{
 		Enabled:                 true,
 		RetryDays:               []int{3, 4, 7},
@@ -1940,7 +1938,7 @@ func DefaultSeedPolicy() domain.DunningPolicy {
 	}
 }
 
-// SeedDefaultPoliciesTx creates DefaultSeedPolicy in test and live mode on
+// SeedPoliciesTx creates NewAccountPolicy in test and live mode on
 // the caller's account-creation tx (ADR-123). It is the one writer of the
 // policy an account starts with; account creation (tenant.RunBootstrap)
 // calls it, so an account that exists has retries on from its first failed
@@ -1948,17 +1946,17 @@ func DefaultSeedPolicy() domain.DunningPolicy {
 // through the same normalize+validate as every other writer. onSeeded runs
 // after each insert in that insert's mode (the callers write an audit row
 // there); an error from it, or from either insert, fails account creation.
-func (s *Service) SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, tenantID string, onSeeded func(p domain.DunningPolicy, livemode bool) error) error {
-	policy, err := normalizeAndValidatePolicy(DefaultSeedPolicy())
+func (s *Service) SeedPoliciesTx(ctx context.Context, tx *sql.Tx, tenantID string, onSeeded func(p domain.DunningPolicy, livemode bool) error) error {
+	policy, err := normalizeAndValidatePolicy(NewAccountPolicy())
 	if err != nil {
 		return fmt.Errorf("the dunning policy a new account starts with: %w", err)
 	}
-	return s.store.SeedDefaultPoliciesTx(ctx, tx, tenantID, policy, onSeeded)
+	return s.store.SeedPoliciesTx(ctx, tx, tenantID, policy, onSeeded)
 }
 
 // normalizeAndValidatePolicy applies the save-time defaults and enforces the
 // policy invariants. The single chokepoint shared by PutPolicy and
-// SeedDefaultPoliciesTx so no writer can persist a policy another path would
+// SeedPoliciesTx so no writer can persist a policy another path would
 // reject.
 func normalizeAndValidatePolicy(policy domain.DunningPolicy) (domain.DunningPolicy, error) {
 	if err := validateRetryDays(policy.RetryDays); err != nil {

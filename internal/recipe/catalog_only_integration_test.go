@@ -26,7 +26,7 @@ func TestService_Instantiate_TouchesOnlyTheCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := dunningSvc.SeedDefaultPoliciesTx(ctx, tx, tenantID, nil); err != nil {
+	if err := dunningSvc.SeedPoliciesTx(ctx, tx, tenantID, nil); err != nil {
 		postgres.Rollback(tx)
 		t.Fatalf("seed: %v", err)
 	}

@@ -56,6 +56,7 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 	}).want(t, 201, "create subscription").body, "id")
 	// A dunning policy, so finalizing an invoice with no card opens a run.
 	call("PUT", "/v1/dunning/policy", map[string]any{
+		"final_subscription_action": "pause", "final_invoice_action": "none",
 		"enabled": true, "retry_days": []int{3, 3},
 	}).want(t, 200, "create dunning policy")
 	dunnedID := flowStr(call("POST", "/v1/invoices", map[string]any{
@@ -159,6 +160,39 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 			body:       map[string]any{"resolution": "invoice_voided"},
 			keptMethod: "POST", kept: "/v1/invoices/" + dunnedID + "/void",
 		},
+		// An account has one dunning policy per mode.
+		{
+			name:   "dunning policies list",
+			method: "GET", path: "/v1/dunning/policies",
+			keptMethod: "GET", kept: "/v1/dunning/policy",
+		},
+		{
+			name:   "dunning policy create",
+			method: "POST", path: "/v1/dunning/policies",
+			body:       map[string]any{"name": "Second", "enabled": true, "retry_days": []int{3}},
+			keptMethod: "GET", kept: "/v1/dunning/policy",
+		},
+		{
+			name:   "dunning policy by id",
+			method: "GET", path: "/v1/dunning/policies/hc_dpol_x",
+			keptMethod: "GET", kept: "/v1/dunning/policy",
+		},
+		{
+			name:   "dunning policy patch",
+			method: "PATCH", path: "/v1/dunning/policies/hc_dpol_x",
+			body:       map[string]any{"enabled": false},
+			keptMethod: "GET", kept: "/v1/dunning/policy",
+		},
+		{
+			name:   "dunning policy delete",
+			method: "DELETE", path: "/v1/dunning/policies/hc_dpol_x",
+			keptMethod: "GET", kept: "/v1/dunning/policy",
+		},
+		{
+			name:   "dunning policy set-default",
+			method: "POST", path: "/v1/dunning/policies/hc_dpol_x/set-default",
+			keptMethod: "GET", kept: "/v1/dunning/policy",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -178,6 +212,13 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 				t.Errorf("kept %s %s = %d %s, want 2xx", tc.keptMethod, tc.kept, kept.status, kept.raw)
 			}
 		})
+	}
+
+	// A customer is no longer assigned a dunning policy: the field is one the
+	// customer update does not take.
+	assign := call("PATCH", "/v1/customers/"+customerID, map[string]any{"dunning_policy_id": "hc_dpol_x"})
+	if assign.status != 422 || flowStr(assign.body, "error", "param") != "dunning_policy_id" {
+		t.Errorf("PATCH customer with dunning_policy_id = %d %s, want 422 naming dunning_policy_id", assign.status, assign.raw)
 	}
 }
 

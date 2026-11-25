@@ -8,8 +8,10 @@
 export type RetriesNotice = { title: string; body: string }
 
 /**
- * A notice when failed payments in this mode are not retried: there is no
- * policy (null), or it is turned off. Null when retries are on.
+ * A notice when a payment that fails now starts no retries in this mode:
+ * there is no policy (null), or it is turned off. Null when retries are on.
+ * Turning the policy off stops new retries only: StartDunning reads
+ * `enabled`, a retry already under way does not.
  */
 export function retriesOffNotice(policy: { enabled: boolean } | null): RetriesNotice | null {
   if (!policy) {
@@ -21,7 +23,7 @@ export function retriesOffNotice(policy: { enabled: boolean } | null): RetriesNo
   if (!policy.enabled) {
     return {
       title: 'Retries are turned off',
-      body: 'Failed payments are not retried. Turn retries on in the retry policy to start them.',
+      body: 'A payment that fails now is not retried. Retries already under way finish their schedule. Turn retries on to start them for new failures.',
     }
   }
   return null

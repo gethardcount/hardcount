@@ -318,8 +318,8 @@ follows.
   dunning policy makes two separate choices. For the subscription: pause
   it, cancel it, or do nothing. For the invoice: write it off, or leave it
   open. An account has one dunning policy in each mode, used for every
-  customer. A new account's retries three times and then does nothing to
-  either.
+  customer. A new account's policy retries three times and then does
+  nothing to either.
   [More](concepts/payments.md#retries-dunning)
 - **dunning run**: One dunning process for one unpaid invoice (at most one
   per invoice). It follows the account's dunning policy, and records the

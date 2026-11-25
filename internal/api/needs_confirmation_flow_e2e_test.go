@@ -158,6 +158,7 @@ func TestE2E_OffSessionCharge_BankNeedsCustomerToConfirm(t *testing.T) {
 		return flowDo(t, ts, method, path, req)
 	}
 	call("PUT", "/v1/dunning/policy", flowReq{body: map[string]any{
+		"final_subscription_action": "pause", "final_invoice_action": "none",
 		"enabled": true, "retry_days": []int{1, 3, 3},
 	}}).want(t, 200, "create dunning policy")
 	if _, err := tenantstripe.NewStore(db).Upsert(callerCtx(tenantID, false), tenantstripe.UpsertInput{

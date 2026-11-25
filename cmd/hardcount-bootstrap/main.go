@@ -80,7 +80,7 @@ func main() {
 		CreateKeyTx:  auth.NewService(db, auditLogger).CreateKeyTx,
 		// The same dunning policy, one per mode, as the HTTP route (ADR-123).
 		// Seeding needs only the store, so no retrier or clock is wired.
-		SeedDunningTx: dunning.NewService(dunning.NewPostgresStore(db), nil, nil).SeedDefaultPoliciesTx,
+		SeedDunningTx: dunning.NewService(dunning.NewPostgresStore(db), nil, nil).SeedPoliciesTx,
 		// The same provisioning audit rows as the HTTP bootstrap route
 		// (ADR-090). The CLI must not be the path that mints a live key with
 		// no record.

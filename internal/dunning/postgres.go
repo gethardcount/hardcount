@@ -123,14 +123,14 @@ func (s *PostgresStore) PutPolicy(ctx context.Context, tenantID string, p domain
 	return stored, nil
 }
 
-// SeedDefaultPoliciesTx inserts p once per mode (test, then live) on the
+// SeedPoliciesTx inserts p once per mode (test, then live) on the
 // caller's account-creation tx (ADR-123). Each insert runs with
 // app.livemode set to its mode, so the livemode trigger stamps the row and
 // the RLS check passes; onSeeded runs in the same mode, so an audit row
 // lands in the matching log. The caller's app.livemode is restored before
 // returning. If the account somehow has a policy already, the unique index
 // rejects the insert and the account is not created.
-func (s *PostgresStore) SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.DunningPolicy, onSeeded func(p domain.DunningPolicy, livemode bool) error) error {
+func (s *PostgresStore) SeedPoliciesTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.DunningPolicy, onSeeded func(p domain.DunningPolicy, livemode bool) error) error {
 	var prevMode sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT current_setting('app.livemode', true)`).Scan(&prevMode); err != nil {
 		return fmt.Errorf("read livemode: %w", err)

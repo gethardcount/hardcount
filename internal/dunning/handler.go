@@ -99,23 +99,29 @@ func (h *Handler) getPolicy(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, policy)
 }
 
-// policyBody is a policy payload: the policy's fields, plus the keys it
-// replaced, declared only so they can be refused by name with what to send
-// instead: the pre-ADR-112 `final_action`, and the three schedule fields
-// that retry_days replaced (2026-10-23). A caller still sending
+// policyBody is a policy payload. PUT replaces the whole policy, so each of
+// its four settings is a pointer: one left out is refused by name, never
+// read as off, empty or a default. It also declares the keys those settings
+// replaced, only so they can be refused by name with what to send instead:
+// the pre-ADR-112 `final_action`, and the three schedule fields that
+// retry_days replaced (2026-10-23). A caller still sending
 // `final_action: "cancel_subscription"` would otherwise store a policy that
 // pauses and never writes off.
 type policyBody struct {
 	domain.DunningPolicy
-	FinalAction      *json.RawMessage `json:"final_action"`
-	RetrySchedule    *json.RawMessage `json:"retry_schedule"`
-	MaxRetryAttempts *json.RawMessage `json:"max_retry_attempts"`
-	GracePeriodDays  *json.RawMessage `json:"grace_period_days"`
+	Enabled                 *bool                             `json:"enabled"`
+	RetryDays               *[]int                            `json:"retry_days"`
+	FinalSubscriptionAction *domain.DunningSubscriptionAction `json:"final_subscription_action"`
+	FinalInvoiceAction      *domain.DunningInvoiceAction      `json:"final_invoice_action"`
+	FinalAction             *json.RawMessage                  `json:"final_action"`
+	RetrySchedule           *json.RawMessage                  `json:"retry_schedule"`
+	MaxRetryAttempts        *json.RawMessage                  `json:"max_retry_attempts"`
+	GracePeriodDays         *json.RawMessage                  `json:"grace_period_days"`
 }
 
 // policyReadOnly are the policy fields the server sets. A body that sends
 // one is refused, naming it.
-var policyReadOnly = respond.ReadOnly("id", "tenant_id", "created_at", "updated_at")
+var policyReadOnly = respond.ReadOnly("tenant_id", "created_at", "updated_at")
 
 // decodePolicyBody decodes a policy payload strictly (respond.DecodeBody)
 // and refuses the replaced keys by name. It writes the refusal and returns
@@ -152,7 +158,26 @@ func decodePolicyBody(w http.ResponseWriter, r *http.Request) (domain.DunningPol
 			return domain.DunningPolicy{}, false
 		}
 	}
-	return body.DunningPolicy, true
+	for _, setting := range []struct {
+		field string
+		sent  bool
+	}{
+		{"enabled", body.Enabled != nil},
+		{"retry_days", body.RetryDays != nil},
+		{"final_subscription_action", body.FinalSubscriptionAction != nil},
+		{"final_invoice_action", body.FinalInvoiceAction != nil},
+	} {
+		if !setting.sent {
+			respond.ValidationField(w, r, setting.field, setting.field+" is required: PUT replaces the whole policy, so send all four settings")
+			return domain.DunningPolicy{}, false
+		}
+	}
+	return domain.DunningPolicy{
+		Enabled:                 *body.Enabled,
+		RetryDays:               *body.RetryDays,
+		FinalSubscriptionAction: *body.FinalSubscriptionAction,
+		FinalInvoiceAction:      *body.FinalInvoiceAction,
+	}, true
 }
 
 // putPolicy creates the account's policy for the request's mode, or
