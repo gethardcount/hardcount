@@ -45,7 +45,7 @@ tags:
   - name: Billing
     description: Billing runs, previews and analytics.
   - name: Dunning
-    description: Retrying failed payments. Policies and runs.
+    description: Retrying failed payments. The policy and the runs.
   - name: Webhooks
     description: Webhook endpoints that Hardcount sends events to, the events, and their deliveries.
   - name: Auth
@@ -510,9 +510,8 @@ components:
 
         Not every route fills every optional field. Get and update return
         the whole record. The list and create answers leave out
-        `email_status`, the bounce fields, `dunning_policy_id` and
-        `stripe_customer_id`, and the list also leaves out
-        `additional_emails`.
+        `email_status`, the bounce fields and `stripe_customer_id`, and the
+        list also leaves out `additional_emails`.
       required: [id, external_id, display_name, status, created_at, updated_at]
       properties:
         id:
@@ -583,12 +582,6 @@ components:
             The reason the email provider gave with the last bounce or spam
             report. Absent until one is recorded, when the report gave no
             reason, and again after `email` changes.
-        dunning_policy_id:
-          type: string
-          description: |
-            The dunning policy (the plan for retrying failed payments) this
-            customer uses. Absent when the customer uses the account's
-            default policy.
         stripe_customer_id:
           type: string
           description: |
@@ -615,7 +608,6 @@ components:
         additional_emails: [finance@acme.example]
         status: active
         email_status: unknown
-        dunning_policy_id: hc_dpol_dajqj1aq3gpgqfoq5c6g
         stripe_customer_id: cus_RkT9qW2xYz3AbC
         created_at: "2026-09-30T16:20:00Z"
         updated_at: "2026-10-15T09:12:44Z"
@@ -6627,9 +6619,10 @@ components:
       description: |
         A dunning run: the payment retries for one unpaid invoice. Dunning
         is retrying a failed or missing payment on a schedule (the
-        invoice's dunning policy), and running the policy's final action
-        when the retries run out. Each invoice has at most one run.
-      required: [id, invoice_id, policy_id, state, attempt_count, paused, created_at, updated_at]
+        account's dunning policy for the run's mode), and running the
+        policy's final action when the retries run out. Each invoice has at
+        most one run.
+      required: [id, invoice_id, state, attempt_count, paused, created_at, updated_at]
       properties:
         id:
           type: string
@@ -6643,9 +6636,6 @@ components:
         customer_id:
           type: string
           description: The invoice's customer. Absent when not recorded.
-        policy_id:
-          type: string
-          description: The dunning policy whose schedule and final action the run follows.
         state:
           type: string
           enum: [active, escalated, resolved]
@@ -6729,7 +6719,6 @@ components:
         tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
         invoice_id: hc_inv_dbj84b2q3gpgqfoq5c40
         customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
-        policy_id: hc_dpol_dajqj1aq3gpgqfoq5c6g
         state: active
         reason: payment_failed
         attempt_count: 1
@@ -6869,7 +6858,6 @@ components:
           tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
           invoice_id: hc_inv_dbj84b2q3gpgqfoq5c40
           customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
-          policy_id: hc_dpol_dajqj1aq3gpgqfoq5c6g
           state: active
           reason: payment_failed
           attempt_count: 1
@@ -7068,21 +7056,14 @@ components:
     DunningPolicyInput:
       type: object
       description: |
-        The body of `POST /v1/dunning/policies` and
-        `PATCH /v1/dunning/policies/{id}`. A PATCH replaces every setting,
-        so send the full policy. `id`, `tenant_id`, `is_default`, `seeded`,
-        `created_at` and `updated_at` are set by the server; sending one is
-        refused with 422.
-      required: [retry_days]
+        The body of `PUT /v1/dunning/policy`. It replaces every setting, so
+        all four are required. `tenant_id`, `created_at` and `updated_at`
+        are set by the server; sending one is refused with 422.
+      required: [enabled, retry_days, final_subscription_action, final_invoice_action]
       properties:
-        name:
-          type: string
-          maxLength: 255
-          description: A name for the policy, up to 255 bytes (a character outside ASCII counts as more than one). Defaults to empty.
         enabled:
           type: boolean
-          default: false
-          description: A disabled policy starts no dunning.
+          description: A disabled policy starts no dunning for a payment that fails from then on. Runs already started keep retrying.
         retry_days:
           type: array
           minItems: 1
@@ -7103,7 +7084,6 @@ components:
         final_subscription_action:
           type: string
           enum: [none, pause, cancel]
-          default: pause
           description: |
             What happens to the subscription when retries run out. `pause`
             pauses collection and sends `subscription.collection_paused`
@@ -7118,13 +7098,11 @@ components:
         final_invoice_action:
           type: string
           enum: [none, mark_uncollectible]
-          default: none
           description: |
             What happens to the invoice when retries run out.
             `mark_uncollectible` writes it off as bad debt; `none` leaves it
             open and due.
       example:
-        name: Strict retries
         enabled: true
         retry_days: [2, 3, 5]
         final_subscription_action: cancel
@@ -7133,37 +7111,19 @@ components:
     DunningPolicy:
       type: object
       description: |
-        A dunning policy: how failed or missing payments are retried, and
-        what happens when the retries run out. Every account starts with one
-        policy per mode, "Default retries" (retries on day 3, 7 and 14, then
-        no final action), as the default. Customers without an assigned
-        policy use the default.
-      required: [id, name, enabled, is_default, seeded, retry_days, final_subscription_action, final_invoice_action, created_at, updated_at]
+        The account's dunning policy for one mode: how failed or missing
+        payments are retried, and what happens when the retries run out.
+        An account has at most one per mode, and it governs every payment
+        retry in that mode. Every account starts with one per mode
+        (retries on day 3, 7 and 14, then no final action).
+      required: [enabled, retry_days, final_subscription_action, final_invoice_action, created_at, updated_at]
       properties:
-        id:
-          type: string
-          description: Unique identifier of the policy, starting `hc_dpol_`.
-          example: hc_dpol_dajqj1aq3gpgqfoq5c6g
         tenant_id:
           type: string
           description: The account the policy belongs to. Absent when empty.
-        name:
-          type: string
-          description: The policy's name. Can be empty.
         enabled:
           type: boolean
           description: Whether the policy starts dunning. A disabled policy starts no runs.
-        is_default:
-          type: boolean
-          description: Customers without an assigned policy use the default.
-        seeded:
-          type: boolean
-          description: |
-            True for the "Default retries" policy the account was created
-            with, until you edit it or make it the default. While it is
-            true, the next enabled policy you create becomes the default
-            instead. Set by the server: a request body that sends it is
-            refused with 422.
         retry_days:
           type: array
           items:
@@ -7187,41 +7147,13 @@ components:
           format: date-time
           description: When the policy last changed.
       example:
-        id: hc_dpol_dajqj1aq3gpgqfoq5c6g
         tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-        name: Default retries
         enabled: true
-        is_default: true
-        seeded: true
         retry_days: [3, 4, 7]
         final_subscription_action: none
         final_invoice_action: none
         created_at: "2026-09-15T12:00:00Z"
         updated_at: "2026-09-15T12:00:00Z"
-
-    DunningPolicyListItem:
-      description: A dunning policy as `GET /v1/dunning/policies` lists it, with how many customers are assigned to it.
-      allOf:
-        - $ref: "#/components/schemas/DunningPolicy"
-        - type: object
-          required: [assigned_customers]
-          properties:
-            assigned_customers:
-              type: integer
-              description: Customers explicitly assigned to this policy. Customers using it only as the default are not counted.
-      example:
-        id: hc_dpol_dajqj1aq3gpgqfoq5c6g
-        tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-        name: Default retries
-        enabled: true
-        is_default: true
-        seeded: true
-        retry_days: [3, 4, 7]
-        final_subscription_action: none
-        final_invoice_action: none
-        created_at: "2026-09-15T12:00:00Z"
-        updated_at: "2026-09-15T12:00:00Z"
-        assigned_customers: 0
 
     UsageAggregate:
       type: object
@@ -9688,9 +9620,6 @@ paths:
         Creates a customer in the mode of your API key. `external_id` must be
         unique in the account and mode. The create is written to the audit
         log.
-
-        `dunning_policy_id` is not a create field: assign a policy with
-        `PATCH /v1/customers/{id}`.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -9738,8 +9667,8 @@ paths:
       responses:
         "201":
           description: |
-            The new customer. The create answer leaves out `email_status`,
-            `dunning_policy_id` and `stripe_customer_id`.
+            The new customer. The create answer leaves out `email_status`
+            and `stripe_customer_id`.
           content:
             application/json:
               schema:
@@ -9785,8 +9714,6 @@ paths:
             `email` or `additional_emails` entry, an `additional_emails` entry
             equal to `email`, or more than 10 `additional_emails`. An unknown
             field is refused the same way.
-            `dunning_policy_id` is not a create field: assign a policy with
-            `PATCH /v1/customers/{id}`.
           content:
             application/json:
               schema:
@@ -9807,8 +9734,8 @@ paths:
       description: |
         Customers in the mode of your API key, newest first unless you choose
         a sort. The list answer leaves out `additional_emails`,
-        `email_status`, the bounce fields, `dunning_policy_id` and
-        `stripe_customer_id`: get one customer for those.
+        `email_status`, the bounce fields and `stripe_customer_id`: get one
+        customer for those.
       parameters:
         - name: status
           in: query
@@ -10027,7 +9954,6 @@ paths:
                   - finance@acme.example
                 status: active
                 email_status: unknown
-                dunning_policy_id: hc_dpol_dajqj1aq3gpgqfoq5c6g
                 stripe_customer_id: cus_RkT9qW2xYz3AbC
                 created_at: "2026-09-30T16:20:00Z"
                 updated_at: "2026-10-15T09:12:44Z"
@@ -10060,10 +9986,6 @@ paths:
           customer has an active or trialing subscription, which still bills.
           Cancel those subscriptions first. Archiving does not stop dunning
           (the retries of failed payments) on unpaid invoices.
-        - `dunning_policy_id` set to `""` removes the assignment, so the
-          account's default policy applies. A set ID must be a policy in this
-          account and mode, or the call returns 404. The change applies to the
-          next dunning run, not to runs already started.
         - `additional_emails` replaces the whole CC list; `[]` clears it.
           Entries are lowercased and deduplicated, and may not equal the
           primary email. More than 10 after deduplication is refused with
@@ -10111,9 +10033,6 @@ paths:
                   description: |
                     `archived` blocks new subscriptions for the customer.
                     `active` lifts that.
-                dunning_policy_id:
-                  type: string
-                  description: Policy ID, or `""` to use the account's default policy.
                 additional_emails:
                   type: array
                   maxItems: 10
@@ -10124,7 +10043,6 @@ paths:
                     clears it. Left out keeps the current list. More than 10
                     after deduplication is refused with 422.
             example:
-              dunning_policy_id: hc_dpol_dajqj1aq3gpgqfoq5c6g
               additional_emails:
                 - finance@acme.example
       responses:
@@ -10144,7 +10062,6 @@ paths:
                   - finance@acme.example
                 status: active
                 email_status: unknown
-                dunning_policy_id: hc_dpol_dajqj1aq3gpgqfoq5c6g
                 stripe_customer_id: cus_RkT9qW2xYz3AbC
                 created_at: "2026-09-30T16:20:00Z"
                 updated_at: "2026-10-15T09:12:44Z"
@@ -10167,8 +10084,7 @@ paths:
         "404":
           description: |
             No customer with this ID in this account and mode
-            (`customer not found`), or no dunning policy with the
-            `dunning_policy_id` you sent (`dunning policy not found`).
+            (`customer not found`).
           content:
             application/json:
               schema:
@@ -10177,7 +10093,7 @@ paths:
                 error:
                   type: invalid_request_error
                   code: not_found
-                  message: dunning policy not found
+                  message: customer not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "409":
           description: |
@@ -20151,7 +20067,7 @@ paths:
         dunning run stays open until the payment settles. A declined card
         answers 502;
         the invoice's `payment_status` becomes `failed`, and dunning starts
-        when the customer's policy is enabled. Check
+        when the account's dunning policy is enabled. Check
         `payment_status` on the returned invoice.
 
         A top-up (`billing_reason` `topup`) is charged here while it is a
@@ -21822,7 +21738,7 @@ paths:
            and `payment.succeeded`, and queues a receipt email to the
            customer when they have an email address. A declined charge sets
            `payment_status` to `failed`, sends `payment.failed`, and starts
-           dunning when the customer's policy is enabled.
+           dunning when the account's dunning policy is enabled.
         3. With no card on file, an email with a link to add one is queued
            for the customer, once, when they have an email address and the
            server's `PAYMENT_UPDATE_URL` is set; `no_pm_notified_at` records
@@ -25328,7 +25244,6 @@ paths:
                     tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
                     invoice_id: hc_inv_dbj84b2q3gpgqfoq5c40
                     customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
-                    policy_id: hc_dpol_dajqj1aq3gpgqfoq5c6g
                     state: active
                     reason: payment_failed
                     attempt_count: 1
@@ -25396,7 +25311,6 @@ paths:
                   tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
                   invoice_id: hc_inv_dbj84b2q3gpgqfoq5c40
                   customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
-                  policy_id: hc_dpol_dajqj1aq3gpgqfoq5c6g
                   state: active
                   reason: payment_failed
                   attempt_count: 1
@@ -25504,76 +25418,64 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
-  /v1/dunning/policies:
+  /v1/dunning/policy:
     get:
       tags: [Dunning]
-      summary: List dunning policies
+      summary: Get the dunning policy
       description: |
-        Every dunning policy in this account and mode, the default first,
-        then oldest first. Each one carries how many customers are assigned
-        to it.
-      operationId: listDunningPolicies
-      parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
+        The account's dunning policy for this mode: how failed payments
+        are retried and what happens when the retries run out. It governs
+        every payment retry in the mode. A new account starts with one in
+        each mode (retries on day 3, 7 and 14, then no final action).
+      operationId: getDunningPolicy
       responses:
         "200":
-          description: Policies
+          description: The policy
           content:
             application/json:
               schema:
-                type: object
-                required: [data, total]
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/DunningPolicyListItem"
-                  total:
-                    $ref: "#/components/schemas/ListTotal"
+                $ref: "#/components/schemas/DunningPolicy"
               example:
-                data:
-                  - id: hc_dpol_dajqj1aq3gpgqfoq5c6g
-                    tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                    name: Default retries
-                    enabled: true
-                    is_default: true
-                    seeded: true
-                    retry_days: [3, 4, 7]
-                    final_subscription_action: none
-                    final_invoice_action: none
-                    created_at: "2026-09-15T12:00:00Z"
-                    updated_at: "2026-09-15T12:00:00Z"
-                    assigned_customers: 0
-                total: 1
+                tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
+                enabled: true
+                retry_days: [3, 4, 7]
+                final_subscription_action: none
+                final_invoice_action: none
+                created_at: "2026-09-15T12:00:00Z"
+                updated_at: "2026-09-15T12:00:00Z"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "422":
-          $ref: "#/components/responses/InvalidPage"
+        "404":
+          description: "`not_found`: this account has no dunning policy in this mode, so failed payments are not retried."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  type: invalid_request_error
+                  code: not_found
+                  message: dunning_policy not found
+                  request_id: req_dbjg652q3gpgqfoq5cd0
         "429":
           $ref: "#/components/responses/RateLimited"
-    post:
+    put:
       tags: [Dunning]
-      summary: Create a dunning policy
+      summary: Set the dunning policy
       description: |
-        A dunning policy decides how failed payments are retried and what
-        happens when the retries run out. Every account starts with one
-        policy per mode, "Default retries", as the default. The first
-        enabled policy you create in a mode takes the default from it,
-        unless you have edited it or made it the default yourself; later
-        ones do not (use set-default). Customers without an assigned policy
-        use the default, so check `is_default` in the response. Assign a
-        policy to a customer with `dunning_policy_id` on
-        `PATCH /v1/customers/{id}`.
+        Creates the account's dunning policy for this mode, or replaces
+        every setting of the one it has with the body. This is not a
+        partial update: all four settings are required, and a body that
+        leaves one out is refused with 422, `param` naming it.
 
-        `enabled` defaults to false. A disabled policy starts no dunning, so
-        send `enabled: true` for the policy to take effect. A policy created
-        disabled never takes the default from "Default retries". A run that
-        has started keeps following its policy as it is when each retry
-        runs.
-      operationId: createDunningPolicy
+        A disabled policy starts no dunning for a payment that fails from
+        then on; runs already started keep retrying. Runs already started
+        follow a new schedule and new final actions from their next step,
+        so a schedule shorter than the retries a run has made ends that run
+        with the final actions.
+      operationId: putDunningPolicy
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -25583,29 +25485,24 @@ paths:
             schema:
               $ref: "#/components/schemas/DunningPolicyInput"
             example:
-              name: Strict retries
               enabled: true
               retry_days: [2, 3, 5]
               final_subscription_action: cancel
               final_invoice_action: mark_uncollectible
       responses:
-        "201":
-          description: The new policy
+        "200":
+          description: The policy as saved
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/DunningPolicy"
               example:
-                id: hc_dpol_dajqj1aq3gpgqfoq5c6h
                 tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                name: Strict retries
                 enabled: true
-                is_default: true
-                seeded: false
                 retry_days: [2, 3, 5]
                 final_subscription_action: cancel
                 final_invoice_action: mark_uncollectible
-                created_at: "2026-11-02T10:00:00Z"
+                created_at: "2026-09-15T12:00:00Z"
                 updated_at: "2026-11-02T10:00:00Z"
         "400":
           $ref: "#/components/responses/InvalidBody"
@@ -25621,8 +25518,8 @@ paths:
             field was sent (`final_action`, `retry_schedule`,
             `max_retry_attempts`, `grace_period_days`), `retry_days` is
             missing, out of bounds or not whole days, an unknown final
-            action, a `name` over 255 bytes, a field the server sets
-            (`id`, `is_default`, `seeded` and the like), or an unknown field.
+            action, a field the server sets (`id`, `tenant_id`,
+            `created_at`, `updated_at`), or an unknown field.
           content:
             application/json:
               schema:
@@ -25634,293 +25531,6 @@ paths:
                   message: entry 1 is 45; each wait is a whole number of days from 1 to 30
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: retry_days
-        "429":
-          $ref: "#/components/responses/RateLimited"
-
-  /v1/dunning/policies/{id}:
-    get:
-      tags: [Dunning]
-      summary: Get a dunning policy
-      operationId: getDunningPolicy
-      parameters:
-        - name: id
-          in: path
-          required: true
-          description: The dunning policy id (`hc_dpol_…`).
-          schema:
-            type: string
-      responses:
-        "200":
-          description: The policy
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DunningPolicy"
-              example:
-                id: hc_dpol_dajqj1aq3gpgqfoq5c6g
-                tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                name: Default retries
-                enabled: true
-                is_default: true
-                seeded: true
-                retry_days: [3, 4, 7]
-                final_subscription_action: none
-                final_invoice_action: none
-                created_at: "2026-09-15T12:00:00Z"
-                updated_at: "2026-09-15T12:00:00Z"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          description: "`not_found`: no policy with this id in this account and mode."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: not_found
-                  message: dunning_policy not found
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "429":
-          $ref: "#/components/responses/RateLimited"
-    patch:
-      tags: [Dunning]
-      summary: Replace a dunning policy's settings
-      description: |
-        Replaces every setting of the policy with the body. This is not a
-        partial update: an omitted field takes its default (`enabled`
-        false, `name` empty, pause the subscription, leave the invoice
-        open), and `retry_days` is required. Send the full policy.
-        `is_default` cannot be changed here; use set-default. Editing the
-        "Default retries" policy the account started with sets its
-        `seeded` to false. Runs already started follow the new settings
-        from their next step.
-      operationId: updateDunningPolicy
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - name: id
-          in: path
-          required: true
-          description: The dunning policy id (`hc_dpol_…`).
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DunningPolicyInput"
-            example:
-              name: Default retries
-              enabled: true
-              retry_days: [3, 4, 7]
-              final_subscription_action: pause
-              final_invoice_action: none
-      responses:
-        "200":
-          description: The updated policy
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DunningPolicy"
-              example:
-                id: hc_dpol_dajqj1aq3gpgqfoq5c6g
-                tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                name: Default retries
-                enabled: true
-                is_default: true
-                seeded: false
-                retry_days: [3, 4, 7]
-                final_subscription_action: pause
-                final_invoice_action: none
-                created_at: "2026-09-15T12:00:00Z"
-                updated_at: "2026-11-02T10:00:00Z"
-        "400":
-          $ref: "#/components/responses/InvalidBody"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          description: "`not_found`: no policy with this id in this account and mode."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: not_found
-                  message: dunning_policy not found
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          description: Same validation as create.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: validation_error
-                  message: "retry_days is required: the days to wait before each retry, for example [3, 4, 7]"
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: retry_days
-        "429":
-          $ref: "#/components/responses/RateLimited"
-    delete:
-      tags: [Dunning]
-      summary: Delete a dunning policy
-      description: |
-        Deletes the policy. Refused for the default policy, for a policy
-        that customers are still assigned to, and for a policy that has run
-        payment retries (their history refers to it). The route takes no
-        body.
-      operationId: deleteDunningPolicy
-      parameters:
-        - name: id
-          in: path
-          required: true
-          description: The dunning policy id (`hc_dpol_…`).
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Deleted
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [status]
-                properties:
-                  status:
-                    type: string
-                    enum: [deleted]
-                    description: Always `deleted`.
-              example:
-                status: deleted
-        "400":
-          $ref: "#/components/responses/InvalidBody"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          description: "`not_found`: no policy with this id in this account and mode."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: not_found
-                  message: dunning_policy not found
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "409":
-          description: |
-            `invalid_state`: the policy is the default (make another policy
-            the default first), customers are assigned to it (reassign
-            them first), or it has run payment retries on invoices.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: invalid_state
-                  message: cannot delete policy — 2 customer(s) still assigned; reassign them first
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          description: The request has a body with a field. This route takes no body (`param` names the field).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: validation_error
-                  message: unknown field "force"
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: force
-        "429":
-          $ref: "#/components/responses/RateLimited"
-
-  /v1/dunning/policies/{id}/set-default:
-    post:
-      tags: [Dunning]
-      summary: Make a dunning policy the default
-      description: |
-        Makes this policy the default and the previous default a normal
-        policy, in one step. Customers without an assigned policy use the
-        new default for dunning started from now on. A policy made default
-        this way is no longer `seeded`. The route takes no body.
-      operationId: setDefaultDunningPolicy
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - name: id
-          in: path
-          required: true
-          description: The dunning policy id (`hc_dpol_…`).
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Default changed
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [status]
-                properties:
-                  status:
-                    type: string
-                    enum: [default_updated]
-                    description: Always `default_updated`.
-              example:
-                status: default_updated
-        "400":
-          $ref: "#/components/responses/InvalidBody"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          description: "`not_found`: no policy with this id in this account and mode."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: not_found
-                  message: dunning_policy not found
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          description: The request has a body with a field. This route takes no body (`param` names the field).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: validation_error
-                  message: unknown field "is_default"
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: is_default
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -27392,7 +27002,7 @@ paths:
         query string.
 
         In one transaction it creates the first account with its default
-        settings and default dunning policies, its owner user, a test secret
+        settings, a dunning policy in each mode, its owner user, a test secret
         key and a live secret key. The response is the only place the keys
         appear, and the password too when Hardcount generated it. The
         response has `Cache-Control: no-store`.

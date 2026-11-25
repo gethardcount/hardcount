@@ -17,10 +17,9 @@ import (
 
 // TestCustomerCreateAndStatus_Validated covers two refusals on the customer
 // routes:
-//   - A-S2: POST /v1/customers with dunning_policy_id was a 201 that dropped
-//     the policy, so the customer silently ran the default policy. Create has
-//     no such field; the key is now a 422 naming it, and PATCH stays the one
-//     validated assign path.
+//   - A-S2: POST /v1/customers with a field the customer does not have (here
+//     tax_exempt, a billing-profile field) was a 201 that dropped it. The
+//     key is now a 422 naming it.
 //   - D-09: PATCH with a status outside {active, archived} reached the
 //     customers_status_check constraint and came back a 500, which the
 //     idempotency middleware caches under the key. It is now a 422 and the
@@ -61,12 +60,12 @@ func TestCustomerCreateAndStatus_Validated(t *testing.T) {
 		return n
 	}
 
-	rr := do(http.MethodPost, "/", `{"external_id":"cus_dpol","display_name":"Dunning","dunning_policy_id":"hc_dpol_x"}`)
+	rr := do(http.MethodPost, "/", `{"external_id":"cus_dpol","display_name":"Dunning","tax_exempt":true}`)
 	if rr.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("dunning_policy_id on create: status %d, want 422; body %s", rr.Code, rr.Body.String())
+		t.Fatalf("tax_exempt on create: status %d, want 422; body %s", rr.Code, rr.Body.String())
 	}
-	if p := param(rr); p != "dunning_policy_id" {
-		t.Errorf("param: got %q, want dunning_policy_id", p)
+	if p := param(rr); p != "tax_exempt" {
+		t.Errorf("param: got %q, want tax_exempt", p)
 	}
 	if n := count("cus_dpol"); n != 0 {
 		t.Fatalf("refused create wrote %d customer rows", n)

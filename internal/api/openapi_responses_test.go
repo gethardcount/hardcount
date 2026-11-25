@@ -62,7 +62,6 @@ var responseTypes = map[string][]any{
 	"CustomerPriceOverride":        {domain.CustomerPriceOverride{}},
 	"CustomerUsage":                {usage.CustomerUsageResult{}},
 	"DunningPolicy":                {domain.DunningPolicy{}},
-	"DunningPolicyListItem":        {dunning.PolicyListItem{}},
 	"DunningRun":                   {domain.InvoiceDunningRun{}},
 	"DunningRunEvent":              {dunning.RunEvent{}},
 	"DunningStats":                 {dunning.Stats{}},
@@ -201,8 +200,6 @@ var inlineNotChecked = map[string]string{
 	"GET /v1/credits/balance/{customer_id} 200":               mapLiteral,
 	"GET /v1/analytics/revenue-chart 200":                     mapLiteral,
 	"GET /v1/analytics/usage 200":                             mapLiteral,
-	"DELETE /v1/dunning/policies/{id} 200":                    mapLiteral,
-	"POST /v1/dunning/policies/{id}/set-default 200":          mapLiteral,
 	"POST /v1/settings/email/test 200":                        mapLiteral,
 	"GET /v1/settings/stripe 200":                             mapLiteral,
 }

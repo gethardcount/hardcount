@@ -252,8 +252,8 @@ func (r *lagRig) exhaustedDunning(subAction domain.DunningSubscriptionAction, in
 	r.t.Helper()
 	ctx := leadertest.Token(r.t, testutil.AdminPool(r.t), postgres.WithLivemode(context.Background(), true), leader.RoleDunning)
 	d := &graceDunning{r: r, ctx: ctx, runs: dunning.NewPostgresStore(r.db)}
-	pol, err := r.srv.DunningSvc.UpsertPolicy(ctx, r.tenantID, domain.DunningPolicy{
-		Name: "grace wait", Enabled: true, RetryDays: []int{3},
+	pol, err := r.srv.DunningSvc.PutPolicy(ctx, r.tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3},
 		FinalSubscriptionAction: subAction, FinalInvoiceAction: invAction,
 	})
 	if err != nil {
@@ -272,7 +272,7 @@ func (r *lagRig) exhaustedDunning(subAction domain.DunningSubscriptionAction, in
 	}
 	d.invID = inv.ID
 	run, err := d.runs.CreateRun(ctx, r.tenantID, domain.InvoiceDunningRun{
-		InvoiceID: inv.ID, CustomerID: r.custID, PolicyID: pol.ID,
+		InvoiceID: inv.ID, CustomerID: r.custID,
 		State: domain.DunningActive, Reason: "payment_failed", AttemptCount: pol.Retries(), NextActionAt: &due,
 	})
 	if err != nil {

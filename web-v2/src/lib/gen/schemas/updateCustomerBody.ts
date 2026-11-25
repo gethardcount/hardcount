@@ -30,8 +30,6 @@ export type UpdateCustomerBody = {
      * `active` lifts that.
      */
   status?: UpdateCustomerBodyStatus;
-  /** Policy ID, or `""` to use the account's default policy. */
-  dunning_policy_id?: string;
   /**
      * The new CC list, which replaces the whole list. `[]`
      * clears it. Left out keeps the current list. More than 10

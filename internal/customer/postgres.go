@@ -250,7 +250,6 @@ func (s *PostgresStore) CreateAudited(ctx context.Context, tenantID string, c do
 // returns the same customer a single read does, field for field.
 const customerFullCols = `id, tenant_id, external_id, display_name, COALESCE(email, ''), status,
 			email_status, email_last_bounced_at, COALESCE(email_bounce_reason,''),
-			COALESCE(dunning_policy_id, ''),
 			COALESCE(stripe_customer_id, ''),
 			additional_emails,
 			created_at, updated_at`
@@ -262,7 +261,6 @@ func (s *PostgresStore) scanCustomerFull(row interface{ Scan(...any) error }) (d
 	var storedCC string
 	if err := row.Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status,
 		(*string)(&c.EmailStatus), &c.EmailLastBouncedAt, &c.EmailBounceReason,
-		&c.DunningPolicyID,
 		&c.StripeCustomerID,
 		&storedCC,
 		&c.CreatedAt, &c.UpdatedAt); err != nil {
@@ -463,13 +461,11 @@ func (s *PostgresStore) GetByCostDashboardToken(ctx context.Context, token strin
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''), status,
 			email_status, email_last_bounced_at, COALESCE(email_bounce_reason,''),
-			COALESCE(dunning_policy_id, ''),
 			livemode,
 			created_at, updated_at
 		FROM customers WHERE cost_dashboard_token_hash = $1
 	`, HashCostDashboardToken(token)).Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status,
 		(*string)(&c.EmailStatus), &c.EmailLastBouncedAt, &c.EmailBounceReason,
-		&c.DunningPolicyID,
 		&c.Livemode,
 		&c.CreatedAt, &c.UpdatedAt)
 
@@ -494,13 +490,11 @@ func (s *PostgresStore) GetByExternalID(ctx context.Context, tenantID, externalI
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''), status,
 			email_status, email_last_bounced_at, COALESCE(email_bounce_reason,''),
-			COALESCE(dunning_policy_id, ''),
 			additional_emails,
 			created_at, updated_at
 		FROM customers WHERE external_id = $1
 	`, externalID).Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status,
 		(*string)(&c.EmailStatus), &c.EmailLastBouncedAt, &c.EmailBounceReason,
-		&c.DunningPolicyID,
 		&storedCC,
 		&c.CreatedAt, &c.UpdatedAt)
 
@@ -538,12 +532,10 @@ func (s *PostgresStore) GetByStripeCustomerID(ctx context.Context, tenantID, str
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''), status,
 			email_status, email_last_bounced_at, COALESCE(email_bounce_reason,''),
-			COALESCE(dunning_policy_id, ''),
 			created_at, updated_at
 		FROM customers WHERE stripe_customer_id = $1
 	`, stripeCustomerID).Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status,
 		(*string)(&c.EmailStatus), &c.EmailLastBouncedAt, &c.EmailBounceReason,
-		&c.DunningPolicyID,
 		&c.CreatedAt, &c.UpdatedAt)
 
 	if err == sql.ErrNoRows {
@@ -952,13 +944,13 @@ func (s *PostgresStore) UpdateTx(ctx context.Context, tx *sql.Tx, c domain.Custo
 	}
 	out, err := s.scanCustomerFull(tx.QueryRowContext(ctx, `
 		UPDATE customers SET display_name = $1, email = $2, email_bidx = NULLIF($3,''),
-			additional_emails = $4, status = $5, dunning_policy_id = NULLIF($6,''), updated_at = $7,
-			email_status = CASE WHEN $9::boolean THEN 'unknown' ELSE email_status END,
-			email_bounce_reason = CASE WHEN $9::boolean THEN NULL ELSE email_bounce_reason END,
-			email_last_bounced_at = CASE WHEN $9::boolean THEN NULL ELSE email_last_bounced_at END
-		WHERE id = $8
+			additional_emails = $4, status = $5, updated_at = $6,
+			email_status = CASE WHEN $8::boolean THEN 'unknown' ELSE email_status END,
+			email_bounce_reason = CASE WHEN $8::boolean THEN NULL ELSE email_bounce_reason END,
+			email_last_bounced_at = CASE WHEN $8::boolean THEN NULL ELSE email_last_bounced_at END
+		WHERE id = $7
 		RETURNING `+customerFullCols,
-		enc.DisplayName, enc.Email, s.emailBlindIndex(c.Email), storedCC, c.Status, c.DunningPolicyID,
+		enc.DisplayName, enc.Email, s.emailBlindIndex(c.Email), storedCC, c.Status,
 		clock.Now(ctx), c.ID, emailChanged,
 	))
 	if errors.Is(err, sql.ErrNoRows) {

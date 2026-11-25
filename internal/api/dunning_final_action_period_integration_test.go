@@ -42,14 +42,14 @@ func TestDunningFinalAction_ReDrivenAfterARenewal_CancelsWhenItRuns(t *testing.T
 
 	// The run as an interrupted exhaustion leaves it: its one retry ran at
 	// finalRetry and took the lease, and no final action ran.
-	policy, err := r.srv.DunningSvc.UpsertPolicy(ctx, r.tenantID, domain.DunningPolicy{
-		Name: "one retry", Enabled: true, RetryDays: []int{3},
+	_, err = r.srv.DunningSvc.PutPolicy(ctx, r.tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3},
 		FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}
-	insertInterruptedRun(t, r, dayOneID, sub.CustomerID, policy.ID, finalRetry, start)
+	insertInterruptedRun(t, r, dayOneID, sub.CustomerID, finalRetry, start)
 	admin := testutil.AdminPool(t)
 	wall.Set(renewal)
 	if _, errs := r.srv.BillingEngine.RunCycle(leadertest.Token(t, admin, clock.WithoutInstant(ctx), leader.RoleBilling), 50, nil); len(errs) != 0 {
@@ -126,14 +126,14 @@ func TestDunningFinalAction_TheFinalInvoiceIsIssuedAtTheCancel(t *testing.T) {
 	// exhaustion stops there; the next tick is at its lease.
 	finalRetry := renewal.Add(5 * 24 * time.Hour)
 	wall.Set(finalRetry)
-	policy, err := r.srv.DunningSvc.UpsertPolicy(ctx, r.tenantID, domain.DunningPolicy{
-		Name: "one retry", Enabled: true, RetryDays: []int{3},
+	_, err = r.srv.DunningSvc.PutPolicy(ctx, r.tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3},
 		FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}
-	insertInterruptedRun(t, r, cycleID, sub.CustomerID, policy.ID, finalRetry, start)
+	insertInterruptedRun(t, r, cycleID, sub.CustomerID, finalRetry, start)
 	redrive := finalRetry.Add(15 * time.Minute)
 	tickAt(t, r.srv, wall, r.tenantID, redrive)
 
@@ -163,7 +163,7 @@ func TestDunningFinalAction_TheFinalInvoiceIsIssuedAtTheCancel(t *testing.T) {
 // insertInterruptedRun writes an active dunning run for invoiceID whose last
 // retry ran at escalation and took the exhaustion lease (next_action_at a
 // quarter hour later), as a run whose exhaustion was interrupted leaves it.
-func insertInterruptedRun(t *testing.T, r *datesRig, invoiceID, customerID, policyID string, escalation, created time.Time) {
+func insertInterruptedRun(t *testing.T, r *datesRig, invoiceID, customerID string, escalation, created time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, postgres.TxBypass, "")
@@ -175,10 +175,10 @@ func insertInterruptedRun(t *testing.T, r *datesRig, invoiceID, customerID, poli
 		t.Fatalf("pin livemode GUC: %v", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason,
+		INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, state, reason,
 			attempt_count, last_attempt_at, next_action_at, paused, created_at, updated_at, livemode)
-		VALUES ($1, $2, $3, $4, $5, 'active', 'payment_failed', 1, $6, $7, false, $8, $8, false)`,
-		"run_"+invoiceID, r.tenantID, invoiceID, customerID, policyID, escalation, escalation.Add(15*time.Minute), created); err != nil {
+		VALUES ($1, $2, $3, $4, 'active', 'payment_failed', 1, $5, $6, false, $7, $7, false)`,
+		"run_"+invoiceID, r.tenantID, invoiceID, customerID, escalation, escalation.Add(15*time.Minute), created); err != nil {
 		postgres.Rollback(tx)
 		t.Fatalf("insert run: %v", err)
 	}

@@ -8,25 +8,25 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 )
 
-// useSeedAsDefault replaces memStore's default with the policy every new
+// useSeedAsDefault replaces memStore's policy with the one every new
 // account is seeded with, after the same normalize+validate the seed writer
 // runs.
 func useSeedAsDefault(t *testing.T, store *memStore) domain.DunningPolicy {
 	t.Helper()
-	seed, err := normalizeAndValidatePolicy(DefaultSeedPolicy())
+	seed, err := normalizeAndValidatePolicy(NewAccountPolicy())
 	if err != nil {
 		t.Fatalf("the seed policy must pass validation: %v", err)
 	}
-	seed.ID, seed.TenantID, seed.IsDefault, seed.Seeded = store.defaultID, "t1", true, true
-	store.policies[store.defaultID] = seed
+	seed.ID, seed.TenantID = "dpol_1", "t1"
+	store.policy = &seed
 	return seed
 }
 
-// TestDefaultSeedPolicy_SurvivesNormalize: an empty final action normalizes
+// TestNewAccountPolicy_SurvivesNormalize: an empty final action normalizes
 // to pause, so the seed must name none explicitly. If it ever relies on the
 // defaults, every new account would pause subscriptions it never chose to.
-func TestDefaultSeedPolicy_SurvivesNormalize(t *testing.T) {
-	got, err := normalizeAndValidatePolicy(DefaultSeedPolicy())
+func TestNewAccountPolicy_SurvivesNormalize(t *testing.T) {
+	got, err := normalizeAndValidatePolicy(NewAccountPolicy())
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
@@ -38,23 +38,23 @@ func TestDefaultSeedPolicy_SurvivesNormalize(t *testing.T) {
 	}
 }
 
-// TestSeedDefaultPoliciesTx_PassesTheSeed: the service hands the store the
+// TestSeedPoliciesTx_PassesTheSeed: the service hands the store the
 // validated seed and forwards the per-insert callback.
-func TestSeedDefaultPoliciesTx_PassesTheSeed(t *testing.T) {
-	store := &memStore{policies: map[string]domain.DunningPolicy{}, runs: map[string]domain.InvoiceDunningRun{}}
+func TestSeedPoliciesTx_PassesTheSeed(t *testing.T) {
+	store := &memStore{runs: map[string]domain.InvoiceDunningRun{}}
 	svc := NewService(store, nil, nil)
 	var called int
-	if err := svc.SeedDefaultPoliciesTx(context.Background(), nil, "t1", func(p domain.DunningPolicy, _ bool) error {
+	if err := svc.SeedPoliciesTx(context.Background(), nil, "t1", func(p domain.DunningPolicy, _ bool) error {
 		called++
-		if p.Name != "Default retries" || !p.Seeded || !p.IsDefault {
+		if !p.Enabled || len(p.RetryDays) != 3 {
 			t.Errorf("callback got %+v", p)
 		}
 		return nil
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if called != 1 || len(store.policies) != 1 {
-		t.Fatalf("callback calls=%d policies=%d, want 1/1", called, len(store.policies))
+	if called != 1 || store.policy == nil {
+		t.Fatalf("callback calls=%d policy=%v, want 1 and the seed stored", called, store.policy)
 	}
 }
 
@@ -70,9 +70,6 @@ func TestSeedPolicy_RetriesOnDay3_7_14(t *testing.T) {
 	run, err := svc.StartDunning(context.Background(), "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
-	}
-	if run.PolicyID != seed.ID {
-		t.Fatalf("run policy = %q, want the seed %q", run.PolicyID, seed.ID)
 	}
 	if run.NextActionAt == nil {
 		t.Fatal("run has no first retry")

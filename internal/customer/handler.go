@@ -282,9 +282,6 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		if input.Status != "" {
 			meta["status"] = input.Status
 		}
-		if input.DunningPolicyID != nil {
-			meta["dunning_policy_id"] = *input.DunningPolicyID
-		}
 		// Same PII rule as email_changed: record that the CC list
 		// changed and its new size, never the addresses.
 		if input.AdditionalEmails != nil {

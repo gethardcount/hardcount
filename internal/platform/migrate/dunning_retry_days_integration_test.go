@@ -42,7 +42,8 @@ func oldPolicySQL(id string, grace, max int, schedule string) string {
 // one list of days, exactly: the first wait, then the waits the retries use,
 // whatever Go duration spelling they had. Entries past the last retry are
 // dropped. The CHECK then refuses any list that is not 1 to 15 whole days
-// from 1 to 30, and the Down writes the three old columns back.
+// from 1 to 30, and the Down writes the three old columns back. The ups
+// stop before oneRetryPolicyVersion, which keeps one of these policies.
 func TestRetryDays_ConvertsExactlyAndRollsBack(t *testing.T) {
 	dsn, db := scratchDB(t, "hardcount_test_dunsched_b_migrate_convert")
 	ctx := context.Background()
@@ -84,7 +85,7 @@ func TestRetryDays_ConvertsExactlyAndRollsBack(t *testing.T) {
 		exec(oldPolicySQL(c.id, c.grace, c.max, c.schedule))
 	}
 
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	if err := up(ctx, dsn, filesBefore(t, oneRetryPolicyVersion)); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
 	for _, c := range cases {
@@ -129,7 +130,7 @@ func TestRetryDays_ConvertsExactlyAndRollsBack(t *testing.T) {
 	exec(`UPDATE dunning_policies SET retry_days = '[1]'::jsonb WHERE id = 'dpol_one'`)
 
 	// Down: the three columns come back, holding the same schedule.
-	if _, err := down(ctx, dsn, migrationFiles(), retryDaysVersion-1); err != nil {
+	if _, err := down(ctx, dsn, filesBefore(t, oneRetryPolicyVersion), retryDaysVersion-1); err != nil {
 		t.Fatalf("Down to before %d: %v", retryDaysVersion, err)
 	}
 	wantOld := map[string]string{
@@ -150,7 +151,7 @@ func TestRetryDays_ConvertsExactlyAndRollsBack(t *testing.T) {
 			t.Errorf("%s after Down: %s, want %s", id, got, want)
 		}
 	}
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	if err := up(ctx, dsn, filesBefore(t, oneRetryPolicyVersion)); err != nil {
 		t.Fatalf("Up again: %v", err)
 	}
 	var again string

@@ -107,25 +107,12 @@ type AuditEmitter interface {
 }
 
 type Service struct {
-	store         Store
-	stripeSyncer  StripeSyncer
-	taxFlusher    TaxFlusher
-	subChecker    SubscriptionChecker
-	auditLogger   AuditEmitter
-	dunningPolicy DunningPolicyReader
+	store        Store
+	stripeSyncer StripeSyncer
+	taxFlusher   TaxFlusher
+	subChecker   SubscriptionChecker
+	auditLogger  AuditEmitter
 }
-
-// DunningPolicyReader fetches a dunning policy by id on a tenant- and
-// mode-scoped transaction. Implemented by *dunning.PostgresStore, wired in
-// wire.go.
-type DunningPolicyReader interface {
-	GetPolicyByID(ctx context.Context, tenantID, id string) (domain.DunningPolicy, error)
-}
-
-// SetDunningPolicyReader wires the policy read Update runs before assigning a
-// customer to a dunning policy. When unwired (narrow unit tests) the read is
-// skipped.
-func (s *Service) SetDunningPolicyReader(r DunningPolicyReader) { s.dunningPolicy = r }
 
 func NewService(store Store) *Service {
 	return &Service{store: store}
@@ -294,12 +281,6 @@ type UpdateInput struct {
 	DisplayName string `json:"display_name"`
 	Email       string `json:"email,omitempty"`
 	Status      string `json:"status,omitempty"`
-	// DunningPolicyID assigns this customer to a specific dunning
-	// policy (ADR-036). Pointer so the handler can distinguish
-	// "unset" (omitted) from "clear" (explicit empty string). nil =
-	// leave as-is; *"" = clear assignment (fall back to default);
-	// *"hc_dpol_..." = assign to that policy.
-	DunningPolicyID *string `json:"dunning_policy_id,omitempty"`
 	// AdditionalEmails replaces the CC list (ADR-082). Pointer for the
 	// same omitted-vs-clear distinction: nil = leave as-is; *[] =
 	// clear; *[...] = validated replacement.
@@ -369,22 +350,6 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateI
 			}
 			next.Status = status
 		}
-		if input.DunningPolicyID != nil {
-			policyID := strings.TrimSpace(*input.DunningPolicyID)
-			// An empty id clears the assignment. A set one must be a policy in
-			// the caller's tenant and mode: the foreign key is on the id alone
-			// and foreign-key checks do not apply row-level security, so the
-			// update would accept another tenant's or the other mode's policy.
-			if policyID != "" && s.dunningPolicy != nil {
-				if _, err := s.dunningPolicy.GetPolicyByID(ctx, tenantID, policyID); err != nil {
-					if errors.Is(err, errs.ErrNotFound) {
-						return errs.NotFound("dunning policy")
-					}
-					return fmt.Errorf("get dunning policy: %w", err)
-				}
-			}
-			next.DunningPolicyID = policyID
-		}
 		if input.AdditionalEmails != nil {
 			cc, err := normalizeAdditionalEmails(*input.AdditionalEmails, next.Email)
 			if err != nil {
@@ -429,19 +394,6 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateI
 	}
 
 	return updated, nil
-}
-
-// GetDunningPolicyID returns the customer's assigned dunning_policy_id
-// (empty string = no explicit assignment, dunning service falls back
-// to the tenant default). Satisfies dunning.CustomerPolicyReader so
-// the dunning service can resolve effective policy without importing
-// the customer package.
-func (s *Service) GetDunningPolicyID(ctx context.Context, tenantID, customerID string) (string, error) {
-	c, err := s.store.Get(ctx, tenantID, customerID)
-	if err != nil {
-		return "", err
-	}
-	return c.DunningPolicyID, nil
 }
 
 // deriveProfileStatus answers exactly one question: can the invoice

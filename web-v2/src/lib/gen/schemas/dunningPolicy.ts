@@ -15,31 +15,17 @@ import type { DunningPolicyFinalInvoiceAction } from './dunningPolicyFinalInvoic
 import type { DunningPolicyFinalSubscriptionAction } from './dunningPolicyFinalSubscriptionAction';
 
 /**
- * A dunning policy: how failed or missing payments are retried, and
- * what happens when the retries run out. Every account starts with one
- * policy per mode, "Default retries" (retries on day 3, 7 and 14, then
- * no final action), as the default. Customers without an assigned
- * policy use the default.
+ * The account's dunning policy for one mode: how failed or missing
+ * payments are retried, and what happens when the retries run out.
+ * An account has at most one per mode, and it governs every payment
+ * retry in that mode. Every account starts with one per mode
+ * (retries on day 3, 7 and 14, then no final action).
  */
 export interface DunningPolicy {
-  /** Unique identifier of the policy, starting `hc_dpol_`. */
-  id: string;
   /** The account the policy belongs to. Absent when empty. */
   tenant_id?: string;
-  /** The policy's name. Can be empty. */
-  name: string;
   /** Whether the policy starts dunning. A disabled policy starts no runs. */
   enabled: boolean;
-  /** Customers without an assigned policy use the default. */
-  is_default: boolean;
-  /**
-     * True for the "Default retries" policy the account was created
-     * with, until you edit it or make it the default. While it is
-     * true, the next enabled policy you create becomes the default
-     * instead. Set by the server: a request body that sends it is
-     * refused with 422.
-     */
-  seeded: boolean;
   /** Days to wait before each retry; the number of retries is its length. */
   retry_days: number[];
   /** What happens to the subscription when retries run out. */

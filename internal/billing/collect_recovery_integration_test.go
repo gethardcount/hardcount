@@ -228,8 +228,8 @@ func (d dunningServiceStarter) StartDunning(ctx context.Context, tenantID, invoi
 func TestCollector_StartsNoPaymentDunning_RealStore(t *testing.T) {
 	h := newCollectHarness(t)
 	dstore := dunning.NewPostgresStore(h.db)
-	if _, err := dstore.UpsertPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+	if _, err := dstore.PutPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3, 3, 3},
 		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone,
 	}); err != nil {
 		t.Fatalf("upsert policy: %v", err)
@@ -265,8 +265,8 @@ func TestCollector_StartsNoPaymentDunning_RealStore(t *testing.T) {
 func TestCollector_FirstRetryCountsFromTheFailure_RealStore(t *testing.T) {
 	h := newCollectHarness(t)
 	dstore := dunning.NewPostgresStore(h.db)
-	if _, err := dstore.UpsertPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+	if _, err := dstore.PutPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3, 3, 3},
 		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone,
 	}); err != nil {
 		t.Fatalf("upsert policy: %v", err)
@@ -318,8 +318,8 @@ func (decliningRetrier) RetryPayment(context.Context, string, string, string) er
 func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
 	h := newCollectHarness(t)
 	dstore := dunning.NewPostgresStore(h.db)
-	if _, err := dstore.UpsertPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetryDays: []int{3, 3, 5},
+	if _, err := dstore.PutPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3, 3, 5},
 		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone,
 	}); err != nil {
 		t.Fatalf("upsert policy: %v", err)

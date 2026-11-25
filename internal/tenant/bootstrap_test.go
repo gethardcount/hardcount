@@ -51,7 +51,7 @@ func testDeps(db *postgres.DB) BootstrapDeps {
 		CreateKeyTx: auth.NewService(db, audit.NewLogger(db)).CreateKeyTx,
 		// The real seed writer: the tenant package may not import dunning,
 		// but its tests may (the arch boundary skips _test files).
-		SeedDunningTx: dunning.NewService(dunning.NewPostgresStore(db), nil, nil).SeedDefaultPoliciesTx,
+		SeedDunningTx: dunning.NewService(dunning.NewPostgresStore(db), nil, nil).SeedPoliciesTx,
 	}
 }
 

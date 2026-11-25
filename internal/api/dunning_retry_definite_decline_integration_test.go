@@ -143,8 +143,8 @@ func newDunningRetryRig(t *testing.T, name string) *dunningRetryRig {
 	d.ledgerFaults = &faultLedger{PostgresStore: d.ledger}
 	d.credits = credit.NewService(d.ledgerFaults)
 	d.faults = &faultInvoices{PostgresStore: r.invoices}
-	policy, err := d.runs.UpsertPolicy(r.ctx, r.tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+	policy, err := d.runs.PutPolicy(r.ctx, r.tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3, 3, 3},
 		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
@@ -191,7 +191,7 @@ func (d *dunningRetryRig) dueRun(invID, custID string, attempts int) domain.Invo
 	d.t.Helper()
 	due := time.Now().UTC().Add(-time.Minute)
 	run, err := d.runs.CreateRun(d.ctx, d.tenantID, domain.InvoiceDunningRun{
-		InvoiceID: invID, CustomerID: custID, PolicyID: d.policy.ID,
+		InvoiceID: invID, CustomerID: custID,
 		State: domain.DunningActive, Reason: "payment_failed", AttemptCount: attempts, NextActionAt: &due,
 	})
 	if err != nil {

@@ -34,7 +34,7 @@ const routes: Route[] = [
   { name: 'credit', path: () => '/credits', heading: () => 'Credit' },
   { name: 'customer credits', path: s => `/credits?customer=${s.creditCustomer.id}`, heading: s => s.creditCustomer.display_name },
   { name: 'payment retries', path: () => '/dunning', heading: () => 'Payment retries' },
-  { name: 'retry policies', path: () => '/dunning?tab=policies', heading: () => 'Payment retries' },
+  { name: 'retry policy', path: () => '/dunning?tab=policy', heading: () => 'Payment retries' },
   { name: 'webhooks', path: () => '/webhooks', heading: () => 'Webhooks' },
   { name: 'webhook events', path: () => '/webhooks/events', heading: () => 'Webhooks' },
   { name: 'webhook endpoint detail', path: s => `/webhooks/endpoints/${s.webhookEndpointId}`, heading: () => 'Webhooks' },

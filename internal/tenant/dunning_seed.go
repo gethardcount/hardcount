@@ -9,10 +9,10 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 )
 
-// DunningSeedFunc writes the dunning policies a new account starts with:
-// one default per mode, on the account-creation tx (ADR-123). The tenant
+// DunningSeedFunc writes the dunning policy a new account starts with, one
+// per mode, on the account-creation tx (ADR-123). The tenant
 // package may not import its peer dunning, so the composition root wires
-// dunning.Service.SeedDefaultPoliciesTx in. onSeeded runs after each
+// dunning.Service.SeedPoliciesTx in. onSeeded runs after each
 // insert, with app.livemode still set to that insert's mode.
 type DunningSeedFunc func(ctx context.Context, tx *sql.Tx, tenantID string, onSeeded func(p domain.DunningPolicy, livemode bool) error) error
 
@@ -31,7 +31,7 @@ func seedDunningPolicies(ctx context.Context, tx *sql.Tx, seed DunningSeedFunc, 
 				Action:        domain.AuditActionCreate,
 				ResourceType:  "dunning_policy",
 				ResourceID:    p.ID,
-				ResourceLabel: p.Name,
+				ResourceLabel: domain.DunningPolicyAuditLabel,
 				Metadata: map[string]any{
 					"action":   auditAction,
 					"livemode": livemode,

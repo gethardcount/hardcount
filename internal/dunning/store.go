@@ -9,13 +9,16 @@ import (
 )
 
 type Store interface {
-	// Policy (ADR-036 campaigns model — see methods at bottom of
-	// interface for the multi-policy-per-tenant resolution path).
-	UpsertPolicy(ctx context.Context, tenantID string, policy domain.DunningPolicy) (domain.DunningPolicy, error)
-	// SeedDefaultPoliciesTx writes the policy a new account starts with,
-	// once per mode, as that mode's seeded default (ADR-123). onSeeded runs
-	// after each insert with app.livemode still set to that mode.
-	SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, tenantID string, policy domain.DunningPolicy, onSeeded func(p domain.DunningPolicy, livemode bool) error) error
+	// GetPolicy returns the account's policy for the mode on ctx, or
+	// errs.ErrNotFound when the mode has none.
+	GetPolicy(ctx context.Context, tenantID string) (domain.DunningPolicy, error)
+	// PutPolicy creates the account's policy for the mode on ctx, or
+	// replaces the one it has, and returns it as stored.
+	PutPolicy(ctx context.Context, tenantID string, policy domain.DunningPolicy) (domain.DunningPolicy, error)
+	// SeedPoliciesTx writes the policy a new account starts with,
+	// once per mode (ADR-123). onSeeded runs after each insert with
+	// app.livemode still set to that mode.
+	SeedPoliciesTx(ctx context.Context, tx *sql.Tx, tenantID string, policy domain.DunningPolicy, onSeeded func(p domain.DunningPolicy, livemode bool) error) error
 
 	// Runs
 	//
@@ -85,7 +88,8 @@ type Store interface {
 	// payment's failure, of all the webhook and reconciler send, record it:
 	// it clears the run's awaited PaymentIntent only while it is
 	// paymentIntentID and the run is active, on the caller's transaction,
-	// and returns the run and its policy when it did.
+	// and returns the run and its account's policy for the run's mode
+	// when it did.
 	TakeAwaitedRetryTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) (domain.InvoiceDunningRun, domain.DunningPolicy, bool, error)
 	// RecordRetryFailureTx writes, on the caller's transaction, what
 	// TakeAwaitedRetryTx's winner decided: the run's next_action_at (still
@@ -106,19 +110,6 @@ type Store interface {
 	// COUNT(*) GROUP BY state + SUM(amount_due_cents) LEFT JOIN
 	// invoices, scoped by RLS tenant.
 	GetStats(ctx context.Context, tenantID string) (Stats, error)
-
-	// Multi-policy-per-tenant (ADR-036, campaigns model).
-	//
-	// GetPolicy returns the singleton tenant policy was REMOVED — every
-	// caller must now resolve by id (GetPolicyByID for a known id) or
-	// by tenant-default (GetDefaultPolicy for "no explicit assignment").
-	// The Service's GetEffectivePolicyForCustomer wraps both.
-	GetPolicyByID(ctx context.Context, tenantID, id string) (domain.DunningPolicy, error)
-	GetDefaultPolicy(ctx context.Context, tenantID string) (domain.DunningPolicy, error)
-	ListPolicies(ctx context.Context, tenantID string) ([]domain.DunningPolicy, error)
-	DeletePolicy(ctx context.Context, tenantID, id string) error
-	SetDefaultPolicy(ctx context.Context, tenantID, id string) error
-	CountCustomersOnPolicy(ctx context.Context, tenantID, policyID string) (int, error)
 }
 
 // RetryInFlightResult is what RecordRetryInFlight did.

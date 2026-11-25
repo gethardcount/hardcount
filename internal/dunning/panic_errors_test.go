@@ -3,6 +3,7 @@ package dunning
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"strings"
@@ -23,11 +24,24 @@ func (p panickingRetrier) RetryPayment(_ context.Context, _, invoiceID, _ string
 	return errors.New("card_declined: your card was declined")
 }
 
+// runWriteErrStore fails every run write of one run with a database error.
+type runWriteErrStore struct {
+	*memStore
+	runID string
+}
+
+func (s runWriteErrStore) UpdateRunIfActive(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, expectedAttempts int, then func(tx *sql.Tx) error) (bool, error) {
+	if run.ID == s.runID {
+		return false, errBlip
+	}
+	return s.memStore.UpdateRunIfActive(ctx, tenantID, run, expectedAttempts, then)
+}
+
 // TestProcessDueRuns_PanicStillLogsTheOtherRunsErrors: a batch processes its
 // other runs past one whose retry panics, then raises the panic again. That
 // panic drops the errors the batch collected, which only the scheduler logs
 // and counts, so while one run kept panicking another run's error (a database
-// error during a connection drop, here a policy read that fails) was never
+// error during a connection drop, here a run write that fails) was never
 // logged. Now the batch logs them before it raises the panic.
 func TestProcessDueRuns_PanicStillLogsTheOtherRunsErrors(t *testing.T) {
 	var logs bytes.Buffer
@@ -39,13 +53,13 @@ func TestProcessDueRuns_PanicStillLogsTheOtherRunsErrors(t *testing.T) {
 	due := time.Now().UTC().Add(-time.Hour)
 	store.runs["drun_err"] = domain.InvoiceDunningRun{
 		ID: "drun_err", TenantID: "t1", InvoiceID: "inv_err", CustomerID: "cus_1",
-		PolicyID: "dpol_unreadable", State: domain.DunningActive, NextActionAt: &due,
+		State: domain.DunningActive, NextActionAt: &due,
 	}
 	store.runs["drun_panic"] = domain.InvoiceDunningRun{
 		ID: "drun_panic", TenantID: "t1", InvoiceID: "inv_panic", CustomerID: "cus_1",
-		PolicyID: "dpol_1", State: domain.DunningActive, NextActionAt: &due,
+		State: domain.DunningActive, NextActionAt: &due,
 	}
-	svc := NewService(store, panickingRetrier{invoiceID: "inv_panic"}, nil)
+	svc := NewService(runWriteErrStore{memStore: store, runID: "drun_err"}, panickingRetrier{invoiceID: "inv_panic"}, nil)
 
 	recovered := func() (r any) {
 		defer func() { r = recover() }()
@@ -55,7 +69,7 @@ func TestProcessDueRuns_PanicStillLogsTheOtherRunsErrors(t *testing.T) {
 	if recovered != "retry: nil dereference on inv_panic" {
 		t.Fatalf("recovered %v, want the retry's panic raised again at the end of the batch", recovered)
 	}
-	if !strings.Contains(logs.String(), "get bound policy dpol_unreadable for run drun_err") {
+	if !strings.Contains(logs.String(), "persist dunning attempt before retry: "+errBlip.Error()) {
 		t.Fatal("the other run's error was not logged: the panic drops the batch's errors, so the batch must log them first")
 	}
 }

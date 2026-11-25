@@ -422,7 +422,7 @@ export const api = {
     ),
 
   // Customer updates
-  updateCustomer: (id: string, data: { display_name?: string; email?: string; additional_emails?: string[]; dunning_policy_id?: string; status?: 'active' | 'archived' }) =>
+  updateCustomer: (id: string, data: { display_name?: string; email?: string; additional_emails?: string[]; status?: 'active' | 'archived' }) =>
     apiRequest<Customer>('PATCH', `/customers/${id}`, data),
 
   // Subscription detail
@@ -494,16 +494,6 @@ export const api = {
     apiRequest<{ sent_to: string }>('POST', '/settings/email/test'),
 
   // Dunning
-  // Dunning policies (campaigns model, ADR-036). Multi-policy-per-
-  // tenant with exactly one is_default. Customer assignment flows
-  // through the customer Update endpoint (PATCH /customers/{id} body
-  // carries dunning_policy_id).
-  listDunningPolicies: () => listAll<DunningPolicyWithCount>('/dunning/policies'),
-  getDunningPolicy: (id: string) => apiRequest<DunningPolicy>('GET', `/dunning/policies/${id}`),
-  createDunningPolicy: (data: Partial<DunningPolicy>) => apiRequest<DunningPolicy>('POST', '/dunning/policies', data),
-  updateDunningPolicy: (id: string, data: Partial<DunningPolicy>) => apiRequest<DunningPolicy>('PATCH', `/dunning/policies/${id}`, data),
-  deleteDunningPolicy: (id: string) => apiRequest<{ status: string }>('DELETE', `/dunning/policies/${id}`),
-  setDefaultDunningPolicy: (id: string) => apiRequest<{ status: string }>('POST', `/dunning/policies/${id}/set-default`),
   listDunningRuns: (params?: string) => apiRequest<{ data: DunningRun[]; total: number }>('GET', `/dunning/runs${params ? '?' + params : ''}`),
   getDunningRun: (id: string) => apiRequest<{ run: DunningRun; events: DunningEvent[] }>('GET', `/dunning/runs/${id}`),
   // Aggregate counts + at-risk sum for the dashboard stat cards.
@@ -684,10 +674,6 @@ export interface Customer {
   email_status?: 'unknown' | 'ok' | 'bounced' | 'complained'
   email_last_bounced_at?: string
   email_bounce_reason?: string
-  // DunningPolicyID assigns this customer to a specific dunning
-  // policy (ADR-036 campaigns model). Empty/undefined = use the
-  // tenant default. Updatable via PATCH /customers/{id}.
-  dunning_policy_id?: string
 }
 
 export interface SubscriptionItem {
@@ -1460,44 +1446,10 @@ export interface InvoicePreviewTotal {
   amount_cents: number
 }
 
-// DunningPolicy = a named campaign (ADR-036). Multi-policy-per-tenant;
-// one row per (tenant, livemode) carries is_default=true and is used
-// when a customer has no explicit dunning_policy_id assignment.
-export interface DunningPolicy {
-  id: string
-  name: string
-  enabled: boolean
-  is_default: boolean
-  // True for the "Default retries" policy the account was created with,
-  // until it is edited or made the default (ADR-123). While true, the next
-  // policy created takes over the default.
-  seeded: boolean
-  // Days to wait before each retry: the first after the failed payment (or
-  // the collection that found no card), each later one after the retry
-  // before it. Its length is the number of
-  // retries (lib/dunningSchedule).
-  retry_days: number[]
-  // The two terminal decisions (ADR-112): 'none' | 'pause' | 'cancel' and
-  // 'none' | 'mark_uncollectible'. They replaced a single `final_action`,
-  // which could not express "cancel and write off".
-  final_subscription_action: string
-  final_invoice_action: string
-  created_at?: string
-  updated_at?: string
-}
-
-// DunningPolicyWithCount augments the policy list rows with the
-// explicit-assignment count for the admin page's "N customers
-// assigned" badge.
-export interface DunningPolicyWithCount extends DunningPolicy {
-  assigned_customers: number
-}
-
 export interface DunningRun {
   id: string
   invoice_id: string
   customer_id: string
-  policy_id: string
   state: string
   reason: string
   attempt_count: number
@@ -1512,7 +1464,7 @@ export interface DunningRun {
   invoice_number?: string
   invoice_amount_due_cents?: number
   invoice_currency?: string
-  // How many retries the run's policy makes, the length of its retry_days
+  // How many retries the policy for the run's mode makes, the length of its retry_days
   // (list responses).
   max_retry_attempts?: number
 }

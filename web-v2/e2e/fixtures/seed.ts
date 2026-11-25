@@ -118,3 +118,13 @@ export async function seedWorld() {
 }
 
 export type Seed = Awaited<ReturnType<typeof seedWorld>>
+
+// retriesOn makes sure the account's retry policy is on, with the values a
+// new account starts with: retries on day 3, 7 and 14, then no final action.
+// Every spec that needs retries sets these same values, so specs running at
+// once never change the policy under each other.
+export async function retriesOn(): Promise<void> {
+  await api('PUT', '/dunning/policy', {
+    enabled: true, retry_days: [3, 4, 7], final_subscription_action: 'none', final_invoice_action: 'none',
+  })
+}

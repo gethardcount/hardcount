@@ -179,10 +179,10 @@ func newInFlightRig(t *testing.T, name string, retryDays []int, script map[strin
 	r := &inFlightRig{t: t, db: db, ts: ts, srv: srv, secret: "whsec_retry_in_flight", wall: wall, frozen: frozen}
 	r.tenantID = testutil.CreateTestTenant(t, db, name)
 	r.key = createAPIKeyWithMode(t, db, r.tenantID, false)
-	r.call("POST", "/v1/dunning/policies", map[string]any{
-		"name": name + " policy", "enabled": true, "retry_days": retryDays,
+	r.call("PUT", "/v1/dunning/policy", map[string]any{
+		"enabled": true, "retry_days": retryDays,
 		"final_subscription_action": "none", "final_invoice_action": "none",
-	}).want(t, 201, "create dunning policy")
+	}).want(t, 200, "create dunning policy")
 	if _, err := tenantstripe.NewStore(db).Upsert(callerCtx(r.tenantID, false), tenantstripe.UpsertInput{
 		TenantID: r.tenantID, Livemode: false, SecretKey: "sk_test_retry_in_flight", PublishableKey: "pk_test_retry_in_flight",
 	}); err != nil {

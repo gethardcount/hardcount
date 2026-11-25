@@ -3,6 +3,7 @@ package recipe
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/dunning"
@@ -25,7 +26,7 @@ func TestService_Instantiate_TouchesOnlyTheCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := dunningSvc.SeedDefaultPoliciesTx(ctx, tx, tenantID, nil); err != nil {
+	if err := dunningSvc.SeedPoliciesTx(ctx, tx, tenantID, nil); err != nil {
 		postgres.Rollback(tx)
 		t.Fatalf("seed: %v", err)
 	}
@@ -56,12 +57,8 @@ func TestService_Instantiate_TouchesOnlyTheCatalog(t *testing.T) {
 	if n := countRows(t, f.db, tenantID, "dunning_policies"); n != 1 {
 		t.Errorf("dunning_policies in test mode: %d, want 1 (the seeded one)", n)
 	}
-	def, err := dunningSvc.GetDefaultPolicy(ctx, tenantID)
-	if err != nil {
-		t.Fatalf("default policy: %v", err)
-	}
-	if !def.Seeded {
-		t.Errorf("default policy = %q, want the seeded one", def.Name)
+	if p, err := dunningSvc.GetPolicy(ctx, tenantID); err != nil || fmt.Sprint(p.RetryDays) != "[3 4 7]" {
+		t.Errorf("policy = %+v (%v), want the seeded one, retry_days [3 4 7]", p, err)
 	}
 	if n := countRows(t, f.db, tenantID, "webhook_endpoints"); n != 0 {
 		t.Errorf("webhook_endpoints: %d, want 0", n)

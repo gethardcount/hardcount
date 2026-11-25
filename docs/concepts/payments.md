@@ -61,18 +61,19 @@ beside the invoice's own `status`.
 
 ## Retries: dunning
 
-Dunning is the process of collecting an unpaid invoice. A dunning policy
-sets it up:
+Dunning is the process of collecting an unpaid invoice. The account's
+dunning policy sets it up, one policy for each mode, used for every
+customer:
 
 - **When to retry:** the days to wait before each retry, in `retry_days`.
   The first wait counts from the failed charge, and each later one from
-  the retry before it. Every new account starts with the policy "Default
-  retries", `retry_days` `[3, 4, 7]`: retries on day 3, 7 and 14 after the
-  failed charge.
+  the retry before it. Every new account starts with `retry_days`
+  `[3, 4, 7]`: retries on day 3, 7 and 14 after the failed charge.
 - **What to do when the retries run out:** two separate choices. For the
   subscription: pause collection, cancel it, or do nothing. For the
-  invoice: write it off, or leave it open. "Default retries" does nothing
-  to either: the subscription keeps billing and the invoice stays open.
+  invoice: write it off, or leave it open. A new account's policy does
+  nothing to either: the subscription keeps billing and the invoice stays
+  open.
 
 Each retry first uses any credit the customer got since the last try.
 
@@ -84,8 +85,8 @@ Some declines are never retried on the same card:
   The emails ask the customer to pay on the hosted invoice page, where they
   can confirm.
 
-You see each run on the **Payment retries** page, and set policies on its
-**Policies** tab.
+You see each run on the **Payment retries** page, and set the policy on
+its **Policy** tab, or with `PUT /v1/dunning/policy`.
 
 ## When the answer is unclear
 

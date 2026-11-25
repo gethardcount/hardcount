@@ -62,7 +62,7 @@ const (
 	InvActionMarkUncollectible DunningInvoiceAction = "mark_uncollectible"
 )
 
-// Valid reports whether the action is a known enum value. UpsertPolicy
+// Valid reports whether the action is a known enum value. PutPolicy
 // refuses any other value instead of using a default. An unknown action
 // that silently became "none" would stop closing the receivables the
 // operator asked to close.
@@ -221,21 +221,17 @@ const (
 	ResolutionAmountBelowMinimum DunningResolution = BelowMinimumCode
 )
 
-// DunningPolicy is a named template that drives the retry state machine for
-// one or more customers (ADR-036, campaigns model). There is one
-// is_default=true policy per (tenant, livemode). A customer without an
-// explicit `dunning_policy_id` inherits the default. The shape mirrors the
-// named campaigns of Lago and Recurly.
+// DunningPolicy is an account's payment retry policy: how a failed payment
+// is retried and what happens when the retries run out. An account has at
+// most one per mode (a unique index on tenant_id, livemode), and it governs
+// every run in that mode. Each run reads it on every step, so an edit
+// reaches runs already under way.
 type DunningPolicy struct {
-	ID        string `json:"id"`
-	TenantID  string `json:"tenant_id,omitempty"`
-	Name      string `json:"name"`
-	Enabled   bool   `json:"enabled"`
-	IsDefault bool   `json:"is_default"`
-	// Seeded is true for the policy the account was created with, until
-	// the operator edits it or makes it the default. While it is true, the
-	// next policy created takes over the default slot (ADR-123).
-	Seeded bool `json:"seeded"`
+	// ID is the row's key. It is not part of the API answer: the policy is
+	// found by its account and mode.
+	ID       string `json:"-"`
+	TenantID string `json:"tenant_id,omitempty"`
+	Enabled  bool   `json:"enabled"`
 	// RetryDays is the whole schedule: the days to wait before each retry.
 	// The first wait counts from the failed payment, or, with no card on
 	// file, from the collection that found none (StartDunning's anchor).
@@ -250,6 +246,10 @@ type DunningPolicy struct {
 	CreatedAt               time.Time                 `json:"created_at"`
 	UpdatedAt               time.Time                 `json:"updated_at"`
 }
+
+// DunningPolicyAuditLabel is the resource label of a dunning policy's audit
+// rows, the words the audit log shows for it.
+const DunningPolicyAuditLabel = "retry policy"
 
 // Limits on DunningPolicy.RetryDays, checked on every write and by the
 // column's CHECK.
@@ -272,13 +272,13 @@ func (p DunningPolicy) WaitBeforeRetry(n int) (wait time.Duration, ok bool) {
 }
 
 // InvoiceDunningRun is one dunning run: the collection of one unpaid invoice
-// under one policy, with its attempts, its next action and its state.
+// under its account's policy for the run's mode, with its attempts, its next
+// action and its state.
 type InvoiceDunningRun struct {
 	ID            string            `json:"id"`
 	TenantID      string            `json:"tenant_id,omitempty"`
 	InvoiceID     string            `json:"invoice_id"`
 	CustomerID    string            `json:"customer_id,omitempty"`
-	PolicyID      string            `json:"policy_id"`
 	State         DunningRunState   `json:"state"`
 	Reason        string            `json:"reason,omitempty"`
 	AttemptCount  int               `json:"attempt_count"`
@@ -298,11 +298,11 @@ type InvoiceDunningRun struct {
 	InvoiceAmountDue int64  `json:"invoice_amount_due_cents,omitempty"`
 	InvoiceCurrency  string `json:"invoice_currency,omitempty"`
 
-	// MaxRetryAttempts is how many retries the bound policy makes (the
-	// length of its retry_days). The list reads (ListRuns,
-	// ListRunsByInvoices) read it with the run, and it is 0 where it was not
-	// read. The policy row is read every tick, so this is the limit the
-	// run's next tick applies.
+	// MaxRetryAttempts is how many retries the account's policy for the
+	// run's mode makes (the length of its retry_days). The list reads
+	// (ListRuns, ListRunsByInvoices) read it with the run, and it is 0 where
+	// it was not read or the mode has no policy. The policy is read every
+	// tick, so this is the limit the run's next tick applies.
 	MaxRetryAttempts int `json:"max_retry_attempts,omitempty"`
 }
 

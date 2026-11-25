@@ -285,7 +285,6 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	dunningSvc.SetSubscriptionPauser(&subscriptionPauserAdapter{svc: subSvc}, invoiceStore)
 	dunningSvc.SetSubscriptionCanceler(&subscriptionCancelerAdapter{svc: subSvc})
 	dunningSvc.SetSubscriptionStateReader(&subscriptionStateAdapter{svc: subSvc})
-	dunningSvc.SetCustomerPolicyReader(customerSvc)
 	webhookH := payment.NewHandler(stripeAdapter, tenantStripeSvc)
 
 	// Invoices.
@@ -411,7 +410,6 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	invoiceSvc.SetAuditLogger(auditLogger)
 
 	// The billing engine.
-	customerSvc.SetDunningPolicyReader(dunningStore)
 	customerSvc.SetSubscriptionChecker(&subscriptionCheckerAdapter{subs: subStore})
 	customerSvc.SetTaxFlusher(invoiceSvc)
 	paymentReadiness := &paymentReadinessAdapter{customers: customerStore, pms: paymentMethodsSvc}
