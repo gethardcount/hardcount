@@ -337,7 +337,8 @@ func (s *Service) SetNumberGenerator(ng NumberGenerator) {
 // written: the credit granter takes its credit back, the number generator
 // numbers it, the unbilled usage reader counts the credit already used, and
 // the Stripe-refund store reads refunds no note holds. Each path that needs
-// one also returns an error without it.
+// one also returns an error without it, except refundBlockedByStripeRefund,
+// which skips its check when the store is missing.
 func (s *Service) MustRecordTopupReturns() {
 	var missing []string
 	for name, nilValue := range map[string]bool{

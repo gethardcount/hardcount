@@ -220,9 +220,11 @@ that keeps running fails on every subscription it reads: the migration drops
 
 The release with migration `00251_dispute_loss_credit_note` makes each paid
 invoice from v0.10.0 that sold prepaid credit and nothing else, with no tax
-and with its credit grant, a top-up (`billing_reason` `topup`). A credit
-note on it then takes the unused credit back, as commit relief does. The
-others stay as they were, and nothing stops a credit note on them:
+and with its credit grant, a top-up (`billing_reason` `topup`). Refunding
+it then goes through commit relief (a `commit_relief` block on
+`POST /v1/credit-notes`), which takes the unused credit back; an ordinary
+credit note on it is refused. The others stay as they were, and an
+ordinary credit note on them is still accepted:
 
 - **Taxed.** A credit note on a taxed prepaid-commit invoice from v0.10.0
   refunds the money and reverses its tax, but doesn't take the credit back,
