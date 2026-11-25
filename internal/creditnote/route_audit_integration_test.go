@@ -533,6 +533,7 @@ func TestRetryRefundAudit_SharedFate(t *testing.T) {
 		svc := creditnote.NewService(store, invStore, refunder)
 		svc.SetNumberGenerator(&seqNumbers{prefix: "RETRYOK"})
 		svc.SetAuditLogger(logger)
+		svc.SetStripeRefundRecording(store, invStore, nil)
 
 		got, err := svc.RetryRefund(ctx, tenantID, cn.ID)
 		if err != nil {
@@ -593,6 +594,7 @@ func TestRetryRefundAudit_SharedFate(t *testing.T) {
 		// that hit the provider is still recorded, flagged as no-change.
 		refunder := &stubRefunder{getStatus: domain.RefundPending}
 		svc := creditnote.NewService(store, invStore, refunder)
+		svc.SetStripeRefundRecording(store, invStore, nil)
 		svc.SetNumberGenerator(&seqNumbers{prefix: "RETRYNOOP"})
 		svc.SetAuditLogger(logger)
 
@@ -631,6 +633,7 @@ func TestRetryRefundAudit_SharedFate(t *testing.T) {
 		emitter := &failingCNEmitter{}
 		refunder := &stubRefunder{refundID: "re_retry_fail", status: domain.RefundSucceeded}
 		svc := creditnote.NewService(store, invStore, refunder)
+		svc.SetStripeRefundRecording(store, invStore, nil)
 		svc.SetNumberGenerator(&seqNumbers{prefix: "RETRYFAIL"})
 		svc.SetAuditLogger(emitter)
 
@@ -675,6 +678,7 @@ func TestRetryRefundAudit_SharedFate(t *testing.T) {
 		// records unknown instead (#965, refund_unknown_integration_test.go).
 		refunder := &stubRefunder{err: refusedRefundErr{msg: "stripe: card_declined"}}
 		svc := creditnote.NewService(store, invStore, refunder)
+		svc.SetStripeRefundRecording(store, invStore, nil)
 		svc.SetNumberGenerator(&seqNumbers{prefix: "RETRYSTRIPEFAIL"})
 		svc.SetAuditLogger(logger)
 

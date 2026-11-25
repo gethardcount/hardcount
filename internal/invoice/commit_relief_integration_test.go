@@ -39,8 +39,8 @@ func (a reliefGranterAdapter) TopupGrantAndBalance(ctx context.Context, tenantID
 	g, spendable, found, err := a.svc.TopupGrantAndBalance(ctx, tenantID, invoiceID, at)
 	return creditnote.TopupGrant(g), spendable, found, err
 }
-func (a reliefGranterAdapter) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, cnID, cnNumber string, slice, refundedGross, grossPaid int64, lostDispute bool) (int64, error) {
-	res, err := a.svc.RetireCommitSliceForReliefTx(ctx, tx, tenantID, invoiceID, cnID, cnNumber, slice, refundedGross, grossPaid, lostDispute)
+func (a reliefGranterAdapter) RetireForTopupNoteTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, cnID, cnNumber string, slice, refundedGross, grossPaid int64, lostDispute bool) (int64, error) {
+	res, err := a.svc.RetireForTopupNoteTx(ctx, tx, tenantID, invoiceID, cnID, cnNumber, slice, refundedGross, grossPaid, lostDispute)
 	if err != nil {
 		return 0, err
 	}

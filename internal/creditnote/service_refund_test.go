@@ -2,6 +2,7 @@ package creditnote
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
@@ -131,7 +132,40 @@ func setupRefundSvc(t *testing.T) (*Service, *memStore, *memInvoiceReader, *fake
 	refunder := &fakeRefunder{}
 	svc := NewService(store, invoices, refunder)
 	svc.SetNumberGenerator(&fakeCNNumbers{})
+	svc.SetStripeRefundRecording(noStripeRefunds{}, nil, nil)
 	return svc, store, invoices, refunder
+}
+
+// TestRetryRefund_RefusesWithoutTheRefundStore: the guard against refunding
+// twice reads the refunds made in Stripe; a service built without their store
+// refuses Retry refund instead of sending it unguarded.
+func TestRetryRefund_RefusesWithoutTheRefundStore(t *testing.T) {
+	svc, store, _, refunder := setupRefundSvc(t)
+	svc.refunds = nil
+	cn, err := store.Create(context.Background(), "t1", domain.CreditNote{
+		TenantID: "t1", InvoiceID: "inv_paid", CustomerID: "cus_1", CreditNoteNumber: "CN-UNWIRED",
+		Status: domain.CreditNoteIssued, Reason: "retry", SubtotalCents: 5000, TotalCents: 5000,
+		RefundAmountCents: 5000, Currency: "USD", RefundStatus: domain.RefundFailed,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RetryRefund(context.Background(), "t1", cn.ID); err == nil || len(refunder.calls) != 0 {
+		t.Errorf("Retry refund with no refund store: %v, %d refund calls; want an error and none", err, len(refunder.calls))
+	}
+}
+
+// noStripeRefunds is the Stripe-refund store of invoices with no refund made
+// in Stripe, which the guard against refunding twice reads (Retry refund,
+// relief, returned another way).
+type noStripeRefunds struct{ StripeRefundStore }
+
+func (noStripeRefunds) ListStripeRefundsByInvoice(context.Context, string, string) ([]domain.InvoiceStripeRefund, error) {
+	return nil, nil
+}
+
+func (noStripeRefunds) ListStripeRefundsByInvoiceTx(context.Context, *sql.Tx, string) ([]domain.InvoiceStripeRefund, error) {
+	return nil, nil
 }
 
 func TestCreateRefund_FullRefund_DefaultAmount(t *testing.T) {

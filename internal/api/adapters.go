@@ -242,7 +242,7 @@ func (a *creditGrantAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.T
 	return err
 }
 
-// LockTopupGrantAndBalanceTx and RetireCommitSliceForReliefTx (below) pass
+// LockTopupGrantAndBalanceTx and RetireForTopupNoteTx (below) pass
 // a note on a top-up to credit.Service, on the credit note's transaction: the
 // note reads the grant and the customer's balance, then takes back the credit
 // it paid for (ADR-080).
@@ -256,8 +256,8 @@ func (a *creditGrantAdapter) TopupGrantAndBalance(ctx context.Context, tenantID,
 	return creditnote.TopupGrant(g), spendable, found, err
 }
 
-func (a *creditGrantAdapter) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64, lostDispute bool) (int64, error) {
-	res, err := a.svc.RetireCommitSliceForReliefTx(ctx, tx, tenantID, invoiceID, creditNoteID, creditNoteNumber, slice, refundedGrossCents, grossPaidCents, lostDispute)
+func (a *creditGrantAdapter) RetireForTopupNoteTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64, lostDispute bool) (int64, error) {
+	res, err := a.svc.RetireForTopupNoteTx(ctx, tx, tenantID, invoiceID, creditNoteID, creditNoteNumber, slice, refundedGrossCents, grossPaidCents, lostDispute)
 	if err != nil {
 		return 0, err
 	}

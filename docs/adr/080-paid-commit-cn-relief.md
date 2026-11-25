@@ -9,7 +9,7 @@ adversarial judge; the cap arithmetic was mechanically verified against
 
 ## Summary
 
-A paid prepaid-commit invoice (credits bought up front, sometimes at a discount) can be refunded partly or fully with a relief credit note: a `commit_relief` block on `POST /v1/credit-notes`. The operator names how many credits to retire, and the cash follows the price paid per credit, so a $9,000 commit worth $10,000 refunds $5,400 for $6,000 unused. One function, `commitReliefCash`, computes that cash cumulatively, so any series of partial refunds adds up to no more than was paid. The note is created and issued, and the credits retired, in one transaction; only the Stripe refund and the tax reversal run after commit, with retry. Status: active; ordinary credit notes on a commit invoice are refused and point to relief, and relief never pays into the credit balance. Amended 2026-11-25: relief takes only unused credit, is refused on a disputed payment, and its card cap counts refunds made in Stripe. Amended again 2026-11-25: money returned outside Hardcount (a refund made in Stripe, a lost dispute) is a credit note that takes back the credit it paid for, and relief refunds no more than the payment's documents leave.
+A paid prepaid-commit invoice (credits bought up front, sometimes at a discount) can be refunded partly or fully with a relief credit note: a `commit_relief` block on `POST /v1/credit-notes`. The operator names how many credits to retire, and the cash follows the price paid per credit, so a $9,000 commit worth $10,000 refunds $5,400 for $6,000 unused. One function, `topupNoteCash`, computes that cash cumulatively, so any series of partial refunds adds up to no more than was paid. The note is created and issued, and the credits retired, in one transaction; only the Stripe refund and the tax reversal run after commit, with retry. Status: active; ordinary credit notes on a commit invoice are refused and point to relief, and relief never pays into the credit balance. Amended 2026-11-25: relief takes only unused credit, is refused on a disputed payment, and its card cap counts refunds made in Stripe. Amended again 2026-11-25: money returned outside Hardcount (a refund made in Stripe, a lost dispute) is a credit note that takes back the credit it paid for, and relief refunds no more than the payment's documents leave.
 
 ## Context
 
@@ -35,7 +35,7 @@ refund at face (over-refund); charging consumption at face under-refunds.
    exactly `f(K_final) ≤ GrossPaid`; per-slice independent rounding is
    forbidden (it over-refunds: GrossPaid=2, Granted=3, three 1-credit
    slices → naive pays 3). **The anchor has exactly one call site
-   computing CN cash** (`commitReliefCash`) — a second site reintroduces
+   computing CN cash** (`topupNoteCash`) — a second site reintroduces
    the rounding bug.
 2. **Single coordinator tx, create-and-issue.** The relief CN is created,
    flipped issued, and the credits retired in ONE tx

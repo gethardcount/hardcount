@@ -652,7 +652,7 @@ func (g reliefLedgerGranter) TopupGrantAndBalance(context.Context, string, strin
 func (g reliefLedgerGranter) LockTopupGrantAndBalanceTx(context.Context, *sql.Tx, string, string, time.Time) (creditnote.TopupGrant, int64, bool, error) {
 	panic("commit relief is not exercised by this test")
 }
-func (g reliefLedgerGranter) RetireCommitSliceForReliefTx(context.Context, *sql.Tx, string, string, string, string, int64, int64, int64, bool) (int64, error) {
+func (g reliefLedgerGranter) RetireForTopupNoteTx(context.Context, *sql.Tx, string, string, string, string, int64, int64, int64, bool) (int64, error) {
 	panic("commit relief is not exercised by this test")
 }
 

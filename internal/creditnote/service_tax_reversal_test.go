@@ -481,7 +481,7 @@ func (f *fakeCreditGranter) LockTopupGrantAndBalanceTx(context.Context, *sql.Tx,
 	return TopupGrant{}, 0, false, nil
 }
 
-func (f *fakeCreditGranter) RetireCommitSliceForReliefTx(context.Context, *sql.Tx, string, string, string, string, int64, int64, int64, bool) (int64, error) {
+func (f *fakeCreditGranter) RetireForTopupNoteTx(context.Context, *sql.Tx, string, string, string, string, int64, int64, int64, bool) (int64, error) {
 	return 0, errors.New("fakeCreditGranter: commit relief is proven on real Postgres")
 }
 
