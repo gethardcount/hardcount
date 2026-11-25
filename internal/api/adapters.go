@@ -790,9 +790,8 @@ func (a *subscriptionStateAdapter) IsCanceled(ctx context.Context, tenantID, id 
 		return false, err
 	}
 	// Canceled is the state in which both actions, cancel and pause, refuse.
-	// The cancel's compare-and-set (CancelAtomicWithBill) matches only a
-	// trialing or active row, and SetPauseCollection rejects canceled
-	// outright.
+	// The cancel's compare-and-set (CancelAtomicWithBill) matches only an
+	// active row, and SetPauseCollection rejects canceled outright.
 	return sub.Status == domain.SubscriptionCanceled, nil
 }
 
@@ -1784,46 +1783,34 @@ type subscriptionReader interface {
 	CustomerSubPlanCurrencies(ctx context.Context, tenantID, customerID, excludeSubID string) ([]subscription.SubPlanCurrency, error)
 }
 
-// NonTerminalForCustomer reads one status at a time: trialing, then active.
-// The customer service calls it under the customer-rules lock, which creates
-// also take, so those cannot move a subscription into the set between the
-// reads. A trial end (trialing to active) takes no
-// customer lock. Reading trialing first finds such a subscription in the
-// first read if the trial has not ended, and in the second if it has; an id
-// already collected is skipped.
+// NonTerminalForCustomer reads the customer's active subscriptions. The
+// customer service calls it under the customer-rules lock, which creates
+// also take, so those cannot move a subscription into the set during the
+// read.
 func (a *subscriptionCheckerAdapter) NonTerminalForCustomer(ctx context.Context, tenantID, customerID string) ([]customer.NonTerminalSubscription, error) {
+	subs, _, err := a.subs.List(ctx, subscription.ListFilter{
+		TenantID:   tenantID,
+		CustomerID: customerID,
+		Status:     string(domain.SubscriptionActive),
+		Limit:      100,
+	})
+	if err != nil {
+		return nil, err
+	}
 	var out []customer.NonTerminalSubscription
-	statuses := []string{string(domain.SubscriptionTrialing), string(domain.SubscriptionActive)}
-	collected := map[string]bool{}
-	for _, status := range statuses {
-		subs, _, err := a.subs.List(ctx, subscription.ListFilter{
-			TenantID:   tenantID,
-			CustomerID: customerID,
-			Status:     status,
-			Limit:      100,
-		})
-		if err != nil {
-			return nil, err
+	for _, sub := range subs {
+		name := sub.DisplayName
+		if name == "" {
+			name = sub.Code
 		}
-		for _, sub := range subs {
-			if collected[sub.ID] {
-				continue
-			}
-			collected[sub.ID] = true
-			name := sub.DisplayName
-			if name == "" {
-				name = sub.Code
-			}
-			out = append(out, customer.NonTerminalSubscription{ID: sub.ID, Status: string(sub.Status), Name: name})
-		}
+		out = append(out, customer.NonTerminalSubscription{ID: sub.ID, Status: string(sub.Status), Name: name})
 	}
 	return out, nil
 }
 
 // PlanCurrencies is the currency pin's own query (ADR-100 G3): one read of
-// every trialing and active subscription of the customer, with no
-// page, so the profile guard and the pin judge the same set. One statement
-// sees one snapshot, so a trial that ends meanwhile is still in it.
+// every active subscription of the customer, with no page, so the profile
+// guard and the pin judge the same set.
 func (a *subscriptionCheckerAdapter) PlanCurrencies(ctx context.Context, tenantID, customerID string) ([]customer.SubscriptionCurrency, error) {
 	pairs, err := a.subs.CustomerSubPlanCurrencies(ctx, tenantID, customerID, "")
 	if err != nil {
@@ -1923,13 +1910,13 @@ type usageThresholdReader interface {
 	ThresholdWatermarks(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (billedThrough, paidThrough *time.Time, err error)
 }
 
-// OpenPeriods reads, in one transaction, every active and trialing
-// subscription of the customer. For each one it reads:
+// OpenPeriods reads, in one transaction, every active subscription of the
+// customer. For each one it reads:
 //   - the threshold watermarks of its current period: how far the period's
 //     threshold invoices have billed and been paid;
 //   - how the close bills the period (billing.PeriodPlans): the plan
-//     stretches, from its billing intervals when it is active, and each
-//     plan's pin, the instant its prices are read for the period;
+//     stretches, from its billing intervals, and each plan's pin, the
+//     instant its prices are read for the period;
 //   - where the customer's other subscriptions stopped covering a meter in
 //     the period.
 //
@@ -1968,12 +1955,11 @@ func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID 
 		if err != nil {
 			return nil, fmt.Errorf("threshold watermarks of %s: %w", sub.ID, err)
 		}
-		sp.period, err = billing.PeriodPlans(sub, start, end, func() ([]domain.ItemInterval, error) {
-			return a.subs.ListItemIntervals(ctx, tenantID, sub.ID)
-		})
+		intervals, err := a.subs.ListItemIntervals(ctx, tenantID, sub.ID)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("billing intervals of %s: %w", sub.ID, err)
 		}
+		sp.period = billing.PeriodPlans(sub, start, end, intervals)
 		sp.coverage, err = a.subs.ListCustomerMeterCoverageEnds(ctx, tenantID, sub.CustomerID, sub.ID, start, end)
 		if err != nil {
 			return nil, fmt.Errorf("other subscriptions' meter coverage of %s: %w", sub.ID, err)

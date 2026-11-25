@@ -126,45 +126,35 @@ function sentEmailLabel(emailType: string): string {
   }
 }
 
-// Subscription sort + bucketing on the customer detail page. Anchored
-// to Stripe / Lago / Orb / Recurly customer-page conventions: active
-// states surface first, terminal states collapse under a toggle, and
-// each row is a single line with the next-event date as meta.
-const SUB_STATUS_RANK: Record<string, number> = {
-  trialing: 0, active: 1, past_due: 2, canceled: 3, ended: 4,
-}
-
-function subIsTerminal(status: string): boolean {
-  return status === 'canceled' || status === 'ended'
+// Subscription bucketing on the customer detail page. Anchored to Stripe /
+// Lago / Orb / Recurly customer-page conventions: live subscriptions surface
+// first, canceled ones collapse under a toggle, and each row is a single
+// line with the next-event date as meta.
+function subIsTerminal(status: Subscription['status']): boolean {
+  switch (status) {
+    case 'active': return false
+    case 'canceled': return true
+  }
 }
 
 function subMeta(sub: Subscription): string {
-  if (sub.status === 'trialing' && sub.trial_end_at) {
-    return `Trial ends ${formatDate(sub.trial_end_at)}`
-  }
   // A scheduled cancel must beat the "Renews …" arm below, and the guard
   // has to hold for the COMMON shape: cancelling at period end sets
   // cancel_at_period_end + cancel_effective_at but leaves cancel_at unset
   // (that one is only for an explicit future-dated cancel). Requiring
   // cancel_at meant this branch never fired for a period-end cancel, so a
   // subscription that stops on Sep 1 advertised "Renews Sep 1".
-  // cancel_effective_at is the backend's authoritative answer (ADR-069) and
-  // is what SubscriptionDetail's timeline already uses.
+  // cancel_effective_at is the backend's authoritative answer and is what
+  // SubscriptionDetail's timeline already uses.
   const cancelAt = sub.cancel_at_period_end || sub.cancel_at ? sub.cancel_effective_at || sub.cancel_at : null
   if (cancelAt) {
     return `Cancels ${formatDate(cancelAt)}`
-  }
-  if (sub.status === 'past_due' && sub.next_billing_at) {
-    return `Past due · retry ${formatDate(sub.next_billing_at)}`
   }
   if (sub.status === 'active' && sub.next_billing_at) {
     return `Renews ${formatDate(sub.next_billing_at)}`
   }
   if (sub.status === 'canceled' && sub.canceled_at) {
     return `Canceled ${formatDate(sub.canceled_at)}`
-  }
-  if (sub.status === 'ended' && sub.current_billing_period_end) {
-    return `Ended ${formatDate(sub.current_billing_period_end)}`
   }
   return ''
 }
@@ -255,17 +245,11 @@ export default function CustomerDetailPage() {
   const allSubs = subsPage?.data
   const subsTotal = subsPage?.total ?? allSubs?.length ?? 0
 
-  // Split subs into active-ish (trialing/active/past_due) and terminal
-  // (canceled/ended), sorted within each bucket by status priority then
-  // most-recent first. Lets the card render active states front-and-
-  // center and tuck terminal history under a toggle.
+  // Split subs into live and canceled, each most-recent first. Lets the card
+  // render live subscriptions front-and-center and tuck canceled ones under
+  // a toggle.
   const subBuckets = useMemo(() => {
-    const sorted = [...(allSubs ?? [])].sort((a, b) => {
-      const ra = SUB_STATUS_RANK[a.status] ?? 99
-      const rb = SUB_STATUS_RANK[b.status] ?? 99
-      if (ra !== rb) return ra - rb
-      return (b.created_at ?? '').localeCompare(a.created_at ?? '')
-    })
+    const sorted = [...(allSubs ?? [])].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
     return {
       active: sorted.filter(s => !subIsTerminal(s.status)),
       terminal: sorted.filter(s => subIsTerminal(s.status)),
@@ -668,9 +652,8 @@ export default function CustomerDetailPage() {
         <div className="min-w-0 space-y-6 lg:col-span-2 lg:col-start-1 lg:row-span-2 lg:row-start-1">
           {/* Subscriptions and invoices first: what the customer pays for and owes. */}
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-            {/* Subscriptions — compact one-line rows, sorted by status
-                priority (trialing → active → past_due). Terminal subs
-                (canceled / ended) collapse under a toggle so they don't
+            {/* Subscriptions — compact one-line rows, most recent first.
+                Canceled subs collapse under a toggle so they don't
                 inflate the card on heavy-use customers. Anchored to
                 Stripe / Lago / Orb / Recurly customer-page conventions. */}
             <Card>

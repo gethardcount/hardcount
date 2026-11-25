@@ -66,17 +66,6 @@ export function amountInputError(input: string, example: string, wholeCents: boo
   return `Enter a plain number, for example ${example}.`
 }
 
-// wholeNumberIn reads a whole number typed in a box that takes a range, 0
-// included where the field allows it (trial days, 0 to 730): digits only and
-// from min to max, or null. parseInt cut "2.7" to 2; a blank box is not 0;
-// "1e3" is not 1000.
-export function wholeNumberIn(input: string, min: number, max: number): number | null {
-  const t = input.trim()
-  if (!/^\d+$/.test(t)) return null
-  const n = Number(t)
-  return Number.isSafeInteger(n) && n >= min && n <= max ? n : null
-}
-
 // percentRate reads a percent typed in a box ("8.875" for 8.875%): from 0 to
 // 100 with at most four decimals, the precision the server stores, or null.
 // A blank box is not 0: a rate of 0 turns tax off, so it must be typed.

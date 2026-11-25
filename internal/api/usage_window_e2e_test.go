@@ -17,10 +17,10 @@ import (
 // aggregated per customer and meter, with no subscription key, and a
 // subscription's period starts at midnight of the day it started. So the
 // window a subscription bills for a meter starts at the latest of its period
-// start, its trial end, its threshold watermark, and the instant another
-// subscription of the customer stopped covering that meter that day. The
-// tests below fail when one of those terms is missing from a closer: the
-// cycle close, the immediate cancel, the threshold fire, or the preview.
+// start, its threshold watermark, and the instant another subscription of the
+// customer stopped covering that meter that day. The tests below fail when
+// one of those terms is missing from a closer: the cycle close, the immediate
+// cancel, the threshold fire, or the preview.
 //
 // Day D is 2026-04-10 (the tenant zone is UTC). The meter prices 1c per call.
 
@@ -32,16 +32,12 @@ func dayAt(h, m int) time.Time {
 }
 
 // newSub creates a subscription for the rig's customer at `at` on planID,
-// billed on the anniversary of its start, and points the rig at it. extra
-// adds fields to the request; without trial_days it starts now.
-func (r *lagRig) newSub(code, planID string, at time.Time, extra map[string]any) string {
+// billed on the anniversary of its start, and points the rig at it.
+func (r *lagRig) newSub(code, planID string, at time.Time) string {
 	r.t.Helper()
 	body := map[string]any{
 		"code": code, "display_name": code, "customer_id": r.custID, "billing_time": "anniversary",
 		"items": []map[string]any{{"plan_id": planID, "quantity": 1}},
-	}
-	for k, v := range extra {
-		body[k] = v
 	}
 	out := r.must(http.MethodPost, "/v1/subscriptions", at, body, http.StatusCreated)
 	r.subID = out["id"].(string)
@@ -98,19 +94,6 @@ func wantUsageStarts(t *testing.T, what string, inv lagInvoice, want time.Time) 
 // a live key).
 func uwCtx(at time.Time) context.Context {
 	return postgres.WithLivemode(clock.WithEffectiveNow(context.Background(), at), true)
-}
-
-// expireTrials runs the trial-expiry scan at `at` and wants one activation.
-func (r *lagRig) expireTrials(at time.Time) {
-	r.t.Helper()
-	r.clk.Set(at)
-	n, errs := r.srv.SubscriptionSvc.ProcessExpiredTrials(uwCtx(at), 100)
-	if n != 1 || len(errs) != 0 {
-		r.t.Fatalf("trial expiry at %v: activated %d, errors %v; want 1 and none", at, n, errs)
-	}
-	if s := r.sub(); s.Status != domain.SubscriptionActive {
-		r.t.Fatalf("status after the trial expiry = %s, want active", s.Status)
-	}
 }
 
 // scanThresholds runs the spend-threshold scan at `at` and returns how many
@@ -187,134 +170,75 @@ func wantUsageBilledOnce(t *testing.T) {
 	}
 }
 
-// --- B2: trial hours are not billed -----------------------------------------
+// --- B4: a same-day cancel and recreate bills the day's usage once ----------
 
-// newTrialEndingAt creates a trialing subscription on plan A whose trial ends
-// at trialEnd (created one day before it), and checks that its first paid
-// period starts at midnight of day D.
-func (r *lagRig) newTrialEndingAt(trialEnd time.Time) {
-	r.t.Helper()
-	r.newSub("trial", r.planA, trialEnd.Add(-24*time.Hour), map[string]any{"trial_days": 1})
-	s := r.sub()
-	if s.TrialEndAt == nil || !s.TrialEndAt.Equal(trialEnd) || s.CurrentBillingPeriodStart == nil || !s.CurrentBillingPeriodStart.Equal(uwDay) {
-		r.t.Fatalf("trial sub: trial end %v, period start %v; want %v and %v", s.TrialEndAt, s.CurrentBillingPeriodStart, trialEnd, uwDay)
+// TestUsageWindow_CancelRecreateSameDay_BillsUsageOnce: subscription A (in
+// advance) starts at 08:00 on day D and is canceled at 10:00; its final
+// invoice bills the usage to 10:00. Subscription B (in arrears) starts on the
+// same meter at 11:00, so its period starts at midnight. B bills its base for
+// the whole day (ADR-012) but its usage only from 10:00, where A's ended.
+func TestUsageWindow_CancelRecreateSameDay_BillsUsageOnce(t *testing.T) {
+	r := newLagRigBare(t, "in_advance", 0)
+	arrears := r.newPlan("plan_arrears", "in_arrears", 2000)
+	subA := r.newSub("sub-a", r.planA, dayAt(8, 0))
+	r.ingest(dayAt(9, 0), 100)
+	r.cancelNow(dayAt(10, 0))
+	if got := usageOf(r.invoicesOf(subA)); got != 100 {
+		t.Errorf("A's usage = %dc, want 100c (to its cancel)", got)
 	}
-}
-
-// TestUsageWindow_TrialEndsMidDay_CloseBillsUsageFromTrialEnd: the trial ends
-// at 18:00 on day D, and the first paid period starts at midnight of D. The
-// base fee bills that whole day (ADR-012); the usage before 18:00 is trial
-// usage and is not billed. The preview of the trialing subscription, read
-// after the trial ended but before the expiry scan flipped it, agrees with
-// the invoice.
-func TestUsageWindow_TrialEndsMidDay_CloseBillsUsageFromTrialEnd(t *testing.T) {
-	r := newLagRigBare(t, "in_arrears", 0)
-	trialEnd := dayAt(18, 0)
-	r.newTrialEndingAt(trialEnd)
-	r.ingest(dayAt(10, 0), 40) // in the trial
-	r.ingest(dayAt(19, 0), 7)  // after it
-
-	if got := r.previewUsage(dayAt(19, 30)); got != 7 {
-		t.Errorf("preview usage of the trialing subscription = %dc, want 7c: the 40c before the trial end is free", got)
-	}
-	r.expireTrials(dayAt(19, 45))
+	r.ingest(dayAt(10, 30), 50)
+	subB := r.newSub("sub-b", arrears, dayAt(11, 0))
+	r.ingest(dayAt(12, 0), 20)
 
 	cyc := r.closePeriod(uwDay)
-	if got := cyc.sum("usage"); got != 7 {
-		t.Errorf("first paid invoice usage = %dc, want 7c: the 40c sent during the trial is billed", got)
+	if got := cyc.sum("usage"); got != 70 {
+		t.Errorf("B's usage = %dc, want 70c: the 100c before A's cancel is already on A's final invoice", got)
 	}
-	wantUsageStarts(t, "first paid invoice", cyc, trialEnd)
-	if got := cyc.sum("base_fee"); got != 3000 {
-		t.Errorf("first paid invoice base = %dc, want the whole period's 3000c (the trial-end day counts whole, ADR-012)", got)
+	wantUsageStarts(t, "B's cycle invoice", cyc, dayAt(10, 0))
+	if got := cyc.sum("base_fee"); got != 2000 {
+		t.Errorf("B's base = %dc, want the whole period's 2000c (the start day counts whole, ADR-012)", got)
+	}
+	if got := usageOf(r.invoicesOf(subA)) + usageOf(r.invoicesOf(subB)); got != 170 {
+		t.Errorf("usage over the customer's live invoices = %dc, want the 170c sent", got)
 	}
 	wantUsageBilledOnce(t)
 }
 
-// TestUsageWindow_TrialEndsMidDay_CancelBillsUsageFromTrialEnd: the same
-// trial, canceled at 20:00 the day it ended. The final invoice bills only the
-// usage after the trial end.
-func TestUsageWindow_TrialEndsMidDay_CancelBillsUsageFromTrialEnd(t *testing.T) {
+// TestUsageWindow_ThresholdFireAfterSameDayCancel_BillsUsageFromCoverageEndOnce:
+// A (in arrears) runs from 08:00 on day D and is canceled at 10:00; its final
+// invoice bills the 40 calls of 09:00. B starts on the same meter at 11:00,
+// so its period starts at midnight. A spend threshold fires at 21:00: it
+// bills B's usage from 10:00, where A's ended, and says so on its line; the
+// preview before it agrees. The close bills what came after the fire. B's
+// plan is priced at B's start (ADR-130 §4 step 3, amended 2026-10-26), so a
+// price edit at 18:30 applies from the next period on both invoices: the
+// fire's watermark does not move the plan's pin.
+//
+// Mutation: build the fire's or the preview's windows without the coverage
+// ends, and it bills 47c; pin the plan at the fire, and the fire bills 14c.
+func TestUsageWindow_ThresholdFireAfterSameDayCancel_BillsUsageFromCoverageEndOnce(t *testing.T) {
 	r := newLagRigBare(t, "in_arrears", 0)
-	trialEnd := dayAt(18, 0)
-	r.newTrialEndingAt(trialEnd)
-	r.ingest(dayAt(10, 0), 40)
-	r.ingest(dayAt(19, 0), 7)
-	r.expireTrials(dayAt(19, 45))
-	r.cancelNow(dayAt(20, 0))
-
-	invs := r.invoices()
-	if len(invs) != 1 {
-		r.logInvoices(invs)
-		t.Fatalf("%d invoices after the cancel, want the final one", len(invs))
-	}
-	if got := invs[0].sum("usage"); got != 7 {
-		t.Errorf("final invoice usage = %dc, want 7c: the 40c sent during the trial is billed", got)
-	}
-	wantUsageStarts(t, "final invoice", invs[0], trialEnd)
-}
-
-// TestUsageWindow_EndTrialEarly_BillsUsageFromTheEnd: the operator ends a
-// three-day trial at 14:00 on day D. The period restarts at midnight of D and
-// the trial end is 14:00, so the usage of the morning is not billed.
-func TestUsageWindow_EndTrialEarly_BillsUsageFromTheEnd(t *testing.T) {
-	r := newLagRigBare(t, "in_arrears", 0)
-	r.newSub("trial", r.planA, dayAt(18, 0).Add(-24*time.Hour), map[string]any{"trial_days": 3})
-	r.ingest(dayAt(10, 0), 40)
-	endAt := dayAt(14, 0)
-	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/end-trial", endAt, nil, http.StatusOK)
-	s := r.sub()
-	if s.TrialEndAt == nil || !s.TrialEndAt.Equal(endAt) || s.CurrentBillingPeriodStart == nil || !s.CurrentBillingPeriodStart.Equal(uwDay) {
-		t.Fatalf("after the early end: trial end %v, period start %v; want %v and %v", s.TrialEndAt, s.CurrentBillingPeriodStart, endAt, uwDay)
-	}
-	r.ingest(dayAt(15, 0), 7)
-
-	cyc := r.closePeriod(uwDay)
-	if got := cyc.sum("usage"); got != 7 {
-		t.Errorf("first paid invoice usage = %dc, want 7c: the 40c sent during the trial is billed", got)
-	}
-	wantUsageStarts(t, "first paid invoice", cyc, endAt)
-}
-
-// TestUsageWindow_TrialEndsAtMidnight_Unchanged is the control: a trial that
-// ends at midnight leaves the first paid period's usage window as it was.
-func TestUsageWindow_TrialEndsAtMidnight_Unchanged(t *testing.T) {
-	r := newLagRigBare(t, "in_arrears", 0)
-	r.newTrialEndingAt(uwDay)
-	r.ingest(uwDay.Add(-14*time.Hour), 5) // in the trial, before the period
-	r.ingest(dayAt(1, 0), 9)
-	r.expireTrials(dayAt(0, 30))
-
-	cyc := r.closePeriod(uwDay)
-	if got := cyc.sum("usage"); got != 9 {
-		t.Errorf("first paid invoice usage = %dc, want 9c", got)
-	}
-	wantUsageStarts(t, "first paid invoice", cyc, uwDay)
-}
-
-// TestUsageWindow_ThresholdFireAfterTrial_BillsUsageFromTrialEndOnce: a
-// spend threshold fires at 21:00 on the day the trial ended at 18:00. The
-// fire bills the usage from the trial end and says so on its line; the close
-// bills what came after the fire. The plan is priced at the trial end, where
-// the first paid period starts (ADR-130 §4 step 3, amended 2026-10-26). A
-// price edit at 18:30, after that, applies from the next period on both
-// invoices: neither the fire's watermark nor the trial-end floor moves the
-// plan's pin.
-func TestUsageWindow_ThresholdFireAfterTrial_BillsUsageFromTrialEndOnce(t *testing.T) {
-	r := newLagRigBare(t, "in_arrears", 0)
-	trialEnd := dayAt(18, 0)
-	r.newTrialEndingAt(trialEnd)
-	plan := r.must(http.MethodGet, "/v1/plans/"+r.planA, dayAt(18, 30), nil, http.StatusOK)
+	subA := r.newSub("sub-a", r.planA, dayAt(8, 0))
+	r.ingest(dayAt(9, 0), 40)
+	r.cancelNow(dayAt(10, 0))
+	subB := r.newSub("sub-b", r.planB, dayAt(11, 0))
+	plan := r.must(http.MethodGet, "/v1/plans/"+r.planB, dayAt(18, 30), nil, http.StatusOK)
 	priceID := flowStr(flowList(plan, "prices")[0], "id")
-	r.must(http.MethodPatch, "/v1/plans/"+r.planA+"/prices/"+priceID, dayAt(18, 30), map[string]any{
+	edit := r.must(http.MethodPatch, "/v1/plans/"+r.planB+"/prices/"+priceID, dayAt(18, 30), map[string]any{
 		"mode": "per_unit", "unit_amount_cents": "2",
 	}, http.StatusOK)
+	if flowStr(edit, "effective") != "next_period" {
+		t.Fatalf("edit of B's plan: effective %q, want next_period (the plan is used)", flowStr(edit, "effective"))
+	}
 	// The database stamps the edit with its own clock; put it at 18:30 of
-	// day D, after the paid window opened at the trial end.
+	// day D, after B joined the plan.
 	r.exec(`UPDATE plan_price_versions SET valid_from = $1 WHERE price_id = $2 AND valid_from = (SELECT max(valid_from) FROM plan_price_versions WHERE price_id = $2)`, dayAt(18, 30), priceID)
-	r.ingest(dayAt(10, 0), 40)
 	r.ingest(dayAt(19, 0), 7)
-	r.expireTrials(dayAt(19, 45))
-	r.must(http.MethodPut, "/v1/subscriptions/"+r.subID+"/billing-thresholds", dayAt(20, 0),
+
+	if got := r.previewUsage(dayAt(19, 30)); got != 7 {
+		t.Errorf("B's preview usage = %dc, want 7c: the 40c before A's cancel is on A's final invoice", got)
+	}
+	r.must(http.MethodPut, "/v1/subscriptions/"+subB+"/billing-thresholds", dayAt(20, 0),
 		map[string]any{"amount_gte": 5}, http.StatusOK)
 	if n := r.scanThresholds(dayAt(21, 0)); n != 1 {
 		t.Fatalf("threshold scan fired %d invoices, want 1", n)
@@ -333,62 +257,35 @@ func TestUsageWindow_ThresholdFireAfterTrial_BillsUsageFromTrialEndOnce(t *testi
 		t.Fatalf("%d threshold invoices, want 1", len(fire))
 	}
 	if got := fire[0].sum("usage"); got != 7 {
-		t.Errorf("threshold invoice usage = %dc, want 7c (7 calls at the trial end's price, after the trial end)", got)
+		t.Errorf("threshold invoice usage = %dc, want 7c (7 calls after A's cancel, at the price of B's start)", got)
 	}
-	wantUsageStarts(t, "threshold invoice", fire[0], trialEnd)
+	wantUsageStarts(t, "threshold invoice", fire[0], dayAt(10, 0))
 
 	cyc := r.closePeriod(uwDay)
 	if got := cyc.sum("usage"); got != 3 {
 		t.Errorf("cycle close usage = %dc, want 3c: only the usage after the fire", got)
 	}
-	if got := usageOf(r.invoices()); got != 10 {
-		t.Errorf("usage over all live invoices = %dc, want 10c", got)
+	if got := usageOf(r.invoicesOf(subA)) + usageOf(r.invoices()); got != 50 {
+		t.Errorf("usage over the customer's live invoices = %dc, want the 50c sent", got)
 	}
 	wantUsageBilledOnce(t)
 }
 
-// TestUsageWindow_PriceEditDuringTrial_FirstPaidPeriodAtTheEdit: the trial
-// ends at 18:00 on day D, and the plan's price was edited at 12:00, during
-// the trial. The plan is priced at the trial end, where the first paid
-// period starts (ADR-130 §4 step 3, amended 2026-10-26), so the preview and
-// the first paid invoice bill the edited price.
+// TestUsageWindow_ItemThresholdAfterSameDayCancel_CountsUsageFromCoverageEnd:
+// A is canceled at 10:00 on day D, after 40 calls at 09:00, and B starts on
+// the same meter at 11:00. B's item threshold counts the item's usage from
+// 10:00, the window B's invoice bills, not the calls A's final invoice
+// billed.
 //
-// Mutation: pin every plan at the period start, and both bill the old
-// price.
-func TestUsageWindow_PriceEditDuringTrial_FirstPaidPeriodAtTheEdit(t *testing.T) {
+// Mutation: count the item's usage from the period start, and the threshold
+// of 45 calls fires on 47.
+func TestUsageWindow_ItemThresholdAfterSameDayCancel_CountsUsageFromCoverageEnd(t *testing.T) {
 	r := newLagRigBare(t, "in_arrears", 0)
-	r.newTrialEndingAt(dayAt(18, 0))
-	plan := r.must(http.MethodGet, "/v1/plans/"+r.planA, dayAt(12, 0), nil, http.StatusOK)
-	priceID := flowStr(flowList(plan, "prices")[0], "id")
-	edit := r.must(http.MethodPatch, "/v1/plans/"+r.planA+"/prices/"+priceID, dayAt(12, 0), map[string]any{
-		"mode": "per_unit", "unit_amount_cents": "2",
-	}, http.StatusOK)
-	if flowStr(edit, "effective") != "next_period" {
-		t.Fatalf("edit during the trial: effective %q, want next_period (the plan is used)", flowStr(edit, "effective"))
-	}
-	// The database stamps the edit with its own clock; put it at 12:00 of
-	// day D, during the trial.
-	r.exec(`UPDATE plan_price_versions SET valid_from = $1 WHERE price_id = $2 AND valid_from = (SELECT max(valid_from) FROM plan_price_versions WHERE price_id = $2)`, dayAt(12, 0), priceID)
+	r.newSub("sub-a", r.planA, dayAt(8, 0))
+	r.ingest(dayAt(9, 0), 40)
+	r.cancelNow(dayAt(10, 0))
+	r.newSub("sub-b", r.planB, dayAt(11, 0))
 	r.ingest(dayAt(19, 0), 7)
-
-	if got := r.previewUsage(dayAt(19, 30)); got != 14 {
-		t.Errorf("preview usage = %dc, want 14c: 7 calls at the price edited during the trial", got)
-	}
-	r.expireTrials(dayAt(19, 45))
-	if got := r.closePeriod(uwDay).sum("usage"); got != 14 {
-		t.Errorf("first paid invoice usage = %dc, want 14c: 7 calls at the price edited during the trial", got)
-	}
-}
-
-// TestUsageWindow_ItemThresholdAfterTrial_CountsUsageFromTrialEnd: an item
-// threshold counts the item's usage from the trial end, the window the
-// invoice bills, not the trial usage before it.
-func TestUsageWindow_ItemThresholdAfterTrial_CountsUsageFromTrialEnd(t *testing.T) {
-	r := newLagRigBare(t, "in_arrears", 0)
-	r.newTrialEndingAt(dayAt(18, 0))
-	r.ingest(dayAt(10, 0), 40)
-	r.ingest(dayAt(19, 0), 7)
-	r.expireTrials(dayAt(19, 45))
 	item := r.sub().Items[0].ID
 	setItemThreshold := func(at time.Time, gte string) {
 		r.must(http.MethodPut, "/v1/subscriptions/"+r.subID+"/billing-thresholds", at, map[string]any{
@@ -397,67 +294,12 @@ func TestUsageWindow_ItemThresholdAfterTrial_CountsUsageFromTrialEnd(t *testing.
 	}
 	setItemThreshold(dayAt(20, 0), "45")
 	if n := r.scanThresholds(dayAt(21, 0)); n != 0 {
-		t.Errorf("an item threshold of 45 calls fired with 7 calls after the trial end (it counted the 40 trial calls)")
+		t.Errorf("an item threshold of 45 calls fired with 7 calls after A's cancel (it counted A's 40 calls)")
 	}
 	setItemThreshold(dayAt(21, 30), "7")
 	if n := r.scanThresholds(dayAt(22, 0)); n != 1 {
-		t.Errorf("an item threshold of 7 calls fired %d invoices with 7 calls after the trial end, want 1", n)
+		t.Errorf("an item threshold of 7 calls fired %d invoices with 7 calls after A's cancel, want 1", n)
 	}
-}
-
-// --- B4: a same-day cancel and recreate bills the day's usage once ----------
-
-// TestUsageWindow_CancelRecreateSameDay_BillsUsageOnce: subscription A (in
-// advance) starts at 08:00 on day D and is canceled at 10:00; its final
-// invoice bills the usage to 10:00. Subscription B (in arrears) starts on the
-// same meter at 11:00, so its period starts at midnight. B bills its base for
-// the whole day (ADR-012) but its usage only from 10:00, where A's ended.
-func TestUsageWindow_CancelRecreateSameDay_BillsUsageOnce(t *testing.T) {
-	r := newLagRigBare(t, "in_advance", 0)
-	arrears := r.newPlan("plan_arrears", "in_arrears", 2000)
-	subA := r.newSub("sub-a", r.planA, dayAt(8, 0), nil)
-	r.ingest(dayAt(9, 0), 100)
-	r.cancelNow(dayAt(10, 0))
-	if got := usageOf(r.invoicesOf(subA)); got != 100 {
-		t.Errorf("A's usage = %dc, want 100c (to its cancel)", got)
-	}
-	r.ingest(dayAt(10, 30), 50)
-	subB := r.newSub("sub-b", arrears, dayAt(11, 0), nil)
-	r.ingest(dayAt(12, 0), 20)
-
-	cyc := r.closePeriod(uwDay)
-	if got := cyc.sum("usage"); got != 70 {
-		t.Errorf("B's usage = %dc, want 70c: the 100c before A's cancel is already on A's final invoice", got)
-	}
-	wantUsageStarts(t, "B's cycle invoice", cyc, dayAt(10, 0))
-	if got := cyc.sum("base_fee"); got != 2000 {
-		t.Errorf("B's base = %dc, want the whole period's 2000c (the start day counts whole, ADR-012)", got)
-	}
-	if got := usageOf(r.invoicesOf(subA)) + usageOf(r.invoicesOf(subB)); got != 170 {
-		t.Errorf("usage over the customer's live invoices = %dc, want the 170c sent", got)
-	}
-	wantUsageBilledOnce(t)
-}
-
-// TestUsageWindow_TrialCanceledRecreatedSameDay_TrialUsageNotBilled: A is a
-// trial from 08:00, canceled at 10:00 (no invoice: trials are free). B starts
-// on the same meter at 11:00. The trial's usage is not B's.
-func TestUsageWindow_TrialCanceledRecreatedSameDay_TrialUsageNotBilled(t *testing.T) {
-	r := newLagRigBare(t, "in_arrears", 0)
-	subA := r.newSub("sub-a", r.planA, dayAt(8, 0), map[string]any{"trial_days": 1})
-	r.ingest(dayAt(9, 0), 100)
-	r.cancelNow(dayAt(10, 0))
-	if invs := r.invoicesOf(subA); len(invs) != 0 {
-		t.Fatalf("the canceled trial has %d invoices, want none", len(invs))
-	}
-	r.newSub("sub-b", r.planB, dayAt(11, 0), nil)
-	r.ingest(dayAt(12, 0), 20)
-
-	cyc := r.closePeriod(uwDay)
-	if got := cyc.sum("usage"); got != 20 {
-		t.Errorf("B's usage = %dc, want 20c: the 100c was sent during A's trial", got)
-	}
-	wantUsageStarts(t, "B's cycle invoice", cyc, dayAt(10, 0))
 }
 
 // TestUsageWindow_NoPredecessor_StartDayUsageBilled is a control: with no
@@ -466,7 +308,7 @@ func TestUsageWindow_TrialCanceledRecreatedSameDay_TrialUsageNotBilled(t *testin
 func TestUsageWindow_NoPredecessor_StartDayUsageBilled(t *testing.T) {
 	r := newLagRigBare(t, "in_arrears", 0)
 	r.ingest(dayAt(9, 0), 30)
-	r.newSub("sub-b", r.planB, dayAt(11, 0), nil)
+	r.newSub("sub-b", r.planB, dayAt(11, 0))
 	r.ingest(dayAt(12, 0), 20)
 
 	cyc := r.closePeriod(uwDay)
@@ -481,11 +323,11 @@ func TestUsageWindow_NoPredecessor_StartDayUsageBilled(t *testing.T) {
 func TestUsageWindow_PredecessorCanceledDayBefore_StartDayUsageBilled(t *testing.T) {
 	r := newLagRigBare(t, "in_arrears", 0)
 	dayBefore := uwDay.AddDate(0, 0, -1)
-	subA := r.newSub("sub-a", r.planA, dayBefore.Add(8*time.Hour), nil)
+	subA := r.newSub("sub-a", r.planA, dayBefore.Add(8*time.Hour))
 	r.ingest(dayBefore.Add(9*time.Hour), 100)
 	r.cancelNow(dayBefore.Add(10 * time.Hour))
 	r.ingest(dayAt(9, 0), 30)
-	subB := r.newSub("sub-b", r.planB, dayAt(11, 0), nil)
+	subB := r.newSub("sub-b", r.planB, dayAt(11, 0))
 	r.ingest(dayAt(12, 0), 20)
 
 	cyc := r.closePeriod(uwDay)
@@ -513,7 +355,7 @@ func TestUsageWindow_ItemRemovedThenMeterOnNewSub_EachBillsItsOwnPart(t *testing
 		t.Fatalf("remove A's metered item: %d %s, want 204", code, raw)
 	}
 	r.ingest(dayAt(10, 30), 40)
-	subB := r.newSub("sub-b", r.planB, dayAt(11, 0), nil)
+	subB := r.newSub("sub-b", r.planB, dayAt(11, 0))
 	r.ingest(dayAt(11, 30), 5)
 	r.cancelNow(dayAt(12, 0))
 	r.ingest(dayAt(13, 0), 7) // nobody's

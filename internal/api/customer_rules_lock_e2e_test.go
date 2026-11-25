@@ -123,11 +123,11 @@ func (r *lagRig) createBody(code, planID string) map[string]any {
 	}
 }
 
-// liveSubs counts the customer's trialing and active subscriptions.
+// liveSubs counts the customer's active subscriptions.
 func (r *lagRig) liveSubs(customerID string) int {
 	r.t.Helper()
 	return flowCount(r.t, r.db, `SELECT count(*) FROM subscriptions
-		WHERE customer_id = $1 AND status IN ('trialing', 'active')`, customerID)
+		WHERE customer_id = $1 AND status = 'active'`, customerID)
 }
 
 // customerField reads one field of the customer as GET returns it.

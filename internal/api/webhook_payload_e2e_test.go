@@ -556,29 +556,6 @@ func TestE2E_WebhookPayloads_Subscription(t *testing.T) {
 	if ev.Data["canceled_by"] != "operator" {
 		t.Errorf("subscription.canceled canceled_by = %v, want operator", ev.Data["canceled_by"])
 	}
-
-	// A trial: extended, then ended by the operator.
-	trial := call("POST", "/v1/subscriptions", flowReq{body: map[string]any{
-		"code": "wp-trial", "display_name": "WP Trial", "customer_id": customerID,
-		"items": []map[string]any{{"plan_id": starter, "quantity": 1}}, "billing_time": "anniversary", "trial_days": 14,
-	}}).want(t, 201, "create trial").body
-	trialID := flowStr(trial, "id")
-	events.next("create trial", domain.EventSubscriptionCreated)
-	trialEnd, err := time.Parse(time.RFC3339, flowStr(trial, "trial_end_at"))
-	if err != nil {
-		t.Fatalf("trial_end_at %q: %v", flowStr(trial, "trial_end_at"), err)
-	}
-	ev = step("extend trial", domain.EventSubscriptionTrialExtended, "POST", "/v1/subscriptions/"+trialID+"/extend-trial",
-		map[string]any{"trial_end": trialEnd.Add(7 * 24 * time.Hour).UTC().Format(time.RFC3339)}, 200)
-	checkEventResource(t, "subscription.trial_extended", ev, getSub(trialID))
-	if ev.Data["triggered_by"] != "operator" {
-		t.Errorf("subscription.trial_extended triggered_by = %v, want operator", ev.Data["triggered_by"])
-	}
-	ev = step("end trial", domain.EventSubscriptionTrialEnded, "POST", "/v1/subscriptions/"+trialID+"/end-trial", nil, 200)
-	checkEventResource(t, "subscription.trial_ended", ev, getSub(trialID))
-	if ev.Data["triggered_by"] != "operator" || flowStr(ev.Data, "ended_at") == "" {
-		t.Errorf("subscription.trial_ended extras = %v / %v, want operator and the end time", ev.Data["triggered_by"], ev.Data["ended_at"])
-	}
 }
 
 // TestE2E_WebhookPayloads_CreditBalance drives the credit.balance_*

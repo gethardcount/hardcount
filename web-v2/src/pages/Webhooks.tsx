@@ -386,8 +386,6 @@ const EVENT_GROUPS: { label: string; events: { type: string; description: string
       { type: 'subscription.cancel_cleared', description: 'A scheduled cancellation was cleared' },
       { type: 'subscription.collection_paused', description: 'Collection paused — invoices draft only' },
       { type: 'subscription.collection_resumed', description: 'Collection resumed' },
-      { type: 'subscription.trial_ended', description: 'Trial ended' },
-      { type: 'subscription.trial_extended', description: 'Trial extended' },
       { type: 'subscription.threshold_crossed', description: 'A usage billing threshold was crossed' },
       { type: 'subscription.item.added', description: 'An item was added to the subscription' },
       { type: 'subscription.item.updated', description: 'A subscription item changed (plan or quantity)' },

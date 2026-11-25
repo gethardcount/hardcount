@@ -140,7 +140,7 @@ func TestCrossIntervalSwap_PlansLockedBeforeTheNumberRow(t *testing.T) {
 			Code: "sub-swap-lockord-w", DisplayName: "W", CustomerID: custB.ID,
 			Items:  []domain.SubscriptionItem{{PlanID: hi.ID, Quantity: 1}},
 			Status: domain.SubscriptionActive, BillingTime: domain.BillingTimeCalendar,
-			StartedAt: &swapAt, ActivatedAt: &swapAt,
+			StartedAt:                 &swapAt,
 			CurrentBillingPeriodStart: &swapAt, CurrentBillingPeriodEnd: &periodEnd, NextBillingAt: &periodEnd,
 			BillingAnchorDay: 1,
 		}, func(tx *sql.Tx, a domain.Subscription) error {

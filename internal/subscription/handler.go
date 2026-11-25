@@ -297,8 +297,6 @@ func (h *Handler) Routes() chi.Router {
 	r.Delete("/{id}/scheduled-cancel", h.clearScheduledCancel)
 	r.Put("/{id}/pause-collection", h.pauseCollection)
 	r.Delete("/{id}/pause-collection", h.resumeCollection)
-	r.Post("/{id}/end-trial", h.endTrial)
-	r.Post("/{id}/extend-trial", h.extendTrial)
 	r.Post("/{id}/retry-billing", h.retryBilling)
 
 	// Billing thresholds — early-invoice (billing threshold) config. PUT writes the full
@@ -380,9 +378,9 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	// always empty (sweep E6).
 	status := r.URL.Query().Get("status")
 	switch domain.SubscriptionStatus(status) {
-	case "", domain.SubscriptionTrialing, domain.SubscriptionActive, domain.SubscriptionCanceled:
+	case "", domain.SubscriptionActive, domain.SubscriptionCanceled:
 	default:
-		msg := "status must be one of trialing, active, canceled"
+		msg := "status must be one of active, canceled"
 		if status == "paused" {
 			msg += `; paused collection is not a status, use collection=paused`
 		}
@@ -477,12 +475,10 @@ func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
 }
 
 // scheduleCancel records a soft-cancel intent. Body must set exactly one of
-// {at_period_end:true, cancel_at:<RFC3339>}. On an ACTIVE sub the current
-// period is unaffected and the billing engine flips the sub to canceled at
-// the boundary. On a TRIALING sub, at_period_end means cancel FREE at trial
-// end (Stripe semantics, ADR-069) and cancel_at accepts exactly trial_end_at
-// or >= current_billing_period_end — the response's derived
-// cancel_effective_at states when the cancel actually lands. Re-calling
+// {at_period_end:true, cancel_at:<RFC3339>}. The current period is
+// unaffected and the billing engine flips the sub to canceled at the
+// boundary; the response's derived cancel_effective_at states when the
+// cancel lands. Re-calling
 // replaces any prior schedule (so a caller can switch modes with a new
 // request); a 409 means the sub's status changed mid-flight — re-read.
 func (h *Handler) scheduleCancel(w http.ResponseWriter, r *http.Request) {
@@ -509,13 +505,10 @@ func (h *Handler) scheduleCancel(w http.ResponseWriter, r *http.Request) {
 		if sub.CancelAt != nil {
 			meta["cancel_at"] = sub.CancelAt.UTC()
 		}
-		// When it lands, and the status it was scheduled in: at period end
-		// on a trialing subscription means at trial end (ADR-069), and the
-		// activity line says which.
+		// When it lands; the activity line shows it.
 		if sub.CancelEffectiveAt != nil {
 			meta["cancel_effective_at"] = sub.CancelEffectiveAt.UTC()
 		}
-		meta["status"] = string(sub.Status)
 		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, meta)
 	}
 
@@ -553,37 +546,6 @@ func (h *Handler) pauseCollection(w http.ResponseWriter, r *http.Request) {
 	h.respondSub(w, r, http.StatusOK, sub)
 }
 
-// endTrial flips a 'trialing' subscription to 'active' immediately,
-// regardless of trial_end_at. Operator-driven counterpart to the cycle
-// scan's auto-flip. The store queues subscription.trial_ended with
-// triggered_by="operator" in the flip's transaction, so a consumer can tell
-// it from the scheduled flip. Returns 422 if the row is not in 'trialing'.
-func (h *Handler) endTrial(w http.ResponseWriter, r *http.Request) {
-	if !respond.NoBody(w, r) {
-		return
-	}
-	tenantID := auth.TenantID(r.Context())
-	id := chi.URLParam(r, "id")
-
-	sub, err := h.svc.EndTrial(r.Context(), tenantID, id)
-	if err != nil {
-		respond.FromError(w, r, err, "subscription")
-		return
-	}
-
-	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
-			"action":      domain.SubAuditTrialEnded,
-			"customer_id": sub.CustomerID,
-		})
-	}
-
-	// subscription.trial_ended (triggered_by=operator) is enqueued IN the
-	// end-trial tx (store-level DispatchTx subset) — do not also fire it here.
-
-	h.respondSub(w, r, http.StatusOK, sub)
-}
-
 // retryBilling is the operator's retry for a subscription whose billing is
 // failing or parked (ADR-119). It clears the saved failure (with its audit row,
 // in one transaction) and bills the subscription now.
@@ -612,49 +574,6 @@ func (h *Handler) retryBilling(w http.ResponseWriter, r *http.Request) {
 		"invoices_generated": res.InvoicesGenerated,
 		"still_due":          res.StillDue,
 	})
-}
-
-// ExtendTrialInput is the POST /v1/subscriptions/{id}/extend-trial body.
-type ExtendTrialInput struct {
-	TrialEnd time.Time `json:"trial_end"`
-}
-
-// extendTrial pushes a trialing subscription's trial_end_at later. Body:
-// {trial_end:<RFC3339>}. Returns 422 if the new value is in the past or
-// not strictly after the current trial_end_at, or the sub is not in
-// 'trialing'. The store queues subscription.trial_extended with
-// triggered_by="operator" in the extension's transaction.
-func (h *Handler) extendTrial(w http.ResponseWriter, r *http.Request) {
-	tenantID := auth.TenantID(r.Context())
-	id := chi.URLParam(r, "id")
-
-	var body ExtendTrialInput
-	if !respond.DecodeStrict(w, r, &body) {
-		return
-	}
-	if body.TrialEnd.IsZero() {
-		respond.ValidationField(w, r, "trial_end", "trial_end is required")
-		return
-	}
-
-	sub, err := h.svc.ExtendTrial(r.Context(), tenantID, id, body.TrialEnd)
-	if err != nil {
-		respond.FromError(w, r, err, "subscription")
-		return
-	}
-
-	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
-			"action":      domain.SubAuditTrialExtended,
-			"customer_id": sub.CustomerID,
-			"trial_end":   body.TrialEnd.UTC(),
-		})
-	}
-
-	// subscription.trial_extended (triggered_by operator) is queued in the
-	// extension's transaction (PostgresStore.ExtendTrial).
-
-	h.respondSub(w, r, http.StatusOK, sub)
 }
 
 // resumeCollection clears the collection-pause state. The store queues
@@ -896,9 +815,8 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 
 	// An add that prorates writes the item and its proration on one
 	// transaction, so a failure on either side rolls back both (ADR-030
-	// atomic-proration follow-through). An add that prorates nothing (a
-	// trialing subscription, the last hours of a period) runs in a
-	// transaction of its own.
+	// atomic-proration follow-through). An add that prorates nothing (the
+	// last hours of a period) runs in a transaction of its own.
 	wantProration := prorationRemainingDays > 0 && h.invoices != nil
 
 	var item domain.SubscriptionItem
@@ -2330,8 +2248,8 @@ func clawbackReason(ct domain.ItemChangeType) string {
 // when the period is not set or has ended. The days never exceed the period's
 // own length, because a change is made inside its period: the service refuses
 // an item change on a subscription that is not active (checkItemChange, and
-// again under the lock), and only a trialing one has a period that starts in
-// the future.
+// again under the lock), and an active subscription's current period starts
+// at or before now.
 func daysLeftInPeriod(sub domain.Subscription, now time.Time) int64 {
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return 0
@@ -2382,7 +2300,7 @@ type TimelineEvent struct {
 	// Detail renders as a sub-line beneath the description (mirrors
 	// invoice timeline's same-named field). Used for the
 	// human-meaningful context that doesn't belong in the main line:
-	// "At end of current period", "New trial end: …", "Amount ≥ …",
+	// "At end of current period", "Amount ≥ …",
 	// "Plan: … → …", "After next cycle close", etc.
 	Detail string `json:"detail,omitempty"`
 	// DetailTimestamp ships the RFC3339 timestamp that the detail

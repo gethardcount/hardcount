@@ -41,9 +41,6 @@ const (
 	kindCancelCleared       = "subscription.cancel_cleared"
 	kindCollectionPaused    = "subscription.collection_paused"
 	kindCollectionResumed   = "subscription.collection_resumed"
-	kindTrialEnded          = "subscription.trial_ended"
-	kindTrialEndedEarly     = "subscription.trial_ended_early"
-	kindTrialExtended       = "subscription.trial_extended"
 	kindBillingRetried      = "subscription.billing_retried"
 	kindThresholdsSet       = "subscription.spend_thresholds_set"
 	kindThresholdsRemoved   = "subscription.spend_thresholds_removed"
@@ -185,23 +182,6 @@ func describeUpdate(meta map[string]any, lb lineLabels) activity.Line {
 			// Dunning paused it, and the invoice it paused for was paid.
 			l.Detail = append(l.Detail, activity.Text("The overdue invoice was paid"))
 		}
-	case domain.SubAuditTrialEnded:
-		// B2: the three schedule writers mark the row triggered_by=schedule;
-		// only the operator's End trial ends it early.
-		if metaString(meta, "triggered_by") == "schedule" {
-			l.Kind, l.Title = kindTrialEnded, "Trial ended"
-		} else {
-			l.Kind, l.Title = kindTrialEndedEarly, "Trial ended early"
-		}
-		// A trial_ended row is written only when the subscription became
-		// active; a trial that ends with a cancellation due writes a cancel
-		// row instead (SubAuditTrialEndCancel).
-		l.Detail = append(l.Detail, activity.Text("Subscription is now active"))
-	case domain.SubAuditTrialExtended:
-		l.Kind, l.Title = kindTrialExtended, "Trial extended"
-		if t, ok := metaTime(meta, "trial_end"); ok {
-			l.Detail = append(l.Detail, activity.Segment{activity.T("Trial now ends "), activity.At(t)})
-		}
 	case domain.SubAuditBillingRetried:
 		// The title matches the "Retry billing" button.
 		l.Kind, l.Title = kindBillingRetried, "Billing retried"
@@ -243,6 +223,12 @@ func describeUpdate(meta map[string]any, lb lineLabels) activity.Line {
 		}
 	case domain.SubAuditPendingPlanChangeCanceled:
 		l.Kind, l.Title = kindPlanChangeCanceled, "Scheduled plan change canceled"
+	case "trial_ended":
+		// Written only by earlier releases, which had trials. Kept, with
+		// the next case, so those rows still read.
+		l.Kind, l.Title = kindChanged, "Trial ended"
+	case "trial_extended":
+		l.Kind, l.Title = kindChanged, "Trial extended"
 	default:
 		return changedFallback("update action", a)
 	}
@@ -311,12 +297,9 @@ func changedFallback(what, token string) activity.Line {
 }
 
 // cancelWhy says why a subscription was canceled when no person did it: the
-// schedule, the trial's end, or payment recovery. A person's or API key's
-// cancel needs no why; the actor says who.
+// schedule or payment recovery. A person's or API key's cancel needs no why;
+// the actor says who.
 func cancelWhy(meta map[string]any) string {
-	if metaString(meta, "action") == domain.SubAuditTrialEndCancel {
-		return "At trial end"
-	}
 	switch metaString(meta, "canceled_by") {
 	case "schedule":
 		return "Scheduled cancellation"
@@ -335,11 +318,7 @@ func cancelScheduledWhen(meta map[string]any) activity.Segment {
 	if !atPeriodEnd {
 		return nil
 	}
-	// At period end on a trialing subscription is at trial end (ADR-069).
 	label := "At the end of the current period"
-	if metaString(meta, "status") == string(domain.SubscriptionTrialing) {
-		label = "At trial end"
-	}
 	if t, ok := metaTime(meta, "cancel_effective_at"); ok {
 		return activity.Segment{activity.T(label + " ("), activity.At(t), activity.T(")")}
 	}
@@ -579,7 +558,7 @@ func legacyStatus(t activity.Tone) string {
 // fields, without the actor, which the card shows from actor_name. The card
 // prints detail_timestamp after detail, in the account's timezone, so a time
 // part in the last segment becomes detail_timestamp with the words before it
-// as the end of detail ("Trial now ends" + the instant). A time part's
+// as the end of detail ("Resumes " + the instant). A time part's
 // closing ")" has no place there and is left out.
 func legacyDetail(l activity.Line) (string, string) {
 	var segs []string

@@ -71,9 +71,8 @@ dimension. A LiteLLM proxy does this for you: Hardcount turns a name such as
 
 The two AI recipes share the `tokens` meter, so you can apply both. Each
 adds its own plan with its own prices, in the plan's currency. One customer
-cannot be on both plans at once. Two subscriptions of one customer that are
-not canceled (trialing or active) cannot price the same meter, so
-usage is never billed twice. Hardcount refuses the second subscription
+cannot be on both plans at once. Two active subscriptions of one customer
+cannot price the same meter, so usage is never billed twice. Hardcount refuses the second subscription
 with 409. It also refuses, with 409 `meter_overlap`, a price that would add
 the meter to a plan when a customer on that plan has another subscription
 that prices the meter. To sell both providers' models to one customer,
@@ -203,8 +202,7 @@ plan in that period. So:
   (`effective: next_period`). The period already open keeps the prices it
   started with, also after a quantity change.
 - A subscriber who joins the plan after a change pays it at once:
-  - a new subscription, from its start (after a trial, from the trial's
-    end);
+  - a new subscription, from its start;
   - an immediate plan change onto the plan, from the change;
   - an added item, from the add.
 
@@ -222,8 +220,7 @@ plan in that period. So:
   period. When the subscription first joins the plan in a period after the
   override was created, the override applies from the join. So an override
   created before a subscription starts, even on the same day, applies from
-  its first period. For a subscription with a trial, that is an override
-  created before the trial ends.
+  its first period.
 - When an item leaves a plan and an item joins it again later in the
   period, each part bills on its own, with its own peak and its own tiers.
   One case is different. An item added on the period's first day bills
@@ -374,7 +371,7 @@ sell commits with tax on.
 Your margin on a customer is what their usage in the window earns at your
 current prices, against what that usage cost you. It is an estimate:
 revenue is rated at each subscription's current-period prices, over active
-and trialing subscriptions only, invoiced or not. After a price change, or
+subscriptions only, invoiced or not. After a price change, or
 for a canceled subscription, it differs from what you billed. Only you see
 it, never the customer.
 

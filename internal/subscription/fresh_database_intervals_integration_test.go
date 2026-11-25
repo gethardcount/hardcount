@@ -19,14 +19,11 @@ import (
 // transaction, so there is nothing to reconstruct.
 //
 // The test drives every item writer on an empty database, then checks the
-// table from both sides:
-//   - every item of a subscription that was ever active has an interval, and
-//     every live item of an active subscription has exactly one open one;
-//   - the only items with no interval are those whose subscription never
-//     became active (a trial, a trial canceled before it converted).
+// table: every item has an interval, every live item of an active
+// subscription has exactly one open one, and no other item has an open one.
 //
 // Mutation check: drop the intervalOpenForAdd call in addItemInTx, or the
-// intervalOpenForItems call in activateAfterTrialInTx, and this fails.
+// intervalOpenForItems call in createInTx, and this fails.
 func TestIntervals_FreshDatabaseNeedsNoBackfill(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -70,44 +67,6 @@ func TestIntervals_FreshDatabaseNeedsNoBackfill(t *testing.T) {
 		t.Fatalf("cancel: %v", err)
 	}
 
-	// Trials: one converts at its end, one ends early, one stays a trial
-	// (with an item added during it), one is canceled before it converts.
-	trialStart := ivPS
-	trialEnd := ivPS.AddDate(0, 0, 14)
-	postPE := trialEnd.AddDate(0, 1, 0)
-	trialSub := func(code string) domain.Subscription {
-		s, err := store.Create(ctx, tenantID, domain.Subscription{
-			Code: code, DisplayName: code, CustomerID: cust,
-			Status: domain.SubscriptionTrialing, BillingTime: domain.BillingTimeAnniversary,
-			TrialStartAt: &trialStart, TrialEndAt: &trialEnd, StartedAt: &trialStart,
-			CurrentBillingPeriodStart: &trialEnd, CurrentBillingPeriodEnd: &postPE, NextBillingAt: &postPE,
-			Items: []domain.SubscriptionItem{{PlanID: planA.ID, Quantity: 1}},
-		})
-		if err != nil {
-			t.Fatalf("create trial %s: %v", code, err)
-		}
-		return s
-	}
-	converted := trialSub("sub-fresh-trial-converted")
-	if _, err := store.ActivateAfterTrial(ctx, tenantID, converted.ID, trialEnd); err != nil {
-		t.Fatalf("convert trial: %v", err)
-	}
-	endedEarly := trialSub("sub-fresh-trial-early")
-	earlyAt := ivPS.Add(4 * day)
-	if _, err := store.EndTrialEarly(ctx, tenantID, endedEarly.ID, earlyAt, earlyAt, earlyAt.AddDate(0, 1, 0), earlyAt.AddDate(0, 1, 0), earlyAt.Day()); err != nil {
-		t.Fatalf("end trial early: %v", err)
-	}
-	stillTrial := trialSub("sub-fresh-trial")
-	if _, err := store.AddItem(at(2*day), tenantID, domain.SubscriptionItem{SubscriptionID: stillTrial.ID, PlanID: planB.ID, Quantity: 1}); err != nil {
-		t.Fatalf("add item during trial: %v", err)
-	}
-	canceledTrial := trialSub("sub-fresh-trial-canceled")
-	if _, err := cancelNow(at(6*day), store, tenantID, canceledTrial.ID); err != nil {
-		t.Fatalf("cancel trial: %v", err)
-	}
-
-	neverActive := map[string]bool{stillTrial.ID: true, canceledTrial.ID: true}
-
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
@@ -134,10 +93,6 @@ func TestIntervals_FreshDatabaseNeedsNoBackfill(t *testing.T) {
 		}
 		items++
 		switch {
-		case neverActive[subID]:
-			if total != 0 {
-				t.Errorf("item %s of never-active subscription %s (%s) has %d intervals, want 0", itemID, subID, status, total)
-			}
 		case total == 0:
 			t.Errorf("item %s of subscription %s (%s) has a billable lifetime but no interval: a fresh database would need a backfill", itemID, subID, status)
 		case status == string(domain.SubscriptionActive) && live && open != 1:
@@ -149,7 +104,7 @@ func TestIntervals_FreshDatabaseNeedsNoBackfill(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("rows: %v", err)
 	}
-	if items != 9 {
-		t.Fatalf("read %d items, want 9 (the fixture changed; recount)", items)
+	if items != 4 {
+		t.Fatalf("read %d items, want 4 (the fixture changed; recount)", items)
 	}
 }

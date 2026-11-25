@@ -80,7 +80,7 @@ function UpcomingInvoicesSection({ customerId }: { customerId: string }) {
   const activeSubs = useMemo(
     () =>
       (subsRes?.data ?? [])
-        .filter((s: Subscription) => s.status === 'active' || s.status === 'trialing')
+        .filter((s: Subscription) => s.status === 'active')
         // Latest period start first — matches the server-side primary-
         // sub heuristic (used to be the only sub displayed; now we
         // show all but the latest is conventionally the "primary").

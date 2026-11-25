@@ -7,6 +7,7 @@
 // code ("active", "dispatched") or picks its own colour.
 
 import { isTerminalInvoiceStatus } from './invoiceTerminal.ts'
+import type { SubscriptionStatus } from './gen/schemas/subscriptionStatus'
 
 export type StatusTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger'
 export interface StatusDisplay { label: string; tone: StatusTone }
@@ -81,7 +82,7 @@ export function invoicePaymentChip(inv: InvoiceStatusInput): StatusDisplay | nul
 const PAYMENT_IN_BADGE = new Set(['succeeded', 'processing', 'failed'])
 
 export interface SubscriptionStatusInput {
-  status: string
+  status: SubscriptionStatus
   pause_collection?: { behavior?: string; resumes_at?: string | null } | null
   cancel_at_period_end?: boolean
   cancel_at?: string | null
@@ -91,40 +92,30 @@ export interface SubscriptionStatusInput {
 export function subscriptionStatus(sub: SubscriptionStatusInput): StatusDisplay {
   switch (sub.status) {
     case 'active': return { label: 'Active', tone: 'success' }
-    case 'trialing': return { label: 'Trialing', tone: 'info' }
     case 'canceled': return { label: 'Canceled', tone: 'neutral' }
   }
-  return { label: humanizeStatus(sub.status), tone: 'neutral' }
 }
 
 // collectionPausedFlag is the chip a list shows beside a live subscription
 // whose collection is paused (by an operator or by dunning), or null. The
-// same rule as GET /v1/subscriptions?collection=paused: live means active or
-// trialing (a canceled row can keep the pause columns), and a timed pause
+// same rule as GET /v1/subscriptions?collection=paused: live means active
+// (a canceled row can keep the pause columns), and a timed pause
 // ends at resumes_at, though the row can keep it a while after. `nowMs` is
 // the subscription's now (hooks/useNow). While it is not known (undefined),
 // the chip follows the stored pause and a passed resumes_at is not checked.
 export function collectionPausedFlag(sub: SubscriptionStatusInput, nowMs: number | undefined): StatusDisplay | null {
-  if (sub.status !== 'active' && sub.status !== 'trialing') return null
+  if (sub.status !== 'active') return null
   const pause = sub.pause_collection
   if (!pause) return null
   if (nowMs !== undefined && pause.resumes_at && new Date(pause.resumes_at).getTime() <= nowMs) return null
   return { label: 'Collection paused', tone: 'warning' }
 }
 
-// trialBadgeEndsAt is the end the "Trial ends" badge counts down to, or null
-// when no trial badge belongs on the subscription. trial_end_at stays on the
-// record after the trial ends (or is ended now), so a badge read from it alone
-// showed a red "Expired" on active, paying subscriptions (sweep E5).
-export function trialBadgeEndsAt(sub: { status: string; trial_end_at?: string | null }): string | null {
-  return sub.status === 'trialing' && sub.trial_end_at ? sub.trial_end_at : null
-}
-
 // subscriptionFlags are the secondary chips shown beside the main badge, for
 // states the main status does not carry: collection paused (often by
 // dunning) and a scheduled cancel. Only for live subscriptions.
 export function subscriptionFlags(sub: SubscriptionStatusInput, nowMs: number | undefined): StatusDisplay[] {
-  if (sub.status !== 'active' && sub.status !== 'trialing') return []
+  if (sub.status !== 'active') return []
   const flags: StatusDisplay[] = []
   const paused = collectionPausedFlag(sub, nowMs)
   if (paused) flags.push(paused)
@@ -168,7 +159,7 @@ export function sentEmailStatus(em: { status: string; delivery_state?: string })
 // sentence-case label.
 const TONES: Record<string, StatusTone> = {
   active: 'success', succeeded: 'success', delivered: 'success', resolved: 'success', ready: 'success', recovered: 'success',
-  pending: 'warning', paused: 'warning', escalated: 'warning', processing: 'info', trialing: 'info',
+  pending: 'warning', paused: 'warning', escalated: 'warning', processing: 'info',
   failed: 'danger', revoked: 'danger', expired: 'danger', disabled: 'neutral',
   archived: 'neutral', canceled: 'neutral', draft: 'neutral', skipped: 'neutral', no_endpoints: 'neutral',
   issued: 'info', accepted: 'success', voided: 'neutral',

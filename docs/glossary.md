@@ -73,8 +73,7 @@ follows.
   billing period is priced as the plan's prices were when it started. A
   subscriber can also join the plan inside a period: with a new
   subscription, an immediate plan change or an added item. That period is
-  priced as the plan was when they first joined it in that period. After a
-  trial, it is priced as the plan was when the trial ended.
+  priced as the plan was when they first joined it in that period.
   [More](concepts/meters-and-prices.md#prices), and
   [the decision](adr/130-usage-prices-belong-to-the-plan.md)
 - **used plan**: A plan that a subscription has used, canceled ones
@@ -140,15 +139,14 @@ follows.
 
 - **subscription**: A customer's agreement to pay for one or more plans,
   period after period. It holds items (each a plan and a quantity). Its
-  status is trialing, active or canceled.
+  status is active or canceled.
   [More](concepts/subscriptions.md)
 - **billing period**: The dates one subscription invoice covers. The start
   day is included and the end is not. Periods start and end at midnight in
   the account's billing timezone. A monthly period starts either on the 1st
   of the month (calendar billing, the default, after a first partial
-  period) or on the day the subscription started (anniversary billing).
-  With a trial, the first period starts on the day the trial ends. A start
-  day that a month lacks, such as the 31st, falls on the month's last day.
+  period) or on the day the subscription started (anniversary billing). A
+  start day that a month lacks, such as the 31st, falls on the month's last day.
   Yearly periods are always anniversary.
   [More](concepts/subscriptions.md#billing-periods), and
   [the decision](adr/012-day-grade-calendar-billing.md)

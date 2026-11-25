@@ -465,10 +465,6 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 			return map[string]any{"amount_gte": 1000}
 		}, 404, "", 0},
 		{"subscription billing thresholds clear [path subscription]", "DELETE", at("/v1/subscriptions/%s/billing-thresholds", sub), none, 404, "", 0},
-		{"subscription end trial [path subscription]", "POST", at("/v1/subscriptions/%s/end-trial", sub), none, 404, "", 0},
-		{"subscription extend trial [path subscription]", "POST", at("/v1/subscriptions/%s/extend-trial", sub), func(_, _ scopeRefs) any {
-			return map[string]any{"trial_end": "2026-04-01T00:00:00Z"}
-		}, 404, "", 0},
 		{"subscription retry billing [path subscription]", "POST", at("/v1/subscriptions/%s/retry-billing", sub), none, 404, "", 0},
 		{"subscription cancel [path subscription]", "POST", at("/v1/subscriptions/%s/cancel", sub), none, 404, "", 200},
 

@@ -371,26 +371,22 @@ test('a canceled subscription reads "Ended", never "Renews"', async ({ page }) =
   await expect(page.getByText(/Renews/)).toHaveCount(0)
 })
 
-test('the next-invoice preview says why a trial set to cancel has no invoice', async ({ page }) => {
-  // A trial canceled at its end issues no invoice, so the preview has no
-  // lines. The card used to show an empty table with no words.
-  const plan = await createPlan()
-  const customer = await createCustomer()
+test('a next-invoice preview with no lines says no invoice is expected, with no empty table', async ({ page }) => {
+  // A plan with no base fee and no prices bills nothing, so the preview has
+  // no lines and no warning.
   const id = uniq()
-  const sub = await api<Subscription>('POST', '/subscriptions', {
-    code: `e2e-trial-${id}`,
-    display_name: `E2E Trial ${id}`,
-    customer_id: customer.id,
-    items: [{ plan_id: plan.id, quantity: 1 }],
-    trial_days: 14,
+  const plan = await api<Plan>('POST', '/plans', {
+    code: `e2e-free-${id}`, name: `E2E Free ${id}`, currency: 'USD',
+    billing_interval: 'monthly', base_amount_cents: 0, base_bill_timing: 'in_arrears',
   })
-  await api('POST', `/subscriptions/${sub.id}/schedule-cancel`, { at_period_end: true })
+  const customer = await createCustomer()
+  const sub = await createSubscription(customer.id, plan.id)
   const preview = await api<{ lines: unknown[]; warnings: string[] }>('POST', '/invoices/create_preview', { customer_id: customer.id, subscription_id: sub.id })
   expect(preview.lines).toHaveLength(0)
-  expect(preview.warnings).toContain('A cancel is scheduled for the end of the trial, so no invoice will be issued.')
+  expect(preview.warnings).toEqual([])
 
   await page.goto(`/subscriptions/${sub.id}`)
-  await expect(page.getByText('A cancel is scheduled for the end of the trial, so no invoice will be issued.')).toBeVisible()
+  await expect(page.getByText('No invoice is expected for this period.')).toBeVisible()
   await expect(page.getByRole('columnheader', { name: 'Description' })).toHaveCount(0)
 })
 
@@ -999,7 +995,7 @@ test('the setup checklist ticks Connect Stripe only for a working key in this mo
     await page.goto('/')
     await page.getByRole('button', { name: /^Setup: / }).click()
     const checklist = page.getByRole('dialog', { name: 'Set up, in order' })
-    // Any subscription ticks its step, a trialing one too.
+    // Any subscription in the account ticks its step.
     await expect(checklist.getByRole('listitem').filter({ hasText: 'Add a customer and put them on a plan' }).locator('[aria-label="done"]')).toHaveCount(1)
     return checklist.getByRole('listitem').filter({ hasText: 'Connect Stripe' })
   }
@@ -1430,7 +1426,7 @@ test('held LiteLLM usage is shown on the Usage page and released once', async ({
   await notice.getByRole('button', { name: `Release held usage for ${ext}` }).click()
   await expect(page.getByText('Released 2 usage rows')).toBeVisible()
   // The customer has no subscription, so no subscription bills the rows.
-  await expect(page.getByText('2 fall in time no subscription bills (before it starts, in a free trial, or after it ends) or in time already invoiced. Bill them with a one-off invoice if needed.')).toBeVisible()
+  await expect(page.getByText('2 fall in time no subscription bills (before it starts or after it ends) or in time already invoiced. Bill them with a one-off invoice if needed.')).toBeVisible()
   await expect(page.getByText(`held for customer '${ext}'`)).toHaveCount(0)
 
   const events = await api<{ data: unknown[]; total: number }>('GET', `/usage-events?customer_id=${customer.id}`)

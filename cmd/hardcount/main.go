@@ -220,11 +220,6 @@ func serve() {
 	// issues a draft whose first attempt failed. The retry is a follow-up to
 	// ADR-056.
 	scheduler.SetClawbackRetrier(server.CreditNoteSvc)
-	// Trial expiry: each tick moves trialing subscriptions to active at
-	// trial_end_at.
-	// Otherwise the dashboard could show an ended trial as trialing for up
-	// to about 30 days.
-	scheduler.SetTrialExpirer(server.SubscriptionSvc)
 	// Pause resume on the real clock: clear pause_collection on subscriptions
 	// whose resumes_at has passed. It runs after the billing run, and it skips
 	// a subscription that still owes a period close before resumes_at, so the

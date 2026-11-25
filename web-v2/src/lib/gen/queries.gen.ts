@@ -93,7 +93,6 @@ import type {
   ExportInvoicesCsvParams,
   ExportSubscriptionsCsvParams,
   ExportUsageEventsCsvParams,
-  ExtendSubscriptionTrialBody,
   ForbiddenResponse,
   GetAnalyticsOverviewParams,
   GetAnalyticsRevenueChart200,
@@ -971,7 +970,7 @@ export const getUpdateCustomerUrl = (id: string,) => {
  * is ignored, so you cannot clear the email here.
  *
  * - `status: archived` is refused with 409 `invalid_state` while the
- *   customer has an active or trialing subscription, which still bills.
+ *   customer has an active subscription, which still bills.
  *   Cancel those subscriptions first. Archiving does not stop dunning
  *   (the retries of failed payments) on unpaid invoices.
  * - `additional_emails` replaces the whole CC list; `[]` clears it.
@@ -1079,8 +1078,8 @@ export const getUpsertCustomerBillingProfileUrl = (id: string,) => {
  *
  * Country, currency and tax ID are stored in upper case.
  *
- * A currency that differs from the plan currency of a trialing or
- * active subscription is refused with 409 `invalid_state`, because
+ * A currency that differs from the plan currency of an active
+ * subscription is refused with 409 `invalid_state`, because
  * invoices would show plan prices in the new currency without
  * conversion.
  *
@@ -1390,14 +1389,13 @@ export const getGetCustomerUsageUrl = (id: string,
 }
 
 /**
- * Usage per meter on the customer's active and trialing subscriptions,
- * priced the same way the invoice prices it. Send both `from` and `to`,
+ * Usage per meter on the customer's active subscriptions, priced the
+ * same way the invoice prices it. Send both `from` and `to`,
  * or neither.
  *
  * With neither, each subscription is rated over its own current billing
  * period, and `period` runs from the earliest start to the latest end of
- * those periods. A trialing subscription's current period is its first
- * paid period, which starts when the trial ends.
+ * those periods.
  *
  * With both, the window is `[from, to)`, at most one year long, and the
  * amounts are an estimate at each subscription's current prices.
@@ -2069,7 +2067,7 @@ export const getGetPublicCostDashboardUrl = (token: string,) => {
  * that no price takes.
  *
  * A token with the wrong prefix or no customer gets 401, the same answer
- * for both. A customer with no active or trialing subscription gets 200
+ * for both. A customer with no active subscription gets 200
  * with `billing_period.source` `no_subscription`: `subscriptions`,
  * `usage` and `totals` are empty, and `credits` still lists the credit
  * balance.
@@ -5869,23 +5867,21 @@ export const getCreateSubscriptionUrl = () => {
 
 /**
  * Creates a subscription that bills a customer for one or more plans.
- * It starts now: `active` from today, or `trialing` when `trial_days`
- * is above 0.
+ * It starts now, `active` from today: its first period starts today in
+ * the account's billing time zone.
  *
  * All the plans must share one billing interval, one base-fee timing
  * (in advance or in arrears) and one currency. The currency must also
  * match the customer's billing profile and the customer's other
- * `trialing` and `active` subscriptions; canceled ones do not
- * count. No two of the plans may bill the same meter, and none may
- * bill a meter that another `trialing` or `active`
- * subscription of the customer bills. The customer and the plans must
+ * `active` subscriptions; canceled ones do not count. No two of the
+ * plans may bill the same meter, and none may bill a meter that
+ * another `active` subscription of the customer bills. The customer and the plans must
  * not be archived.
  *
- * An `active` subscription whose plans bill a non-zero base fee in
- * advance is saved together with its first invoice, in one database
- * transaction: both are saved, or neither is. The invoice is then
- * collected like any other invoice. A `trialing` subscription gets
- * that invoice when its trial ends.
+ * A subscription whose plans bill a non-zero base fee in advance is
+ * saved together with its first invoice, in one database transaction:
+ * both are saved, or neither is. The invoice is then collected like
+ * any other invoice.
  *
  * Sends the `subscription.created` webhook event.
  * @summary Create a subscription
@@ -6269,8 +6265,8 @@ export const getCancelSubscriptionUrl = (id: string,) => {
 }
 
 /**
- * Cancels the subscription immediately. Works on `trialing` and
- * `active` subscriptions. Takes no body.
+ * Cancels the subscription immediately. Works on an `active`
+ * subscription. Takes no body.
  *
  * In the transaction that cancels it, Hardcount writes the final
  * invoice for the part of the current period that has been used
@@ -6280,8 +6276,7 @@ export const getCancelSubscriptionUrl = (id: string,) => {
  * invoice of which nothing was used. After the transaction commits,
  * the credit notes are issued, which is when the balance credit and
  * the tax reversal happen (a failed issue is retried), and then the
- * final invoice is collected, so that credit reduces it. A trial that
- * never became active is canceled with no invoice.
+ * final invoice is collected, so that credit reduces it.
  *
  * If a billing period has already ended, it is billed first. If a
  * scheduled cancel was already due, that cancel takes effect at its
@@ -6366,14 +6361,10 @@ export const getScheduleSubscriptionCancelUrl = (id: string,) => {
  * schedule. If a billing period has ended and is not invoiced yet,
  * it is billed first, so "the current period" is the one running.
  *
- * - **Active subscription.** `at_period_end` cancels at the end of
- *   the current period. `cancel_at` must be on or after the end of
- *   the current period. A date inside a later period is allowed, and
- *   that period is billed up to the date.
- * - **Trialing subscription.** `at_period_end` cancels at the end of
- *   the trial, with no charge. `cancel_at` must be exactly
- *   `trial_end_at` (free cancel) or on or after
- *   `current_billing_period_end`.
+ * `at_period_end` cancels at the end of the current period.
+ * `cancel_at` must be on or after the end of the current period. A
+ * date inside a later period is allowed, and that period is billed up
+ * to the date.
  *
  * The response's `cancel_effective_at` says when the cancel takes
  * effect. Sends the `subscription.cancel_scheduled` webhook event.
@@ -6691,163 +6682,6 @@ export const useResumeSubscriptionCollection = <TError = InvalidBodyResponse | U
       return useMutation(getResumeSubscriptionCollectionMutationOptions(options), queryClient);
     }
 
-export const getEndSubscriptionTrialUrl = (id: string,) => {
-
-
-
-
-  return `/v1/subscriptions/${id}/end-trial`
-}
-
-/**
- * Ends the trial now and makes the subscription `active`. The first
- * paid period starts today, and `trial_end_at` becomes now. Items
- * whose base fee is billed in advance get their first invoice in the
- * same transaction. A subscription with a scheduled cancel is
- * refused: clear the schedule first. Takes no body.
- *
- * Sends the `subscription.trial_ended` webhook event.
- * @summary End a trial now
- */
-export const endSubscriptionTrial = async (id: string, options?: RequestInit): Promise<Subscription> => {
-
-  return orvalClient<Subscription>(getEndSubscriptionTrialUrl(id),
-  {
-    ...options,
-    method: 'POST'
-
-
-  }
-);}
-
-
-
-
-
-export const getEndSubscriptionTrialMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endSubscriptionTrial>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof endSubscriptionTrial>>, TError,{id: string}, TContext> => {
-
-const mutationKey = ['endSubscriptionTrial'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof endSubscriptionTrial>>, {id: string}> = (props) => {
-          const {id} = props ?? {};
-
-          return  endSubscriptionTrial(id,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type EndSubscriptionTrialMutationResult = NonNullable<Awaited<ReturnType<typeof endSubscriptionTrial>>>
-
-    export type EndSubscriptionTrialMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
-
-    /**
- * @summary End a trial now
- */
-export const useEndSubscriptionTrial = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endSubscriptionTrial>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof endSubscriptionTrial>>,
-        TError,
-        {id: string},
-        TContext
-      > => {
-      return useMutation(getEndSubscriptionTrialMutationOptions(options), queryClient);
-    }
-
-export const getExtendSubscriptionTrialUrl = (id: string,) => {
-
-
-
-
-  return `/v1/subscriptions/${id}/extend-trial`
-}
-
-/**
- * Moves the end of the trial later. The first paid period is moved
- * to start at the beginning of the new trial end's day, in your
- * account's billing time zone. A cancel scheduled with
- * `at_period_end` moves with the trial. To shorten a trial, use
- * `POST /v1/subscriptions/{id}/end-trial`.
- *
- * Sends the `subscription.trial_extended` webhook event.
- * @summary Extend a trial
- */
-export const extendSubscriptionTrial = async (id: string,
-    extendSubscriptionTrialBody: ExtendSubscriptionTrialBody, options?: RequestInit): Promise<Subscription> => {
-
-  return orvalClient<Subscription>(getExtendSubscriptionTrialUrl(id),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(extendSubscriptionTrialBody)
-  }
-);}
-
-
-
-
-
-export const getExtendSubscriptionTrialMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof extendSubscriptionTrial>>, TError,{id: string;data: ExtendSubscriptionTrialBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof extendSubscriptionTrial>>, TError,{id: string;data: ExtendSubscriptionTrialBody}, TContext> => {
-
-const mutationKey = ['extendSubscriptionTrial'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof extendSubscriptionTrial>>, {id: string;data: ExtendSubscriptionTrialBody}> = (props) => {
-          const {id,data} = props ?? {};
-
-          return  extendSubscriptionTrial(id,data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type ExtendSubscriptionTrialMutationResult = NonNullable<Awaited<ReturnType<typeof extendSubscriptionTrial>>>
-    export type ExtendSubscriptionTrialMutationBody = ExtendSubscriptionTrialBody
-    export type ExtendSubscriptionTrialMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
-
-    /**
- * @summary Extend a trial
- */
-export const useExtendSubscriptionTrial = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof extendSubscriptionTrial>>, TError,{id: string;data: ExtendSubscriptionTrialBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof extendSubscriptionTrial>>,
-        TError,
-        {id: string;data: ExtendSubscriptionTrialBody},
-        TContext
-      > => {
-      return useMutation(getExtendSubscriptionTrialMutationOptions(options), queryClient);
-    }
-
 export const getSetSubscriptionBillingThresholdsUrl = (id: string,) => {
 
 
@@ -7021,8 +6855,8 @@ export const getAddSubscriptionItemUrl = (id: string,) => {
  * Adds a plan to the subscription as a new item. The plan must use
  * the same billing interval, base-fee timing and currency as the
  * other items. It must not bill a meter that another item of this
- * subscription, or another `trialing` or `active`
- * subscription of the customer, bills. A period that ended and is
+ * subscription, or another `active` subscription of the customer,
+ * bills. A period that ended and is
  * not invoiced yet is billed first. The subscription must not be
  * `canceled`.
  *
@@ -7215,7 +7049,7 @@ export const getRemoveSubscriptionItemUrl = (id: string,
 }
 
 /**
- * Removes an item from a trialing or active subscription. A
+ * Removes an item from an active subscription. A
  * subscription's last item cannot be removed; cancel the subscription
  * instead. A
  * period that ended and is not invoiced yet is billed first. Takes
@@ -7787,8 +7621,7 @@ export const getBackfillUsageEventUrl = () => {
  * bill it; bill it with a one-off invoice if needed. Its 201 carries
  * the `billing_status` Hardcount found (see the `billing_status`
  * field): `after_close` while the subscription that invoiced the
- * period is active or trialing, and `outside_subscription` once it has
- * ended. If another subscription has a billing period that holds the
+ * period is active, and `outside_subscription` once it has ended. If another subscription has a billing period that holds the
  * event's time and is not invoiced yet, that period decides the status
  * instead.
  *
@@ -8375,14 +8208,14 @@ export const getCreateInvoiceUrl = () => {
  *
  * A manual invoice uses the customer's currency. A `currency` that
  * differs from the customer's billing-profile currency, or from the
- * plan currency of any of the customer's trialing or active
- * subscriptions, is refused with 409. A customer with neither
+ * plan currency of any of the customer's active subscriptions, is
+ * refused with 409. A customer with neither
  * may be invoiced in any supported currency.
  *
  * Defaults when a field is left out:
  * - `currency`: the customer's billing-profile currency, then the plan
- *   currency of the customer's trialing or active
- *   subscriptions, then the account's default currency.
+ *   currency of the customer's active subscriptions, then the
+ *   account's default currency.
  * - `net_payment_term_days`: the account's net payment terms. A
  *   negative value is stored as 0 (due on receipt).
  * - `billing_period_start` / `billing_period_end`: now.
@@ -8484,15 +8317,12 @@ export const getCreateInvoicePreviewUrl = () => {
  * current period will close with: base fees prorate for a short first
  * period and per segment after a mid-period item add, quantity change,
  * plan swap or removal, and each meter's usage counts only while a
- * plan carrying it was on the subscription. For a trialing
- * subscription it is the first invoice after the trial: the trial-end
- * invoice when a plan bills in advance, otherwise the close of the
- * first paid period, prorated the same way. With an explicit `period`,
+ * plan carrying it was on the subscription. With an explicit `period`,
  * it is a flat estimate over that window, at today's prices, and warns
  * when a mid-period change makes the invoice differ.
  *
- * Without `subscription_id`, Hardcount uses the customer's active or
- * trialing subscription whose current period started last.
+ * Without `subscription_id`, Hardcount uses the customer's active
+ * subscription whose current period started last.
  * @summary Preview a customer's next invoice
  */
 export const createInvoicePreview = async (createInvoicePreviewBody: CreateInvoicePreviewBody, options?: RequestInit): Promise<InvoicePreview> => {
@@ -12274,7 +12104,7 @@ export const getRunBillingUrl = () => {
 /**
  * Runs the billing run now for this account and mode, the same run
  * the scheduler makes. It invoices every subscription that is due:
- * an `active` or `trialing` subscription whose period ended, or whose
+ * an `active` subscription whose period ended, or whose
  * scheduled mid-period cancel came, more than the invoice grace ago
  * (`INVOICE_GRACE_PERIOD`, 1 hour by default), so usage that arrives
  * late still makes its invoice. A subscription overdue for several
@@ -13787,8 +13617,7 @@ export const getExportSubscriptionsCsvUrl = (params?: ExportSubscriptionsCsvPara
  *
  * Streams every subscription in the caller's mode, newest first,
  * from one consistent snapshot. Columns: id, code, display_name, customer_id, status,
- * billing_time, trial_start_at, trial_end_at, started_at,
- * activated_at, canceled_at, current_billing_period_start,
+ * billing_time, started_at, canceled_at, current_billing_period_start,
  * current_billing_period_end, next_billing_at, plan_ids (plan IDs
  * joined with `|`), created_at.
  *
@@ -15008,8 +14837,7 @@ export const getCreatePriceOverrideUrl = () => {
  * period; the current period keeps the rate it started with. It applies from the
  * join when a subscription of the customer first joins the plan in a
  * period after it is created: an override created before a subscription
- * starts (after a trial, before the trial ends), even on the same day,
- * applies from its first period. The create is written to the audit
+ * starts, even on the same day, applies from its first period. The create is written to the audit
  * log.
  * @summary Create a customer price override
  */

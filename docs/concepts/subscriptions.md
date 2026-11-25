@@ -13,15 +13,13 @@ billed by the plan's prices, whatever the quantity.
 
 | Status | What it means | What you do |
 |---|---|---|
-| `trialing` | In a free trial. The trial bills nothing. | Nothing. It becomes `active` when the trial ends. |
 | `active` | Billing, period after period. | Nothing. |
 | `canceled` | Ended. It never bills again, and it cannot be restarted. | Create a new subscription to bill the customer again. |
 
 A subscription starts when it is created, so there is no status for one
 that is set up now and billed later. Create the subscription when it should
-bill, or give it a trial, which starts billing by itself when it ends. A
-plan billed in advance is invoiced when the subscription is created. With
-`trial_days`, nothing is billed until the trial ends.
+bill. A plan billed in advance is invoiced when the subscription is
+created.
 
 Paused collection is not a status. A subscription whose collection is
 paused stays `active` and keeps making invoices; see
@@ -35,18 +33,14 @@ All the routes are under `/v1/subscriptions`. Each change sends a
 | From | Caused by | Webhook | To |
 |---|---|---|---|
 | (new) | `POST /` | `subscription.created` | `active` |
-| (new) | `POST /` with `trial_days` | `subscription.created` | `trialing` |
-| `trialing` | Hardcount, when `trial_end_at` passes | `subscription.trial_ended` | `active` |
-| `trialing` | `POST /{id}/end-trial` | `subscription.trial_ended` | `active` |
-| `trialing` | `POST /{id}/extend-trial`, with a later `trial_end` | `subscription.trial_extended` | `trialing` |
-| `trialing`, `active` | `POST /{id}/cancel` | `subscription.canceled` | `canceled` |
-| `trialing`, `active` | `POST /{id}/schedule-cancel` | `subscription.cancel_scheduled` | no change yet |
-| `trialing`, `active` | Hardcount, when the scheduled cancel is due | `subscription.canceled` | `canceled` |
-| `trialing`, `active` | `DELETE /{id}/scheduled-cancel` | `subscription.cancel_cleared` | no change |
+| `active` | `POST /{id}/cancel` | `subscription.canceled` | `canceled` |
+| `active` | `POST /{id}/schedule-cancel` | `subscription.cancel_scheduled` | no change yet |
+| `active` | Hardcount, when the scheduled cancel is due | `subscription.canceled` | `canceled` |
+| `active` | `DELETE /{id}/scheduled-cancel` | `subscription.cancel_cleared` | no change |
 | `active` | Hardcount, when the payment retries for an unpaid invoice (dunning) run out and the dunning policy says cancel | `subscription.canceled` | `canceled` |
 
-A trial ends whether or not the customer has saved a card. The first
-invoice is then collected like any other. Once email is set up, a customer
+A subscription bills whether or not the customer has saved a card. Its
+first invoice is collected like any other. Once email is set up, a customer
 with no card gets an email:
 
 - with a link to add a card, when Stripe is connected and
@@ -72,8 +66,7 @@ day monthly periods start on:
 - **`anniversary`:** the day the subscription started. A subscription that
   starts on June 18 bills June 18 to July 18, then July 18 to August 18.
 
-Yearly plans always bill on the anniversary. A subscription with a trial
-starts its first paid period on the day the trial ends.
+Yearly plans always bill on the anniversary.
 
 When the start day does not exist in a month, the period starts on that
 month's last day, and goes back to the start day when it can. A
@@ -156,17 +149,14 @@ $50.00 of base fee.
   in arrears for those days. For a base fee billed in advance, the days
   left are given back. The share already paid goes to the customer's
   credit balance. The share not paid yet lowers what the open invoice asks
-  for. A trial that never became active gets no final invoice.
+  for.
 - **Later:** `POST /v1/subscriptions/{id}/schedule-cancel`, with
   `{"at_period_end": true}` or `{"cancel_at": "2026-09-30T00:00:00Z"}`.
-  Until then the subscription bills as usual. On a trial, `at_period_end`
-  cancels free when the trial ends.
+  Until then the subscription bills as usual.
   - `cancel_at` must be in the future, and on or after the end of the
     current period: the period in progress cannot be shortened.
   - A `cancel_at` inside a later period is accepted. That period is billed
     up to it, prorated.
-  - On a trial, `cancel_at` must be the trial's end (a free cancel) or on or
-    after the end of the first period.
   - Any other date is refused with `422`.
 
 ## Pause collection

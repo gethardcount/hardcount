@@ -85,16 +85,13 @@ type SubscriptionCurrency struct {
 // The service calls it under the customer-rules lock
 // (Store.WithCustomerRulesLock). Subscription creates hold the same lock, so
 // the answer counts every one that committed first.
-// A trial that ends does not take the lock; the implementation must still
-// count that subscription when it moves from trialing to active between its
-// reads.
 type SubscriptionChecker interface {
 	// NonTerminalForCustomer returns the subscriptions that still bill:
-	// active or trialing, including an active one with a scheduled cancel
-	// (it bills until the boundary).
+	// active ones, including one with a scheduled cancel (it bills until the
+	// boundary).
 	NonTerminalForCustomer(ctx context.Context, tenantID, customerID string) ([]NonTerminalSubscription, error)
-	// PlanCurrencies returns the plan currencies of every trialing and
-	// active subscription of the customer, however many, a pending plan
+	// PlanCurrencies returns the plan currencies of every active
+	// subscription of the customer, however many, a pending plan
 	// change's plan included (ADR-100).
 	PlanCurrencies(ctx context.Context, tenantID, customerID string) ([]SubscriptionCurrency, error)
 }
@@ -579,7 +576,7 @@ func (s *Service) UpsertBillingProfile(ctx context.Context, tenantID string, bp 
 }
 
 // checkProfileCurrency refuses a profile currency that differs from a plan
-// currency of the customer's trialing or active subscriptions
+// currency of the customer's active subscriptions
 // (InvalidState). The profile currency replaces the plan currency on every
 // invoice, so a mismatch would relabel plan prices without conversion
 // ($100 invoiced as €100). An empty currency checks nothing, and a currency

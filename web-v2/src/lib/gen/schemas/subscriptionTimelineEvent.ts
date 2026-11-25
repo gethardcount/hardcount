@@ -39,7 +39,7 @@ export interface SubscriptionTimelineEvent {
      * `detail_timestamp`. For example "Starter → Pro".
      */
   detail?: string;
-  /** The date the end of `detail` refers to, for the client to format, as in "Trial now ends" followed by this date. */
+  /** The date the end of `detail` refers to, for the client to format, as in "Resumes" followed by this date. */
   detail_timestamp?: string;
   /** The line's problem. */
   error?: string;

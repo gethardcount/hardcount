@@ -26,7 +26,7 @@ export function activityCyclePeriodLabel(
 // A window the operator chose (source "explicit": the Activity card's 7d,
 // 30d and 90d, and every Margin card window) is priced at each
 // subscription's current prices, not at the prices each past period had
-// (ADR-130 §10). Only active and trialing subscriptions are rated
+// (ADR-130 §10). Only active subscriptions are rated
 // (usage.filterActiveSubs), so a canceled one's usage is not counted. The
 // page says both under the figure. The current billing cycle is exact, so
 // it says nothing.

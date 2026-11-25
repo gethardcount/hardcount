@@ -18,15 +18,14 @@ import (
 // lines (ADR-128, PR 4): the standard's words, in the order they happened,
 // with no Recorded time.
 //
-// The story: a trial is extended and ended by hand; the plan changes now,
-// a plan change is scheduled for renewal and then canceled; a cancellation
-// is scheduled and undone; collection is paused and resumed; spend
-// thresholds are set and removed; an item is added, its quantity changed,
-// and removed. The plans bill in arrears, so no change makes a proration
-// invoice and the story needs no payment method.
+// The story: the plan changes now, a plan change is scheduled for renewal
+// and then canceled; a cancellation is scheduled and undone; collection is
+// paused and resumed; spend thresholds are set and removed; an item is
+// added, its quantity changed, and removed. The plans bill in arrears, so no
+// change makes a proration invoice and the story needs no payment method.
 //
 // Each date inside a line is checked against the instant it names: the
-// trial end the operator asked for, or the current period's end.
+// current period's end.
 func TestActivityParity_SubscriptionOperatorScenarios(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
@@ -57,7 +56,6 @@ func TestActivityParity_SubscriptionOperatorScenarios(t *testing.T) {
 	sub := call("POST", "/v1/subscriptions", flowReq{body: map[string]any{
 		"code": "sub-parity-real", "display_name": "Sub Parity real", "customer_id": customerID,
 		"items": []map[string]any{{"plan_id": starter, "quantity": 1}}, "billing_time": "anniversary",
-		"trial_days": 14,
 	}}).want(t, 201, "create subscription").body
 	subID := flowStr(sub, "id")
 	items, _ := sub["items"].([]any)
@@ -65,15 +63,8 @@ func TestActivityParity_SubscriptionOperatorScenarios(t *testing.T) {
 		t.Fatalf("subscription has %d items, want 1", len(items))
 	}
 	itemID := flowStr(items[0].(map[string]any), "id")
-	trialEndAt, err := time.Parse(time.RFC3339, flowStr(sub, "trial_end_at"))
-	if err != nil {
-		t.Fatalf("trial_end_at %q: %v", flowStr(sub, "trial_end_at"), err)
-	}
-	newTrialEnd := trialEndAt.Add(7 * 24 * time.Hour).UTC()
 	base := "/v1/subscriptions/" + subID
 
-	call("POST", base+"/extend-trial", flowReq{body: map[string]any{"trial_end": newTrialEnd.Format(time.RFC3339)}}).want(t, 200, "extend trial")
-	call("POST", base+"/end-trial", flowReq{}).want(t, 200, "end trial")
 	call("PATCH", base+"/items/"+itemID, flowReq{body: map[string]any{"new_plan_id": pro, "immediate": true}}).want(t, 200, "change plan now")
 	call("PATCH", base+"/items/"+itemID, flowReq{body: map[string]any{"new_plan_id": basic, "immediate": false}}).want(t, 200, "schedule plan change")
 	call("DELETE", base+"/items/"+itemID+"/pending-change", flowReq{}).want(t, 200, "cancel scheduled plan change")
@@ -94,15 +85,13 @@ func TestActivityParity_SubscriptionOperatorScenarios(t *testing.T) {
 		t.Fatalf("current_billing_period_end %q: %v", flowStr(after, "current_billing_period_end"), err)
 	}
 	lines := linesOf(t, flowList(call("GET", base+"/timeline", flowReq{}).want(t, 200, "timeline").body, "events"))
-	names := map[string]time.Time{"<trial end>": newTrialEnd, "<period end>": periodEnd}
+	names := map[string]time.Time{"<period end>": periodEnd}
 
 	if len(lines) < 10 {
 		t.Fatalf("%d rows, want the whole story", len(lines))
 	}
 	want := []string{
 		"Subscription created | by API key",
-		"Trial extended | Trial now ends <trial end> · by API key",
-		"Trial ended early | Subscription is now active · by API key",
 		"Plan changed | Parity Starter → Parity Pro · by API key",
 		"Plan change scheduled | Parity Pro → Parity Basic at renewal on <period end> · by API key",
 		"Scheduled plan change canceled | by API key",

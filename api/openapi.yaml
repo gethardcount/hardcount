@@ -33,7 +33,7 @@ tags:
   - name: Pricing
     description: Meters, plans, prices and price overrides.
   - name: Subscriptions
-    description: Subscriptions, their items, trials, pauses and cancellations.
+    description: Subscriptions, their items, pauses and cancellations.
   - name: Usage
     description: Sending usage events and reading usage totals.
   - name: Invoices
@@ -984,9 +984,8 @@ components:
         `next_period`: each subscriber pays the new content from their next
         billing period; the current period keeps the prices it started with.
         A subscriber who first joins the plan in a period after the write
-        gets it from the join: a subscription that starts after it (after a
-        trial, from the trial's end), an immediate plan change onto the
-        plan, or an item added on it. Each is priced from that moment by the
+        gets it from the join: a subscription that starts after it, an
+        immediate plan change onto the plan, or an item added on it. Each is priced from that moment by the
         plan's prices then, so a subscription that starts later on the day
         of the write bills a price added that day and not one removed that
         day. A subscription that was on the plan earlier in the period and
@@ -1108,8 +1107,8 @@ components:
         Usage, and a base fee billed in arrears, are invoiced when a period
         ends. A base fee billed in advance is invoiced when its period
         starts: the first one in the same transaction that creates the
-        subscription or ends its trial, each later one on the invoice that
-        closes the period before.
+        subscription, each later one on the invoice that closes the period
+        before.
       required: [id, code, display_name, customer_id, status, billing_time, cancel_at_period_end, created_at, updated_at]
       properties:
         id:
@@ -1136,16 +1135,12 @@ components:
             $ref: "#/components/schemas/SubscriptionItem"
         status:
           type: string
-          enum: [trialing, active, canceled]
+          enum: [active, canceled]
           description: |
             Where the subscription is in its life.
 
-            - `trialing`: in a free trial until `trial_end_at`. Usage in
-              the trial is not billed. When the trial ends, Hardcount makes
-              the subscription `active` and its first paid period starts.
-              If a cancel is scheduled for the trial end, it becomes
-              `canceled` instead, with no charge.
-            - `active`: billing. Usage and base fees billed in arrears are
+            - `active`: billing, from the start of the day it is created
+              (in the account's time zone). Usage and base fees billed in arrears are
               invoiced when each period ends; a base fee billed in advance
               when its period starts.
             - `canceled`: ended at `canceled_at`. It bills nothing more,
@@ -1159,8 +1154,7 @@ components:
           enum: [calendar, anniversary]
           description: |
             How monthly periods line up. The first period starts on the day
-            the subscription starts to bill: the day it is created, or,
-            with a trial, the day the trial ends.
+            the subscription is created.
             `calendar`: every period ends on the 1st of a month, in your
             account's billing time zone, so the first period runs from that
             day to the next 1st. `anniversary`: each period starts on the
@@ -1169,33 +1163,14 @@ components:
             that first day, whatever this says. An immediate change to a
             plan with another billing interval starts a new first period at
             the change.
-        trial_start_at:
-          type: string
-          format: date-time
-          description: When the trial started. Absent when the subscription had no trial.
-        trial_end_at:
-          type: string
-          format: date-time
-          description: |
-            When the trial ends, or ended. The first paid period starts at
-            the beginning of that day in your account's billing time zone.
-            Ending the trial early (`POST /v1/subscriptions/{id}/end-trial`)
-            sets it to that moment. Absent when the subscription had no
-            trial.
         started_at:
           type: string
           format: date-time
           description: |
-            The moment the subscription was created. Its trial begins
-            then, or, without a trial, its billing. A subscription that an
-            earlier release activated from a draft has the moment of that
-            activation instead.
-        activated_at:
-          type: string
-          format: date-time
-          description: |
-            When the subscription became `active`: at creation without a
-            trial, or when its trial ended. Absent while it trials.
+            The moment the subscription was created. Its first period, and
+            the usage it bills, start at the beginning of that day in the
+            account's time zone. A subscription that an earlier release activated from a
+            draft has the moment of that activation instead.
         canceled_at:
           type: string
           format: date-time
@@ -1211,16 +1186,15 @@ components:
           type: boolean
           description: |
             True when the subscription cancels at the end of the current
-            period, or, while it trials, at the end of the trial. False
-            after the subscription is canceled.
+            period. False after the subscription is canceled.
         cancel_effective_at:
           type: string
           format: date-time
           description: |
             When a scheduled cancel takes effect: `cancel_at` when set;
-            otherwise, with `cancel_at_period_end`, `trial_end_at` while
-            the subscription trials and `current_billing_period_end`
-            after. Absent when no cancel is scheduled.
+            otherwise, with `cancel_at_period_end`,
+            `current_billing_period_end`. Absent when no cancel is
+            scheduled.
         pause_collection:
           $ref: "#/components/schemas/SubscriptionPauseCollection"
         billing_thresholds:
@@ -1230,10 +1204,8 @@ components:
           format: date-time
           description: |
             Start of the current billing period, normally the beginning of
-            a day in your account's billing time zone. While the
-            subscription trials, it is the start of the first paid period:
-            the beginning of the day the trial ends, not `trial_end_at`
-            itself. After an immediate change to a plan with another billing
+            a day in your account's billing time zone. After an immediate
+            change to a plan with another billing
             interval, a period can start or end at the instant of the
             change. On a canceled subscription it keeps its last value.
         current_billing_period_end:
@@ -1241,8 +1213,7 @@ components:
           format: date-time
           description: |
             End of the current period (exclusive): the start of the next
-            one. While the subscription trials, the end of the first paid
-            period. On a canceled subscription it keeps its last value.
+            one. On a canceled subscription it keeps its last value.
         current_billing_period_display:
           type: string
           description: |
@@ -1293,7 +1264,6 @@ components:
         status: active
         billing_time: calendar
         started_at: "2026-10-01T09:12:44Z"
-        activated_at: "2026-10-01T09:12:44Z"
         cancel_at_period_end: false
         current_billing_period_start: "2026-10-01T00:00:00Z"
         current_billing_period_end: "2026-11-01T00:00:00Z"
@@ -1465,10 +1435,9 @@ components:
           event with a one-off invoice if it should be charged.
         - `not_on_plan`: a billing period not invoiced yet holds the event's
           time, but its plan has no price for this meter.
-        - `outside_subscription`: no active or trialing subscription of the
-          customer bills the event's time. For example, it has none, or the
-          time is before one starts, in a free trial, or after one ends or
-          its scheduled cancel.
+        - `outside_subscription`: no active subscription of the customer
+          bills the event's time. For example, it has none, or the time is
+          before one starts, or after one ends or its scheduled cancel.
         - `no_price`: the plan that bills the event's time prices this
           meter, but no price of that plan takes the event's `dimensions`.
           A price takes an event whose dimensions include all of the
@@ -1479,11 +1448,10 @@ components:
         No `billing_status` means Hardcount found no reason then. It is not a
         promise that the event will be billed. Hardcount checks only the
         customer's current billing periods: time after a period end whose
-        invoice is not built yet is not checked, nor is time after a trial's
-        end before Hardcount ends the trial. A later change can change the
-        outcome either way: a subscription created or changed, a
-        trial extended, a scheduled cancel undone, or a price added. The
-        invoice is the final answer.
+        invoice is not built yet is not checked. A later change can change
+        the outcome either way: a subscription created or changed, a
+        scheduled cancel undone, or a price added. The invoice is the final
+        answer.
 
         Two cases can make a present status wrong: a price change whose
         save began before a billing period started and finished after the
@@ -2026,7 +1994,7 @@ components:
         - `subscription_cycle`: the invoice for a subscription period that
           ended (a renewal).
         - `subscription_create`: the first invoice when a subscription
-          starts or its trial ends, for the fees its plans bill in advance.
+          starts, for the fees its plans bill in advance.
           A subscription billed only in arrears has none.
         - `subscription_cancel`: the final invoice when a subscription is
           canceled at once in the middle of a period.
@@ -2835,8 +2803,8 @@ components:
           description: |
             Total rated usage revenue in the window, in the minor unit of
             `revenue_currency` (cents for USD). It is an estimate at each
-            subscription's current prices. Only active and trialing
-            subscriptions are counted.
+            subscription's current prices. Only active subscriptions are
+            counted.
         revenue_currency:
           type: string
           description: |
@@ -3116,7 +3084,7 @@ components:
       description: >
         A customer's credit position right now, one entry per currency: every
         currency the customer holds credit in, and every currency an active
-        or trialing subscription will invoice usage in. Amounts in two currencies are
+        subscription will invoice usage in. Amounts in two currencies are
         never added together. Returned by
         `GET /v1/credits/balance/{customer_id}/live`; nothing is stored.
       required: [customer_id, balances, computed_at]
@@ -3175,9 +3143,7 @@ components:
             in the currency's minor unit. Usage that a mid-period threshold
             invoice already billed is not counted again. After a mid-period
             plan change each meter is counted for the time a plan carrying it
-            was on the subscription. For a trialing subscription only usage
-            from the trial end on counts, inside its first paid period; trial
-            usage is free.
+            was on the subscription.
         estimated_remaining_cents:
           type: integer
           format: int64
@@ -4232,8 +4198,8 @@ components:
       type: object
       description: |
         A customer's usage and its cost over a window, priced the way the
-        invoice prices it: `GET /v1/customers/{id}/usage`. Only active and
-        trialing subscriptions are counted. Quantities are decimal strings.
+        invoice prices it: `GET /v1/customers/{id}/usage`. Only active
+        subscriptions are counted. Quantities are decimal strings.
       required: [customer_id, period, subscriptions, meters, totals, warnings, buckets]
       properties:
         customer_id:
@@ -4266,14 +4232,14 @@ components:
                 the amounts are what the period's invoices bill.
                 `explicit`: the window you sent. Its amounts are an
                 estimate, so a past window can differ from its invoices.
-                Only active and trialing subscriptions are counted: the
-                usage of a canceled subscription is left out. Each
+                Only active subscriptions are counted: the usage of a
+                canceled subscription is left out. Each
                 subscription's usage in the window is priced at the
                 prices of its current billing period.
         subscriptions:
           type: array
           description: |
-            One entry per item of each active or trialing subscription. A
+            One entry per item of each active subscription. A
             subscription with several plans appears once per plan, with the
             same `id`.
           items:
@@ -4498,7 +4464,7 @@ components:
           type: array
           description: |
             The customer's subscriptions with status `active`, up to 50,
-            with their items. Trialing subscriptions are not listed.
+            with their items.
           items:
             $ref: "#/components/schemas/Subscription"
         recent_invoices:
@@ -4558,7 +4524,6 @@ components:
             status: active
             billing_time: calendar
             started_at: "2026-10-01T00:00:00Z"
-            activated_at: "2026-10-01T00:00:00Z"
             cancel_at_period_end: false
             current_billing_period_start: "2026-11-01T00:00:00Z"
             current_billing_period_end: "2026-12-01T00:00:00Z"
@@ -5144,7 +5109,7 @@ components:
         detail_timestamp:
           type: string
           format: date-time
-          description: The date the end of `detail` refers to, for the client to format, as in "Trial now ends" followed by this date.
+          description: The date the end of `detail` refers to, for the client to format, as in "Resumes" followed by this date.
         error:
           type: string
           description: The line's problem.
@@ -5488,7 +5453,7 @@ components:
             Uppercase or lowercase ISO 4217 code; it is stored uppercase. It
             must be the customer's currency (see the 409). Defaults to the
             billing profile's currency, then the plan currency of the
-            customer's trialing and active subscriptions, then the
+            customer's active subscriptions, then the
             account's default
             currency. Currencies with no minor unit (such as JPY) are
             refused.
@@ -7535,8 +7500,7 @@ components:
             Released rows in a billing period not invoiced yet that a price
             of its plan takes. Rows Hardcount does not check count here too:
             rows after the current period's end, while the subscription
-            continues, and rows after a trial's end while the subscription
-            still trials. Rows of a sum or count meter stamped before the end
+            continues. Rows of a sum or count meter stamped before the end
             of this period's spend-threshold invoice are not counted here:
             see `pending_threshold_invoice` and `outside_open_period`.
         no_price:
@@ -7562,8 +7526,7 @@ components:
           type: integer
           description: |
             Released rows outside every subscription's time (before it
-            started, in a free trial, after it ended or after its scheduled
-            cancel, or in another, ended subscription's time), and rows in a
+            started, after it ended or after its scheduled cancel, or in another, ended subscription's time), and rows in a
             period already invoiced. Also rows of a sum or count meter
             stamped before the end of this period's paid spend-threshold
             invoice. Bill them with a one-off invoice if they should be
@@ -9983,7 +9946,7 @@ paths:
         is ignored, so you cannot clear the email here.
 
         - `status: archived` is refused with 409 `invalid_state` while the
-          customer has an active or trialing subscription, which still bills.
+          customer has an active subscription, which still bills.
           Cancel those subscriptions first. Archiving does not stop dunning
           (the retries of failed payments) on unpaid invoices.
         - `additional_emails` replaces the whole CC list; `[]` clears it.
@@ -10097,8 +10060,8 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "409":
           description: |
-            Archive refused because an active or trialing subscription still
-            bills (`invalid_state`). The message names the subscriptions. Code
+            Archive refused because an active subscription still bills
+            (`invalid_state`). The message names the subscriptions. Code
             `concurrent_change`: Postgres stopped the update because of another
             change to the same records (it broke a deadlock, or ended a wait for
             a lock), so the customer is unchanged; send the same request again,
@@ -10159,8 +10122,8 @@ paths:
 
         Country, currency and tax ID are stored in upper case.
 
-        A currency that differs from the plan currency of a trialing or
-        active subscription is refused with 409 `invalid_state`, because
+        A currency that differs from the plan currency of an active
+        subscription is refused with 409 `invalid_state`, because
         invoices would show plan prices in the new currency without
         conversion.
 
@@ -10246,8 +10209,7 @@ paths:
         "409":
           description: |
             The currency differs from the plan currency of one of the
-            customer's trialing or active subscriptions
-            (`invalid_state`). Code `concurrent_change`: Postgres stopped the
+            customer's active subscriptions (`invalid_state`). Code `concurrent_change`: Postgres stopped the
             write because of another change to the same records (it broke a
             deadlock, or ended a wait for a lock), so the profile is unchanged;
             send the same request again, with the same `Idempotency-Key`.
@@ -10421,14 +10383,13 @@ paths:
       tags: [Customers]
       summary: Get the customer's usage and cost for a period
       description: |
-        Usage per meter on the customer's active and trialing subscriptions,
-        priced the same way the invoice prices it. Send both `from` and `to`,
+        Usage per meter on the customer's active subscriptions, priced the
+        same way the invoice prices it. Send both `from` and `to`,
         or neither.
 
         With neither, each subscription is rated over its own current billing
         period, and `period` runs from the earliest start to the latest end of
-        those periods. A trialing subscription's current period is its first
-        paid period, which starts when the trial ends.
+        those periods.
 
         With both, the window is `[from, to)`, at most one year long, and the
         amounts are an estimate at each subscription's current prices.
@@ -10524,8 +10485,8 @@ paths:
             before `from`; with `param` `period` when only one of `from` and
             `to` is sent, when `from` is not before `to`, or when the window
             is longer than one year. `customer_has_no_subscription` (`param`
-            `period`) when no period is sent and the customer has no active or
-            trialing subscription with a current billing period.
+            `period`) when no period is sent and the customer has no active
+            subscription with a current billing period.
           content:
             application/json:
               schema:
@@ -10581,7 +10542,6 @@ paths:
                     status: active
                     billing_time: calendar
                     started_at: "2026-10-01T00:00:00Z"
-                    activated_at: "2026-10-01T00:00:00Z"
                     cancel_at_period_end: false
                     current_billing_period_start: "2026-11-01T00:00:00Z"
                     current_billing_period_end: "2026-12-01T00:00:00Z"
@@ -11178,7 +11138,7 @@ paths:
         that no price takes.
 
         A token with the wrong prefix or no customer gets 401, the same answer
-        for both. A customer with no active or trialing subscription gets 200
+        for both. A customer with no active subscription gets 200
         with `billing_period.source` `no_subscription`: `subscriptions`,
         `usage` and `totals` are empty, and `credits` still lists the credit
         balance.
@@ -11236,15 +11196,15 @@ paths:
                           Check this before you show the period.
                           `subscription`: the period runs from the earliest
                           start to the latest end of the current billing
-                          periods of the customer's active and trialing
-                          subscriptions. `no_subscription`: the customer has
-                          no active or trialing subscription; `subscriptions`,
+                          periods of the customer's active subscriptions.
+                          `no_subscription`: the customer has no active
+                          subscription; `subscriptions`,
                           `usage` and `totals` are empty (`credits` is not),
                           and `start` and `end` hold the zero time, not a real
                           range.
                   subscriptions:
                     type: array
-                    description: One entry per plan of each active or trialing subscription.
+                    description: One entry per plan of each active subscription.
                     items:
                       type: object
                       required: [id, plan_name, currency, current_period_start, current_period_end]
@@ -15076,23 +15036,21 @@ paths:
       operationId: createSubscription
       description: |
         Creates a subscription that bills a customer for one or more plans.
-        It starts now: `active` from today, or `trialing` when `trial_days`
-        is above 0.
+        It starts now, `active` from today: its first period starts today in
+        the account's billing time zone.
 
         All the plans must share one billing interval, one base-fee timing
         (in advance or in arrears) and one currency. The currency must also
         match the customer's billing profile and the customer's other
-        `trialing` and `active` subscriptions; canceled ones do not
-        count. No two of the plans may bill the same meter, and none may
-        bill a meter that another `trialing` or `active`
-        subscription of the customer bills. The customer and the plans must
+        `active` subscriptions; canceled ones do not count. No two of the
+        plans may bill the same meter, and none may bill a meter that
+        another `active` subscription of the customer bills. The customer and the plans must
         not be archived.
 
-        An `active` subscription whose plans bill a non-zero base fee in
-        advance is saved together with its first invoice, in one database
-        transaction: both are saved, or neither is. The invoice is then
-        collected like any other invoice. A `trialing` subscription gets
-        that invoice when its trial ends.
+        A subscription whose plans bill a non-zero base fee in advance is
+        saved together with its first invoice, in one database transaction:
+        both are saved, or neither is. The invoice is then collected like
+        any other invoice.
 
         Sends the `subscription.created` webhook event.
       parameters:
@@ -15137,17 +15095,6 @@ paths:
                   enum: [calendar, anniversary]
                   default: calendar
                   description: How monthly periods line up. See the subscription's `billing_time`.
-                trial_days:
-                  type: integer
-                  minimum: 0
-                  maximum: 730
-                  description: |
-                    Days of free trial; 0 means no trial. At 0, the
-                    subscription is `active`, its first period starts today
-                    in the account's billing time zone, and a non-zero base fee
-                    billed in advance is invoiced now. Above 0, the
-                    subscription is `trialing` from now and its first paid
-                    period starts on the day the trial ends.
             example:
               code: acme-pro
               display_name: Acme Pro
@@ -15180,7 +15127,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 cancel_at_period_end: false
                 current_billing_period_start: "2026-10-01T00:00:00Z"
                 current_billing_period_end: "2026-11-01T00:00:00Z"
@@ -15211,11 +15157,11 @@ paths:
             Code `already_exists` (`param: code`): another subscription in
             this account and mode has this `code`. Code `invalid_state`: the
             customer or a plan is archived; a plan bills a meter that another
-            `trialing` or `active` subscription of the customer
-            already bills; or the plans' currency differs from each other,
-            from the customer's billing profile or from the customer's other
-            `trialing` or `active` subscriptions. Code
-            `concurrent_change`: Postgres stopped the create because of another
+            `active` subscription of the customer already bills; or the
+            plans' currency differs from each other, from the customer's
+            billing profile or from the customer's other `active`
+            subscriptions. Code `concurrent_change`: Postgres stopped the
+            create because of another
             change to the same records (it broke a deadlock, or ended a wait for
             a lock), so nothing was created; send the same request again, with
             the same `Idempotency-Key`.
@@ -15234,16 +15180,14 @@ paths:
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
-            A field failed validation (`param` names it), for example
-            `trial_days` outside 0 to 730. Also: `code`, `display_name`,
-            `customer_id` or `items` missing; a `code` with other
-            characters; a repeated or unknown plan, plans with different
-            billing intervals or base-fee timings, or two plans that bill
-            the same meter (`param: items`); a `quantity` below 1. Or the
-            body has an unknown field (`param` names it; the body must use
-            only the fields listed here). `status` and `start_now` are such
-            fields: a subscription always starts, or starts its trial, when
-            it is created.
+            A field failed validation (`param` names it): `code`,
+            `display_name`, `customer_id` or `items` missing; a `code` with
+            other characters; a repeated or unknown plan, plans with
+            different billing intervals or base-fee timings, or two plans
+            that bill the same meter (`param: items`); a `quantity` below 1.
+            Or the body has an unknown field (`param` names it; the body must
+            use only the fields listed here). `status` and `start_now` are
+            such fields: a subscription always starts when it is created.
           content:
             application/json:
               schema:
@@ -15252,9 +15196,9 @@ paths:
                 error:
                   type: invalid_request_error
                   code: validation_error
-                  message: must be between 0 and 730
+                  message: must contain only alphanumeric characters, hyphens, and underscores
                   request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: trial_days
+                  param: code
         "429":
           $ref: "#/components/responses/RateLimited"
     get:
@@ -15283,7 +15227,7 @@ paths:
             a status: use `collection=paused`.
           schema:
             type: string
-            enum: [trialing, active, canceled]
+            enum: [active, canceled]
         - name: billing
           in: query
           description: |
@@ -15298,7 +15242,7 @@ paths:
         - name: collection
           in: query
           description: |
-            `paused` returns only active and trialing subscriptions whose
+            `paused` returns only active subscriptions whose
             `pause_collection` is in force, whether a dashboard user or an
             API key set it, or dunning (Hardcount's automatic payment
             retries) did. A timed pause ends at `resumes_at`, even while the
@@ -15316,12 +15260,12 @@ paths:
           in: query
           description: |
             The order of the list. `created_at` (the default),
-            `next_billing_at`, `status`, `display_name` (or `name`) or
-            `trial_end_at`. Any other value is a 422 with `param: sort`. Ties
+            `next_billing_at`, `status` or `display_name` (or `name`). Any
+            other value is a 422 with `param: sort`. Ties
             are broken by `id` in the same direction.
           schema:
             type: string
-            enum: [created_at, next_billing_at, status, display_name, name, trial_end_at]
+            enum: [created_at, next_billing_at, status, display_name, name]
             default: created_at
         - name: dir
           in: query
@@ -15367,7 +15311,6 @@ paths:
                     status: active
                     billing_time: calendar
                     started_at: "2026-10-01T09:12:44Z"
-                    activated_at: "2026-10-01T09:12:44Z"
                     cancel_at_period_end: false
                     current_billing_period_start: "2026-10-01T00:00:00Z"
                     current_billing_period_end: "2026-11-01T00:00:00Z"
@@ -15396,7 +15339,7 @@ paths:
                 error:
                   type: invalid_request_error
                   code: validation_error
-                  message: "status must be one of trialing, active, canceled; paused collection is not a status, use collection=paused"
+                  message: "status must be one of active, canceled; paused collection is not a status, use collection=paused"
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: status
         "429":
@@ -15464,9 +15407,8 @@ paths:
                     type: integer
                     description: |
                       Period-close invoices this call created. The final
-                      invoice of a scheduled cancel and the first invoice
-                      at a trial end are not counted, so 0 does not mean
-                      the retry failed. Read success from
+                      invoice of a scheduled cancel is not counted, so 0
+                      does not mean the retry failed. Read success from
                       `subscription.billing_failure` and `still_due`.
                   still_due:
                     type: boolean
@@ -15493,7 +15435,6 @@ paths:
                   status: active
                   billing_time: calendar
                   started_at: "2026-10-01T09:12:44Z"
-                  activated_at: "2026-10-01T09:12:44Z"
                   cancel_at_period_end: false
                   current_billing_period_start: "2026-11-01T00:00:00Z"
                   current_billing_period_end: "2026-12-01T00:00:00Z"
@@ -15593,7 +15534,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 cancel_at_period_end: false
                 current_billing_period_start: "2026-10-01T00:00:00Z"
                 current_billing_period_end: "2026-11-01T00:00:00Z"
@@ -15626,8 +15566,8 @@ paths:
       summary: Cancel a subscription now
       operationId: cancelSubscription
       description: |
-        Cancels the subscription immediately. Works on `trialing` and
-        `active` subscriptions. Takes no body.
+        Cancels the subscription immediately. Works on an `active`
+        subscription. Takes no body.
 
         In the transaction that cancels it, Hardcount writes the final
         invoice for the part of the current period that has been used
@@ -15637,8 +15577,7 @@ paths:
         invoice of which nothing was used. After the transaction commits,
         the credit notes are issued, which is when the balance credit and
         the tax reversal happen (a failed issue is retried), and then the
-        final invoice is collected, so that credit reduces it. A trial that
-        never became active is canceled with no invoice.
+        final invoice is collected, so that credit reduces it.
 
         If a billing period has already ended, it is billed first. If a
         scheduled cancel was already due, that cancel takes effect at its
@@ -15679,7 +15618,6 @@ paths:
                 status: canceled
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 canceled_at: "2026-10-20T16:45:00Z"
                 cancel_at_period_end: false
                 current_billing_period_start: "2026-10-01T00:00:00Z"
@@ -15761,14 +15699,10 @@ paths:
         schedule. If a billing period has ended and is not invoiced yet,
         it is billed first, so "the current period" is the one running.
 
-        - **Active subscription.** `at_period_end` cancels at the end of
-          the current period. `cancel_at` must be on or after the end of
-          the current period. A date inside a later period is allowed, and
-          that period is billed up to the date.
-        - **Trialing subscription.** `at_period_end` cancels at the end of
-          the trial, with no charge. `cancel_at` must be exactly
-          `trial_end_at` (free cancel) or on or after
-          `current_billing_period_end`.
+        `at_period_end` cancels at the end of the current period.
+        `cancel_at` must be on or after the end of the current period. A
+        date inside a later period is allowed, and that period is billed up
+        to the date.
 
         The response's `cancel_effective_at` says when the cancel takes
         effect. Sends the `subscription.cancel_scheduled` webhook event.
@@ -15789,7 +15723,7 @@ paths:
               properties:
                 at_period_end:
                   type: boolean
-                  description: Cancel at the end of the current period (or of the trial, while trialing).
+                  description: Cancel at the end of the current period.
                 cancel_at:
                   type: string
                   format: date-time
@@ -15820,7 +15754,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 cancel_at_period_end: true
                 cancel_effective_at: "2026-11-01T00:00:00Z"
                 current_billing_period_start: "2026-10-01T00:00:00Z"
@@ -15939,7 +15872,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 cancel_at_period_end: false
                 current_billing_period_start: "2026-10-01T00:00:00Z"
                 current_billing_period_end: "2026-11-01T00:00:00Z"
@@ -16080,7 +16012,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 cancel_at_period_end: false
                 pause_collection:
                   behavior: keep_as_draft
@@ -16200,7 +16131,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 cancel_at_period_end: false
                 current_billing_period_start: "2026-10-01T00:00:00Z"
                 current_billing_period_end: "2026-11-01T00:00:00Z"
@@ -16257,246 +16187,6 @@ paths:
                   message: unknown field "behavior"
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: behavior
-        "429":
-          $ref: "#/components/responses/RateLimited"
-
-  /v1/subscriptions/{id}/end-trial:
-    post:
-      tags: [Subscriptions]
-      summary: End a trial now
-      operationId: endSubscriptionTrial
-      description: |
-        Ends the trial now and makes the subscription `active`. The first
-        paid period starts today, and `trial_end_at` becomes now. Items
-        whose base fee is billed in advance get their first invoice in the
-        same transaction. A subscription with a scheduled cancel is
-        refused: clear the schedule first. Takes no body.
-
-        Sends the `subscription.trial_ended` webhook event.
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - name: id
-          in: path
-          required: true
-          description: The subscription's ID (`hc_sub_…`).
-          schema:
-            type: string
-      responses:
-        "200":
-          description: The active subscription.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Subscription"
-              example:
-                id: hc_sub_dauq502q3gpgqfoq5c2g
-                tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                code: acme-pro
-                display_name: Acme Pro
-                customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
-                items:
-                  - id: hc_si_3f9c0e2a1b4d5c6e7f8a9b0c
-                    tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                    subscription_id: hc_sub_dauq502q3gpgqfoq5c2g
-                    plan_id: hc_pln_dajr5o2q3gpgqfoq5c1g
-                    quantity: 1
-                    created_at: "2026-10-01T09:12:44Z"
-                    updated_at: "2026-10-01T09:12:44Z"
-                status: active
-                billing_time: calendar
-                trial_start_at: "2026-10-01T09:12:44Z"
-                trial_end_at: "2026-10-08T10:00:00Z"
-                started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-08T10:00:00Z"
-                cancel_at_period_end: false
-                current_billing_period_start: "2026-10-08T00:00:00Z"
-                current_billing_period_end: "2026-11-01T00:00:00Z"
-                current_billing_period_display: "Oct 8, 2026 – Oct 31, 2026"
-                next_billing_at: "2026-11-01T00:00:00Z"
-                created_at: "2026-10-01T09:12:44Z"
-                updated_at: "2026-10-08T10:00:00Z"
-        "400":
-          $ref: "#/components/responses/InvalidBody"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          description: No subscription with this ID in this account and mode.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: not_found
-                  message: subscription not found
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "409":
-          description: |
-            Code `invalid_state`: the subscription is not `trialing`, or it
-            has a scheduled cancel. Clear the scheduled cancel first.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: invalid_state
-                  message: This subscription is scheduled to cancel. Undo the scheduled cancellation first, then end the trial.
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          description: |
-            The request has a body with a field (`param` names it). This
-            route takes no body: send none, `{}` or `null`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: validation_error
-                  message: unknown field "trial_end"
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: trial_end
-        "429":
-          $ref: "#/components/responses/RateLimited"
-
-  /v1/subscriptions/{id}/extend-trial:
-    post:
-      tags: [Subscriptions]
-      summary: Extend a trial
-      operationId: extendSubscriptionTrial
-      description: |
-        Moves the end of the trial later. The first paid period is moved
-        to start at the beginning of the new trial end's day, in your
-        account's billing time zone. A cancel scheduled with
-        `at_period_end` moves with the trial. To shorten a trial, use
-        `POST /v1/subscriptions/{id}/end-trial`.
-
-        Sends the `subscription.trial_extended` webhook event.
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - name: id
-          in: path
-          required: true
-          description: The subscription's ID (`hc_sub_…`).
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [trial_end]
-              properties:
-                trial_end:
-                  type: string
-                  format: date-time
-                  description: The new trial end. Must be in the future, after the current `trial_end_at`, and at most 730 days after `trial_start_at`.
-            example:
-              trial_end: "2026-10-29T00:00:00Z"
-      responses:
-        "200":
-          description: The subscription with the new `trial_end_at`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Subscription"
-              example:
-                id: hc_sub_dauq502q3gpgqfoq5c2g
-                tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                code: acme-pro
-                display_name: Acme Pro
-                customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
-                items:
-                  - id: hc_si_3f9c0e2a1b4d5c6e7f8a9b0c
-                    tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                    subscription_id: hc_sub_dauq502q3gpgqfoq5c2g
-                    plan_id: hc_pln_dajr5o2q3gpgqfoq5c1g
-                    quantity: 1
-                    created_at: "2026-10-01T09:12:44Z"
-                    updated_at: "2026-10-01T09:12:44Z"
-                status: trialing
-                billing_time: calendar
-                trial_start_at: "2026-10-01T09:12:44Z"
-                trial_end_at: "2026-10-29T00:00:00Z"
-                started_at: "2026-10-01T09:12:44Z"
-                cancel_at_period_end: false
-                current_billing_period_start: "2026-10-29T00:00:00Z"
-                current_billing_period_end: "2026-11-01T00:00:00Z"
-                current_billing_period_display: "Oct 29, 2026 – Oct 31, 2026"
-                next_billing_at: "2026-11-01T00:00:00Z"
-                created_at: "2026-10-01T09:12:44Z"
-                updated_at: "2026-10-10T12:00:00Z"
-        "400":
-          description: The body is not valid JSON, a field has a value of the wrong JSON type, or `trial_end` is not an RFC 3339 date-time.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: invalid_request
-                  message: invalid JSON body
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          description: No subscription with this ID in this account and mode.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: not_found
-                  message: subscription not found
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "409":
-          description: |
-            Code `invalid_state`: the subscription is not `trialing`, or it
-            has a scheduled cancel with an explicit `cancel_at`. Clear the
-            scheduled cancel first.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: invalid_state
-                  message: Only a trialing subscription's trial can be extended. This one is active.
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          description: |
-            `trial_end` is missing, in the past, not after the current
-            `trial_end_at`, or more than 730 days after `trial_start_at`
-            (`param: trial_end`). Also: the body has an unknown field
-            (`param` names it).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: validation_error
-                  message: Pick a date after the current trial end. To end the trial sooner, use End trial now.
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: trial_end
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -16595,7 +16285,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 cancel_at_period_end: false
                 billing_thresholds:
                   amount_gte: 50000
@@ -16709,7 +16398,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 cancel_at_period_end: false
                 current_billing_period_start: "2026-10-01T00:00:00Z"
                 current_billing_period_end: "2026-11-01T00:00:00Z"
@@ -16764,8 +16452,8 @@ paths:
         Adds a plan to the subscription as a new item. The plan must use
         the same billing interval, base-fee timing and currency as the
         other items. It must not bill a meter that another item of this
-        subscription, or another `trialing` or `active`
-        subscription of the customer, bills. A period that ended and is
+        subscription, or another `active` subscription of the customer,
+        bills. A period that ended and is
         not invoiced yet is billed first. The subscription must not be
         `canceled`.
 
@@ -16855,10 +16543,9 @@ paths:
             this plan. Code `invalid_state`: the subscription is `canceled`;
             the plan is archived; the plan's meters (the meters it has a
             price for) overlap another item of this subscription or another
-            `trialing` or `active` subscription of the customer; or
-            the plan's currency differs from the subscription's, the
-            customer's billing profile or the customer's other
-            `trialing` or `active` subscriptions.
+            `active` subscription of the customer; or the plan's currency
+            differs from the subscription's, the customer's billing profile
+            or the customer's other `active` subscriptions.
             Code
             `unpaid_invoice_blocks_change`: the invoice for the current
             period is unpaid (a written-off invoice is unpaid); settle or
@@ -17063,11 +16750,10 @@ paths:
           description: |
             Code `invalid_state`: the subscription is not `active`, the new
             plan is archived, its meters (the meters it has a price for)
-            overlap another item of this subscription or another
-            `trialing` or `active` subscription of the customer, or its
-            currency differs from the item's current plan, the other items,
-            the customer's billing profile or the customer's other
-            subscriptions (`trialing` or `active`). Code
+            overlap another item of this subscription or another `active`
+            subscription of the customer, or its currency differs from the
+            item's current plan, the other items, the customer's billing
+            profile or the customer's other `active` subscriptions. Code
             `unpaid_invoice_blocks_change`: an increase would charge against
             an unpaid invoice for the current period (a written-off invoice
             is unpaid); settle or void it first. Code `subscription_period_moved`: the billing period
@@ -17095,7 +16781,7 @@ paths:
                 error:
                   type: invalid_request_error
                   code: invalid_state
-                  message: Items can only be changed on an active subscription. This one is trialing.
+                  message: Items can only be changed on an active subscription. This one is canceled.
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
@@ -17149,7 +16835,7 @@ paths:
       summary: Remove a subscription item
       operationId: removeSubscriptionItem
       description: |
-        Removes an item from a trialing or active subscription. A
+        Removes an item from an active subscription. A
         subscription's last item cannot be removed; cancel the subscription
         instead. A
         period that ended and is not invoiced yet is billed first. Takes
@@ -17952,8 +17638,7 @@ paths:
         bill it; bill it with a one-off invoice if needed. Its 201 carries
         the `billing_status` Hardcount found (see the `billing_status`
         field): `after_close` while the subscription that invoiced the
-        period is active or trialing, and `outside_subscription` once it has
-        ended. If another subscription has a billing period that holds the
+        period is active, and `outside_subscription` once it has ended. If another subscription has a billing period that holds the
         event's time and is not invoiced yet, that period decides the status
         instead.
 
@@ -18645,14 +18330,14 @@ paths:
 
         A manual invoice uses the customer's currency. A `currency` that
         differs from the customer's billing-profile currency, or from the
-        plan currency of any of the customer's trialing or active
-        subscriptions, is refused with 409. A customer with neither
+        plan currency of any of the customer's active subscriptions, is
+        refused with 409. A customer with neither
         may be invoiced in any supported currency.
 
         Defaults when a field is left out:
         - `currency`: the customer's billing-profile currency, then the plan
-          currency of the customer's trialing or active
-          subscriptions, then the account's default currency.
+          currency of the customer's active subscriptions, then the
+          account's default currency.
         - `net_payment_term_days`: the account's net payment terms. A
           negative value is stored as 0 (due on receipt).
         - `billing_period_start` / `billing_period_end`: now.
@@ -18820,15 +18505,12 @@ paths:
         current period will close with: base fees prorate for a short first
         period and per segment after a mid-period item add, quantity change,
         plan swap or removal, and each meter's usage counts only while a
-        plan carrying it was on the subscription. For a trialing
-        subscription it is the first invoice after the trial: the trial-end
-        invoice when a plan bills in advance, otherwise the close of the
-        first paid period, prorated the same way. With an explicit `period`,
+        plan carrying it was on the subscription. With an explicit `period`,
         it is a flat estimate over that window, at today's prices, and warns
         when a mid-period change makes the invoice differ.
 
-        Without `subscription_id`, Hardcount uses the customer's active or
-        trialing subscription whose current period started last.
+        Without `subscription_id`, Hardcount uses the customer's active
+        subscription whose current period started last.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -18846,8 +18528,8 @@ paths:
                   type: string
                   description: |
                     Optional. The subscription to preview; it must belong to
-                    `customer_id`. Defaults to the customer's active or
-                    trialing subscription whose current period started last.
+                    `customer_id`. Defaults to the customer's active
+                    subscription whose current period started last.
                 period:
                   type: object
                   description: |
@@ -18929,8 +18611,8 @@ paths:
             bound, `from` not before `to`, or a bound that is not RFC 3339
             (`param` `period`, `period.from` or `period.to`); or an unknown
             field. Code `customer_has_no_subscription`: no `subscription_id`
-            was given and the customer has no active or trialing
-            subscription. Code `subscription_has_no_cycle`: the subscription
+            was given and the customer has no active subscription. Code
+            `subscription_has_no_cycle`: the subscription
             has no current period, so pass `period`.
           content:
             application/json:
@@ -18940,7 +18622,7 @@ paths:
                 error:
                   type: invalid_request_error
                   code: customer_has_no_subscription
-                  message: customer has no active or trialing subscription; pass subscription_id explicitly to preview a non-active sub
+                  message: customer has no active subscription; pass subscription_id explicitly to preview a non-active sub
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: customer_id
         "429":
@@ -23321,7 +23003,7 @@ paths:
       description: |
         Runs the billing run now for this account and mode, the same run
         the scheduler makes. It invoices every subscription that is due:
-        an `active` or `trialing` subscription whose period ended, or whose
+        an `active` subscription whose period ended, or whose
         scheduled mid-period cancel came, more than the invoice grace ago
         (`INVOICE_GRACE_PERIOD`, 1 hour by default), so usage that arrives
         late still makes its invoice. A subscription overdue for several
@@ -24761,8 +24443,7 @@ paths:
 
         Streams every subscription in the caller's mode, newest first,
         from one consistent snapshot. Columns: id, code, display_name, customer_id, status,
-        billing_time, trial_start_at, trial_end_at, started_at,
-        activated_at, canceled_at, current_billing_period_start,
+        billing_time, started_at, canceled_at, current_billing_period_start,
         current_billing_period_end, next_billing_at, plan_ids (plan IDs
         joined with `|`), created_at.
 
@@ -25550,8 +25231,7 @@ paths:
         period; the current period keeps the rate it started with. It applies from the
         join when a subscription of the customer first joins the plan in a
         period after it is created: an override created before a subscription
-        starts (after a trial, before the trial ends), even on the same day,
-        applies from its first period. The create is written to the audit
+        starts, even on the same day, applies from its first period. The create is written to the audit
         log.
       operationId: createPriceOverride
       parameters:

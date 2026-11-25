@@ -13,7 +13,7 @@
  */
 
 export type ScheduleSubscriptionCancelBody = {
-  /** Cancel at the end of the current period (or of the trial, while trialing). */
+  /** Cancel at the end of the current period. */
   at_period_end?: boolean;
   /** Cancel at this instant. Must be in the future. */
   cancel_at?: string;

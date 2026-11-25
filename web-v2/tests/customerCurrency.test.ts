@@ -28,7 +28,7 @@ test('the billing profile wins over the live plan, as on the invoice', () => {
   // engine.invoiceCurrency draws the invoice in the profile's currency
   // first (ADR-100), so the page must too.
   const c = resolveCustomerCurrency({
-    subscriptions: [{ status: 'trialing', items: [{ plan_id: 'pln_eur' }] }],
+    subscriptions: [{ status: 'active', items: [{ plan_id: 'pln_eur' }] }],
     plans,
     billingProfileCurrency: 'usd',
     invoices: [{ currency: 'GBP', created_at: '2026-10-01T00:00:00Z' }],

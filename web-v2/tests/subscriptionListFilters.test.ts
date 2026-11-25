@@ -3,6 +3,7 @@ import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { SUBSCRIPTION_TABS, subscriptionTabEmptyTitle, subscriptionTabParams } from '../src/lib/subscriptionListFilters.ts'
 import { collectionPausedFlag } from '../src/lib/statusLabels.ts'
+import { ListSubscriptionsStatus } from '../src/lib/gen/schemas/listSubscriptionsStatus.ts'
 
 test('the Paused tab asks for paused collection, not a status no subscription has', () => {
   // A paused subscription stays active; only its collection pauses. The tab
@@ -14,7 +15,7 @@ test('the Paused tab asks for paused collection, not a status no subscription ha
 })
 
 test('every tab maps to a filter the API accepts', () => {
-  const statuses = new Set(['trialing', 'active', 'canceled'])
+  const statuses = new Set<string>(Object.values(ListSubscriptionsStatus))
   for (const tab of SUBSCRIPTION_TABS) {
     const params = subscriptionTabParams(tab.value)
     if (params.status !== undefined) assert.ok(statuses.has(params.status), `${tab.value} sends status=${params.status}`)
@@ -34,7 +35,6 @@ test('the pause chip shows on live subscriptions whose collection is paused', ()
   const chip = { label: 'Collection paused', tone: 'warning' }
   const now = Date.parse('2027-01-15T00:00:00Z')
   assert.deepEqual(collectionPausedFlag({ status: 'active', pause_collection: { behavior: 'keep_as_draft' } }, now), chip)
-  assert.deepEqual(collectionPausedFlag({ status: 'trialing', pause_collection: { behavior: 'keep_as_draft' } }, now), chip)
   assert.equal(collectionPausedFlag({ status: 'active' }, now), null)
   // The same live rule as ?collection=paused: a canceled row's leftover
   // pause is not shown.
@@ -44,7 +44,7 @@ test('the pause chip shows on live subscriptions whose collection is paused', ()
 test('a timed pause stops showing once its resume date passes, by the given now', () => {
   // The engine collects again at resumes_at, though the row can keep the
   // pause until the resumer closes the periods that ended before it.
-  const sub = { status: 'active', pause_collection: { behavior: 'keep_as_draft', resumes_at: '2027-01-15T00:00:00Z' } }
+  const sub = { status: 'active' as const, pause_collection: { behavior: 'keep_as_draft', resumes_at: '2027-01-15T00:00:00Z' } }
   assert.deepEqual(collectionPausedFlag(sub, Date.parse('2027-01-14T00:00:00Z')), { label: 'Collection paused', tone: 'warning' })
   assert.equal(collectionPausedFlag(sub, Date.parse('2027-01-15T00:00:00Z')), null)
   assert.equal(collectionPausedFlag(sub, Date.parse('2027-01-16T00:00:00Z')), null)

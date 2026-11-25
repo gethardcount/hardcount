@@ -164,7 +164,6 @@ export * from './exportCustomersCsvParams';
 export * from './exportInvoicesCsvParams';
 export * from './exportSubscriptionsCsvParams';
 export * from './exportUsageEventsCsvParams';
-export * from './extendSubscriptionTrialBody';
 export * from './forbiddenResponse';
 export * from './getAnalyticsOverviewParams';
 export * from './getAnalyticsRevenueChart200';

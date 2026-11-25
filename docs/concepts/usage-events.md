@@ -91,7 +91,7 @@ Hardcount found when the event arrived.
 | `after_close` | That period is already invoiced. The event is stored but on no invoice. |
 | `not_on_plan` | The customer's plan has no price for this meter. |
 | `no_price` | The plan prices the meter, but no price takes the event's dimensions. Usually a model with no price. |
-| `outside_subscription` | No subscription of the customer bills that time, for example before it started or in a free trial. |
+| `outside_subscription` | No subscription of the customer bills that time, for example before it started or after it ended. |
 
 No `billing_status` means Hardcount found no problem then. It is not a
 promise: the invoice is the final answer.

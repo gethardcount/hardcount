@@ -31,7 +31,6 @@ func TestList_CollectionPausedFilter(t *testing.T) {
 	s.sub(bfRow{id: "sub_cp_running", nextBilling: next})
 	s.sub(bfRow{id: "sub_cp_paused", nextBilling: next})
 	s.sub(bfRow{id: "sub_cp_timed", nextBilling: next})
-	s.sub(bfRow{id: "sub_cp_trial", status: "trialing", nextBilling: next, trialEnd: &next})
 	s.sub(bfRow{id: "sub_cp_canceled", nextBilling: next})
 	// The resume date has passed, but a period that ended before it is still
 	// open, so the resumer has not cleared the pause yet.
@@ -49,7 +48,6 @@ func TestList_CollectionPausedFilter(t *testing.T) {
 	}
 	pause("sub_cp_paused", nil)
 	pause("sub_cp_timed", &next)
-	pause("sub_cp_trial", nil)
 	pause("sub_cp_canceled", nil)
 	s.exec(`UPDATE subscriptions SET status = 'canceled', canceled_at = now() WHERE id = 'sub_cp_canceled'`)
 	// The service refuses a past resume date, so move it into the past after
@@ -86,19 +84,22 @@ func TestList_CollectionPausedFilter(t *testing.T) {
 	}
 
 	code, got, total := list("?collection=paused")
-	want := []string{"sub_cp_paused", "sub_cp_timed", "sub_cp_trial"}
+	want := []string{"sub_cp_paused", "sub_cp_timed"}
 	if code != http.StatusOK || !slices.Equal(got, want) || total != len(want) {
 		t.Fatalf("collection=paused: code %d, rows %v, total %d; want 200, %v, %d", code, got, total, want, len(want))
 	}
 
 	// It composes with the status filter.
-	if code, got, total := list("?collection=paused&status=trialing"); code != http.StatusOK || !slices.Equal(got, []string{"sub_cp_trial"}) || total != 1 {
-		t.Fatalf("collection=paused&status=trialing: code %d, rows %v, total %d; want 200, [sub_cp_trial], 1", code, got, total)
+	if code, got, total := list("?collection=paused&status=active"); code != http.StatusOK || !slices.Equal(got, want) || total != len(want) {
+		t.Fatalf("collection=paused&status=active: code %d, rows %v, total %d; want 200, %v, %d", code, got, total, want, len(want))
+	}
+	if code, got, total := list("?collection=paused&status=canceled"); code != http.StatusOK || len(got) != 0 || total != 0 {
+		t.Fatalf("collection=paused&status=canceled: code %d, rows %v, total %d; want 200 and none", code, got, total)
 	}
 
-	// Control: no filter returns all six, the elapsed pause among them.
-	if code, got, total := list(""); code != http.StatusOK || len(got) != 6 || total != 6 || !slices.Contains(got, "sub_cp_elapsed") {
-		t.Fatalf("unfiltered: code %d, rows %v, total %d; want 200 and 6 with sub_cp_elapsed", code, got, total)
+	// Control: no filter returns all five, the elapsed pause among them.
+	if code, got, total := list(""); code != http.StatusOK || len(got) != 5 || total != 5 || !slices.Contains(got, "sub_cp_elapsed") {
+		t.Fatalf("unfiltered: code %d, rows %v, total %d; want 200 and 5 with sub_cp_elapsed", code, got, total)
 	}
 
 	// "paused" is not a status; asking for it is a 422, not an empty list.

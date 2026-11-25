@@ -3,7 +3,7 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
-  cancelImmediatelyText,
+  CANCEL_IMMEDIATELY_SENTENCE,
   changePlanNowHelper,
   changeQuantityText,
   PAUSE_DIALOG_SENTENCE,
@@ -11,20 +11,15 @@ import {
   planChangeToast,
   removeItemText,
   scheduleCancelToast,
-  startBillingLines,
 } from '../src/lib/subscriptionCopy.ts'
 import { cardLabel, removeCardSentence } from '../src/lib/paymentMethodCopy.ts'
 
-test('schedule cancel toast: a trial cancels free at trial end', () => {
-  assert.deepEqual(scheduleCancelToast({ status: 'trialing' }, 'Nov 1, 2026'), {
-    title: 'Cancellation scheduled',
-    description: "Cancels at trial end, Nov 1, 2026. The customer won't be charged.",
-  })
-  assert.deepEqual(scheduleCancelToast({ status: 'active' }, 'Nov 1, 2026'), {
+test('schedule cancel toast names the end of the current period', () => {
+  assert.deepEqual(scheduleCancelToast('Nov 1, 2026'), {
     title: 'Cancellation scheduled',
     description: 'Cancels at the end of the current period, Nov 1, 2026.',
   })
-  assert.equal(scheduleCancelToast({ status: 'trialing' }, undefined).description, 'Cancels at the end of the current period.')
+  assert.equal(scheduleCancelToast(undefined).description, 'Cancels at the end of the current period.')
 })
 
 test('pause toast names the resume date only when one was saved', () => {
@@ -72,11 +67,9 @@ test('item change words follow the plan bill timing', () => {
   assert.equal(removeItemText(undefined), '')
 })
 
-test('cancel immediately: a final invoice for a paid subscription, nothing for a trial', () => {
-  assert.match(cancelImmediatelyText('active'), /final invoice/)
-  assert.doesNotMatch(cancelImmediatelyText('active'), /Stops billing right now/)
-  assert.match(cancelImmediatelyText('trialing'), /Nothing is billed/)
-  assert.doesNotMatch(cancelImmediatelyText('trialing'), /final invoice/)
+test('cancel immediately names the final invoice', () => {
+  assert.match(CANCEL_IMMEDIATELY_SENTENCE, /final invoice/)
+  assert.doesNotMatch(CANCEL_IMMEDIATELY_SENTENCE, /Stops billing right now/)
 })
 
 test('plan change toast: scheduled vs changed now', () => {
@@ -121,24 +114,4 @@ test('remove card: only card, default with others left, non-default', () => {
   assert.doesNotMatch(removeCardSentence({ onlyCard: true, isDefault: true }), /emailed/)
   assert.match(removeCardSentence({ onlyCard: false, isDefault: true }), /newest remaining card becomes the default/)
   assert.match(removeCardSentence({ onlyCard: false, isDefault: false }), /default card stays the same/)
-})
-
-// End trial bills day 1: the confirm says when the first invoice comes and
-// whether a card is charged now, and guesses nothing it hasn't loaded.
-test('startBillingLines says when the first period is invoiced and charged', () => {
-  const starts = 'The trial ends now, and the first paid billing period starts.'
-  assert.deepEqual(startBillingLines({ inAdvance: true, hasCard: true }), [
-    starts,
-    "It is invoiced now and charged to the customer's card at once.",
-  ])
-  assert.deepEqual(startBillingLines({ inAdvance: true, hasCard: false }), [
-    starts,
-    'It is invoiced now. The customer has no card on file, so nothing is charged until they add one.',
-  ])
-  assert.deepEqual(startBillingLines({ inAdvance: false, hasCard: true }), [
-    starts,
-    'It is invoiced at the end of the period, with any usage.',
-  ])
-  assert.deepEqual(startBillingLines({}), [starts])
-  assert.deepEqual(startBillingLines({ inAdvance: true }), [starts, 'It is invoiced now.'])
 })

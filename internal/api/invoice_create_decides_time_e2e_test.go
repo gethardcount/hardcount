@@ -39,7 +39,7 @@ func TestE2E_ALiveInvoiceCreateReadsOneInstant(t *testing.T) {
 // (422) with nothing created.
 func TestE2E_InvoiceCreateForAnotherCustomersSubscriptionIsRefused(t *testing.T) {
 	r := newDatesRig(t, "Invoice Other Sub Co")
-	_, _ = r.trialSub("owner")
+	_, _ = r.subWithItem("owner", r.planID)
 	owner := flowList(r.call("GET", "/v1/subscriptions", flowReq{}).want(t, 200, "list subscriptions").body, "data")
 	if len(owner) != 1 {
 		t.Fatalf("%d subscriptions; want the owner's one", len(owner))

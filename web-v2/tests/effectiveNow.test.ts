@@ -12,7 +12,6 @@ import assert from 'node:assert/strict'
 import {
   wallClockNow,
   timeAgo,
-  daysUntil,
   isOlderThan,
   sinceMs,
   untilMs,
@@ -33,12 +32,6 @@ test('timeAgo anchors on the frozen instant, not wall-clock', () => {
   assert.equal(timeAgo('2027-09-01T00:00:00.000Z', now), 'just now')
   // Unparseable input is swallowed (empty string), never "NaNd ago".
   assert.equal(timeAgo('not-a-date', now), '')
-})
-
-test('daysUntil is ceil-days relative to the anchor', () => {
-  const now = at('2027-08-08T00:00:00.000Z')
-  assert.equal(daysUntil('2027-08-11T00:00:00.000Z', now), 3)
-  assert.equal(daysUntil('2027-08-05T00:00:00.000Z', now), -3)
 })
 
 test('isOlderThan gates on the anchor, guards NaN', () => {

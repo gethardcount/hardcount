@@ -27,10 +27,10 @@ import (
 //   - A key the server sets (ReadOnly) is a 422 with param set to the key.
 //   - A route that takes no body refuses a body with any key (NoBody).
 //
-// encoding/json drops unknown keys without a word. Without this rule,
-// `trial_period_days` instead of `trial_days` would create an active,
-// charged subscription with a 201. A PATCH with a misspelled field would
-// answer 200 and change nothing.
+// encoding/json drops unknown keys without a word. Without this rule, a
+// misspelled `billing_time` would create a subscription billed on the
+// default with a 201, and a PATCH with a misspelled field would answer 200
+// and change nothing.
 //
 // A handler decodes its body before it changes anything. A refused body
 // then frees the request's Idempotency-Key (TrackBodyRefusal), so the

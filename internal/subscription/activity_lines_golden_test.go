@@ -31,8 +31,8 @@ const goldenPath = "testdata/activity_lines.golden.json"
 
 // ── Writer tokens, read from the code that writes them ──
 //
-// B2 was a writer's token (triggered_by=schedule) and the renderer's switch
-// drifting apart. The golden cases and the no-fallback test range over the
+// A writer's token and the renderer's switch can drift apart, and the row
+// then reads wrong. The golden cases and the no-fallback test range over the
 // two lists below, and TestSubscriptionAuditWriters_UseTheVocabulary proves
 // the lists are exactly what the writers emit: every subscription audit row
 // in the code is written with a domain constant, never a literal, and every
@@ -55,9 +55,8 @@ func subscriptionAuditActions() []string {
 func subscriptionAuditSubActions() []string {
 	return []string{
 		domain.SubAuditCancelScheduled, domain.SubAuditCancelCleared, domain.SubAuditCollectionPaused, domain.SubAuditCollectionResumed,
-		domain.SubAuditTrialEnded, domain.SubAuditTrialExtended, domain.SubAuditBillingRetried, domain.SubAuditThresholdsSet,
-		domain.SubAuditThresholdsCleared, domain.SubAuditItemAdded, domain.SubAuditItemRemoved, domain.SubAuditPendingPlanChangeCanceled,
-		domain.SubAuditTrialEndCancel, domain.SubAuditItemPlanChanged, domain.SubAuditItemQuantityChanged,
+		domain.SubAuditBillingRetried, domain.SubAuditThresholdsSet, domain.SubAuditThresholdsCleared, domain.SubAuditItemAdded,
+		domain.SubAuditItemRemoved, domain.SubAuditPendingPlanChangeCanceled, domain.SubAuditItemPlanChanged, domain.SubAuditItemQuantityChanged,
 	}
 }
 
@@ -274,8 +273,6 @@ func TestSubscriptionAuditWriters_UseTheVocabulary(t *testing.T) {
 // subActionParent is the audit action each metadata "action" rides.
 func subActionParent(sub string) string {
 	switch sub {
-	case domain.SubAuditTrialEndCancel:
-		return domain.AuditActionCancel
 	case domain.SubAuditItemPlanChanged, domain.SubAuditItemQuantityChanged:
 		return domain.AuditActionSubscriptionItemUpdated
 	}
@@ -417,10 +414,9 @@ func goldenActionCases(t *testing.T) []actionCase {
 		m := func(extra map[string]any) map[string]any { return with(map[string]any{"action": sub}, extra) }
 		switch sub {
 		case domain.SubAuditCancelScheduled:
-			add(name+"/at period end", parent, m(map[string]any{"cancel_at_period_end": true, "status": "active", "cancel_effective_at": at(30)}))
-			add(name+"/at period end while trialing", parent, m(map[string]any{"cancel_at_period_end": true, "status": "trialing", "cancel_effective_at": at(14)}))
+			add(name+"/at period end", parent, m(map[string]any{"cancel_at_period_end": true, "cancel_effective_at": at(30)}))
 			add(name+"/at period end legacy", parent, m(map[string]any{"cancel_at_period_end": true}))
-			add(name+"/on a date", parent, m(map[string]any{"cancel_at_period_end": false, "cancel_at": at(45), "cancel_effective_at": at(45), "status": "active"}))
+			add(name+"/on a date", parent, m(map[string]any{"cancel_at_period_end": false, "cancel_at": at(45), "cancel_effective_at": at(45)}))
 			add(name+"/no date", parent, m(map[string]any{}))
 		case domain.SubAuditCollectionPaused:
 			add(name+"/by dunning", parent, m(map[string]any{"triggered_by": "dunning", "behavior": "keep_as_draft"}))
@@ -430,12 +426,6 @@ func goldenActionCases(t *testing.T) []actionCase {
 			add(name+"/on schedule", parent, m(map[string]any{"triggered_by": "schedule", "resumed_at": at(30)}))
 			add(name+"/by hand", parent, m(map[string]any{"triggered_by": "operator"}))
 			add(name+"/by payment", parent, m(map[string]any{"triggered_by": "payment", "resumed_at": at(30)}))
-		case domain.SubAuditTrialEnded:
-			add(name+"/on schedule", parent, m(map[string]any{"triggered_by": "schedule", "trial_end_at": at(0)}))
-			add(name+"/by hand", parent, m(map[string]any{}))
-		case domain.SubAuditTrialExtended:
-			add(name, parent, m(map[string]any{"trial_end": at(21)}))
-			add(name+"/no date", parent, m(map[string]any{}))
 		case domain.SubAuditBillingRetried:
 			for _, n := range []float64{0, 1, 3} {
 				add(name+"/attempts_before="+strconv.Itoa(int(n)), parent, m(map[string]any{"attempts_before": n, "was_parked": n > 2}))
@@ -454,8 +444,6 @@ func goldenActionCases(t *testing.T) []actionCase {
 			for _, pn := range proNames {
 				add(name+"/proration "+pn, parent, with(m(map[string]any{"item_id": "si_2", "plan_id": "pln_seat"}), prorations[pn]))
 			}
-		case domain.SubAuditTrialEndCancel:
-			add(name, parent, m(map[string]any{"triggered_by": "schedule", "canceled_at": at(14), "trial_end_at": at(14)}))
 		case domain.SubAuditItemPlanChanged:
 			for _, pn := range proNames {
 				add(name+"/now/proration "+pn, parent, with(m(map[string]any{"item_id": "si_1", "immediate": true, "old_plan_id": "pln_starter", "new_plan_id": "pln_pro"}), prorations[pn]))
@@ -542,9 +530,8 @@ func TestActivityLinesGolden(t *testing.T) {
 	}
 }
 
-// TestActivityLines_NoFallback is the test that would have caught B2: no
-// token a writer emits may reach the fallback line, and no line shows a raw
-// code, cents or a Go error.
+// TestActivityLines_NoFallback: no token a writer emits may reach the
+// fallback line, and no line shows a raw code, cents or a Go error.
 func TestActivityLines_NoFallback(t *testing.T) {
 	w := scanSubscriptionAuditWriters(t)
 	for action := range w.actions {
@@ -563,14 +550,6 @@ func TestActivityLines_NoFallback(t *testing.T) {
 	}
 	if l := describeSubscriptionAction("subscription.not_a_writer_token", nil, lineLabels{}); l.Kind != kindChanged || l.Title != "Subscription changed" {
 		t.Errorf("an unknown action renders %q, want the one fallback", l.Title)
-	}
-
-	// B2: only the operator's End trial ends a trial early.
-	if l := describeSubscriptionAction(domain.AuditActionUpdate, map[string]any{"action": domain.SubAuditTrialEnded, "triggered_by": "schedule"}, lineLabels{}); l.Title != "Trial ended" {
-		t.Errorf("a trial that ran out reads %q, want Trial ended (B2)", l.Title)
-	}
-	if l := describeSubscriptionAction(domain.AuditActionUpdate, map[string]any{"action": domain.SubAuditTrialEnded}, lineLabels{}); l.Title != "Trial ended early" {
-		t.Errorf("a trial ended by hand reads %q, want Trial ended early", l.Title)
 	}
 
 	for _, c := range buildGoldenCases(t) {
@@ -608,6 +587,17 @@ func TestActivityLines_NoFallback(t *testing.T) {
 	}
 }
 
+// TestDescribeUpdate_TrialRowsOfEarlierReleasesStillRead: no release writes a
+// trial row any more, but a database upgraded from one that did still holds
+// them, and its history must name them.
+func TestDescribeUpdate_TrialRowsOfEarlierReleasesStillRead(t *testing.T) {
+	for action, title := range map[string]string{"trial_ended": "Trial ended", "trial_extended": "Trial extended"} {
+		if l := describeUpdate(map[string]any{"action": action}, lineLabels{}); l.Title != title {
+			t.Errorf("update row %q reads %q, want %q", action, l.Title, title)
+		}
+	}
+}
+
 // TestLegacyDetail pins how a line's meta reaches the older detail and
 // detail_timestamp fields the card reads today.
 func TestLegacyDetail(t *testing.T) {
@@ -619,7 +609,7 @@ func TestLegacyDetail(t *testing.T) {
 	}{
 		{"no meta", nil, "", ""},
 		{"text and money", []activity.Segment{activity.Text("Starter → Pro"), {activity.T("Credit "), activity.M(1980, "EUR")}}, "Starter → Pro · Credit €19.80", ""},
-		{"trailing time", []activity.Segment{{activity.T("Trial now ends "), activity.At(at)}}, "Trial now ends", at.Format(time.RFC3339)},
+		{"trailing time", []activity.Segment{{activity.T("Resumes "), activity.At(at)}}, "Resumes", at.Format(time.RFC3339)},
 		{"time in brackets", []activity.Segment{{activity.T("At the end of the current period ("), activity.At(at), activity.T(")")}}, "At the end of the current period", at.Format(time.RFC3339)},
 		{"text then time", []activity.Segment{activity.Text("Seat"), {activity.T("Resumes "), activity.At(at)}}, "Seat · Resumes", at.Format(time.RFC3339)},
 		{"a link", []activity.Segment{{activity.T("Invoice "), activity.L(activity.LinkInvoice, "hc_inv_1", "HC-000123"), activity.T(" issued early")}}, "Invoice HC-000123 issued early", ""},

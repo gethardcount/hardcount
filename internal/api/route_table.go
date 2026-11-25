@@ -409,8 +409,6 @@ var routeTable = map[routeKey]routeDecl{
 	{"PUT", "/v1/subscriptions/{id}/billing-thresholds"}:               needs(subscriptionWrite).withAudit(explicit("subscription.Handler.setBillingThresholds (Log)")),
 	{"DELETE", "/v1/subscriptions/{id}/billing-thresholds"}:            needs(subscriptionWrite).withAudit(explicit("subscription.Handler.clearBillingThresholds (Log)")),
 	{"POST", "/v1/subscriptions/{id}/cancel"}:                          needs(subscriptionWrite).withAudit(explicit("subscription.Service.Cancel (LogInTx)")),
-	{"POST", "/v1/subscriptions/{id}/end-trial"}:                       needs(subscriptionWrite).withAudit(explicit("subscription.Handler.endTrial (Log)")),
-	{"POST", "/v1/subscriptions/{id}/extend-trial"}:                    needs(subscriptionWrite).withAudit(explicit("subscription.Handler.extendTrial (Log)")),
 	{"POST", "/v1/subscriptions/{id}/items"}:                           needs(subscriptionWrite).withAudit(explicit("subscription.Handler.addItem (Log)")),
 	{"PATCH", "/v1/subscriptions/{id}/items/{itemID}"}:                 needs(subscriptionWrite).withAudit(explicit("subscription.Handler.updateItem (Log)")),
 	{"DELETE", "/v1/subscriptions/{id}/items/{itemID}"}:                needs(subscriptionWrite).withAudit(explicit("subscription.Handler.removeItem (Log)")),

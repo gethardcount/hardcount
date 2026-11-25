@@ -50,7 +50,7 @@ func registerQueueDepthGauges(reg prometheus.Registerer, invoiceGrace time.Durat
 	// duePredicate is of the scan's, because this package imports no domain
 	// package. TestBillingGauges_DueAndFailingPartition pins the two copies to
 	// each other on real rows.
-	const billingFailing = `status IN ('active','trialing')
+	const billingFailing = `status = 'active'
 		AND billing_failed_for IS NOT NULL
 		AND billing_failed_for IS NOT DISTINCT FROM LEAST(next_billing_at, CASE WHEN status = 'active' THEN cancel_at END)`
 	dueHelp := "Subscriptions due for billing now whose billing is not failing. A subscription is due once INVOICE_GRACE_PERIOD has passed after its period end or mid-period cancel. Spikes on busy billing days and falls as the scheduler drains it. Subscriptions with a saved billing failure are in hardcount_billing_failing_subscriptions. -1 = metric query failed."
@@ -58,8 +58,8 @@ func registerQueueDepthGauges(reg prometheus.Registerer, invoiceGrace time.Durat
 	// dueBy is now() less the grace, in whole microseconds (Postgres's
 	// timestamp resolution).
 	dueBy := fmt.Sprintf("(now() - interval '%d microseconds')", invoiceGrace.Microseconds())
-	duePredicate := `status IN ('active', 'trialing') AND livemode = %t
-		AND (next_billing_at <= ` + dueBy + ` OR (status = 'active' AND cancel_at IS NOT NULL AND cancel_at <= ` + dueBy + `))
+	duePredicate := `status = 'active' AND livemode = %t
+		AND (next_billing_at <= ` + dueBy + ` OR (cancel_at IS NOT NULL AND cancel_at <= ` + dueBy + `))
 		AND NOT (` + billingFailing + `)`
 	for _, m := range []struct {
 		label string
@@ -72,7 +72,7 @@ func registerQueueDepthGauges(reg prometheus.Registerer, invoiceGrace time.Durat
 			// (LEAST skips the NULL of an arm that doesn't).
 			{"hardcount_billing_oldest_due_age_seconds", ageHelp, `SELECT COALESCE(EXTRACT(EPOCH FROM ` + dueBy + ` - MIN(LEAST(
 				CASE WHEN next_billing_at <= ` + dueBy + ` THEN next_billing_at END,
-				CASE WHEN status = 'active' AND cancel_at <= ` + dueBy + ` THEN cancel_at END))), 0)
+				CASE WHEN cancel_at <= ` + dueBy + ` THEN cancel_at END))), 0)
 				FROM subscriptions WHERE ` + pred},
 		} {
 			q := g.query

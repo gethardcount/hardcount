@@ -55,26 +55,9 @@ func TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain(t *testing.T) {
 		}
 	}
 	activeRig := paidRig(false)
-	// createdRig is the rig's customer with one subscription made by body: on
-	// plan_a, and with the plan_c add-on as a second item when withAddOn is
-	// set.
-	createdRig := func(withAddOn bool, extra map[string]any) func(t *testing.T) *lagRig {
-		return func(t *testing.T) *lagRig {
-			r := newLagRigBare(t, "in_advance", 0)
-			items := []map[string]any{{"plan_id": r.planA, "quantity": 1}}
-			if withAddOn {
-				items = append(items, map[string]any{"plan_id": r.planC, "quantity": 1})
-			}
-			body := map[string]any{
-				"code": "lock-sub", "display_name": "Lock Sub", "customer_id": r.custID, "items": items,
-			}
-			for k, v := range extra {
-				body[k] = v
-			}
-			r.subID = r.must(http.MethodPost, "/v1/subscriptions", lagP0, body, http.StatusCreated)["id"].(string)
-			return r
-		}
-	}
+	// lastHours is six hours before the period ends. Less than half a day is
+	// left, which rounds to no day to prorate (daysLeftInPeriod).
+	lastHours := lagB.Add(-6 * time.Hour)
 	holdCustomerRules := func(t *testing.T, tx *sql.Tx, r *lagRig) {
 		if _, err := tx.ExecContext(t.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
 			"customer_rules:"+r.tenantID+":"+r.custID); err != nil {
@@ -190,12 +173,12 @@ func TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain(t *testing.T) {
 			},
 		},
 		{
-			// A trialing subscription prorates nothing, so the add runs in
-			// Service.AddItem's transaction of its own.
-			name: "item_add_unprorated", rig: createdRig(false, map[string]any{"trial_days": 14}), hold: holdCustomerRules,
+			// In the last hours of the period the add prorates nothing, so it
+			// runs in Service.AddItem's transaction of its own.
+			name: "item_add_unprorated", rig: activeRig, hold: holdCustomerRules,
 			method: http.MethodPost, path: func(r *lagRig) string { return "/v1/subscriptions/" + r.subID + "/items" },
 			body: func(r *lagRig) any { return map[string]any{"plan_id": r.planC, "quantity": 1} },
-			at:   lagP0.AddDate(0, 0, 2), want: http.StatusCreated,
+			at:   lastHours, want: http.StatusCreated,
 			unchanged: func(t *testing.T, r *lagRig) {
 				if n := items(t, r); n != 1 {
 					t.Fatalf("%d items, want 1", n)
@@ -204,6 +187,9 @@ func TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain(t *testing.T) {
 			once: func(t *testing.T, r *lagRig) {
 				if n := items(t, r); n != 2 {
 					t.Fatalf("%d items, want 2", n)
+				}
+				if _, invs := r.customerCounts(); invs != 1 {
+					t.Fatalf("%d invoices, want only the first: the add prorates nothing", invs)
 				}
 			},
 		},
@@ -233,11 +219,11 @@ func TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain(t *testing.T) {
 			},
 		},
 		{
-			// A trialing subscription credits nothing, so the removal runs in
-			// Service.RemoveItem's transaction of its own.
-			name: "item_remove_unprorated", rig: createdRig(true, map[string]any{"trial_days": 14}), hold: holdCustomerRules,
+			// In the last hours of the period the removal credits nothing, so
+			// it runs in Service.RemoveItem's transaction of its own.
+			name: "item_remove_unprorated", rig: paidRig(true), hold: holdCustomerRules,
 			method: http.MethodDelete, path: addOnPath,
-			at: lagP0.AddDate(0, 0, 2), want: http.StatusNoContent,
+			at: lastHours, want: http.StatusNoContent,
 			unchanged: func(t *testing.T, r *lagRig) {
 				if n := items(t, r); n != 2 {
 					t.Fatalf("%d items, want 2", n)
@@ -246,6 +232,9 @@ func TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain(t *testing.T) {
 			once: func(t *testing.T, r *lagRig) {
 				if n := items(t, r); n != 1 {
 					t.Fatalf("%d items, want 1", n)
+				}
+				if n := r.creditNotesOn(r.firstInvoiceID()); n != 0 {
+					t.Fatalf("%d credit notes on the first invoice, want none: the removal credits nothing", n)
 				}
 			},
 		},

@@ -1,6 +1,5 @@
 {
   "subscription": {
-    "activated_at": "2026-09-01T12:00:00Z",
     "billing_thresholds": {
       "amount_gte": 50000,
       "item_thresholds": []

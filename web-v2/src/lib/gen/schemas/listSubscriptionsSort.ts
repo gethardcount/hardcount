@@ -21,5 +21,4 @@ export const ListSubscriptionsSort = {
   status: 'status',
   display_name: 'display_name',
   name: 'name',
-  trial_end_at: 'trial_end_at',
 } as const;

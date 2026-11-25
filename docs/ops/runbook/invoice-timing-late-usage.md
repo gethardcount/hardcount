@@ -219,8 +219,8 @@ rows of `PLAN`, this subscription's plan.
    `INCLUSIVE` is `true`. The rest is the total to bill. Hardcount works
    out its tax when you finalize.
 
-   **A canceled subscription:** the usage call prices only active or
-   trialing subscriptions, so it answers `meters: []`. Read each price's
+   **A canceled subscription:** the usage call prices only active
+   subscriptions, so it answers `meters: []`. Read each price's
    quantity instead: `total_units` from
    `GET /v1/usage-events/aggregate?customer_id=$CUSTOMER&meter_id=<meter id>&from=$FROM&to=$TO&dimensions=<key>=<value>,...`,
    with the labels of the price's `dimension_match`

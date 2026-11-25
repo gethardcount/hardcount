@@ -1,10 +1,7 @@
-// The dates a subscription page and list show, from one place.
-//
-// The summary, the timeline, the list's "Next bill" column and the cancel
-// dialog each used to work out "renews" on their own, so a canceled
-// subscription still said "Renews Nov 16", an immediate cancel in the middle
-// of a trial read "Canceled at trial end", and one page said both "Period end
-// Nov 15" and "Cancels Nov 16 12:00 AM" for the same boundary (M-SUB-3/4/5).
+// The dates a subscription page and list show, from one place. The summary,
+// the timeline, the list's "Next bill" column and the cancel dialog all read
+// them here, so a canceled subscription never says "Renews", and one boundary
+// never shows as two dates ("Period end Nov 15" beside "Cancels Nov 16").
 //
 // The convention, everywhere:
 //   - a period's last covered day is "through Nov 15" (inclusive);
@@ -14,14 +11,13 @@
 // every branch.
 
 import { hasScheduledCancel } from './subscriptionNotices.ts'
+import type { SubscriptionStatus } from './gen/schemas/subscriptionStatus'
 
 export interface SubscriptionPeriodInput {
-  status: string
+  status: SubscriptionStatus
   current_billing_period_start?: string
   current_billing_period_end?: string
   next_billing_at?: string
-  trial_start_at?: string
-  trial_end_at?: string
   cancel_at_period_end?: boolean
   cancel_at?: string | null
   cancel_effective_at?: string
@@ -46,8 +42,8 @@ export interface NextEvent {
 }
 
 export interface PeriodLabels {
-  // Last covered day of the current period ("Nov 15, 2026"); for a trial,
-  // the trial's last day. Null when there is no current period.
+  // Last covered day of the current period ("Nov 15, 2026"). Null when there
+  // is no current period.
   accessThrough: string | null
   // The renewal day, only when the subscription will renew.
   renewsOn: string | null
@@ -55,86 +51,36 @@ export interface PeriodLabels {
   cancelsOn: string | null
   // The day it was canceled.
   canceledOn: string | null
-  trialEndsOn: string | null
-  // The first paid charge of a trialing subscription with no cancel scheduled.
-  firstChargeOn: string | null
-  canceledAtTrialEnd: boolean
-  // Canceled before its trial ended (an immediate cancel mid-trial).
-  canceledDuringTrial: boolean
   next: NextEvent | null
 }
 
-// A cancel at trial end stamps canceled_at at the trial end; allow a minute
-// of skew between the two writes.
-const SAME_INSTANT_MS = 60_000
-
-function ms(iso?: string | null): number {
-  return iso ? new Date(iso).getTime() : NaN
-}
-
-// periodLabels. `firstChargeTiming` is the first item's plan bill timing: an
-// in_advance plan charges at trial end, an in_arrears plan at the first
-// period's close (next_billing_at).
-export function periodLabels(
-  sub: SubscriptionPeriodInput,
-  fmt: PeriodDateFormat,
-  firstChargeTiming?: string,
-): PeriodLabels {
-  const live = sub.status === 'active' || sub.status === 'trialing'
-  const trialing = sub.status === 'trialing'
+export function periodLabels(sub: SubscriptionPeriodInput, fmt: PeriodDateFormat): PeriodLabels {
+  const live = sub.status === 'active'
   const canceled = sub.status === 'canceled'
   const scheduled = live && hasScheduledCancel(sub)
 
-  const canceledMs = ms(sub.canceled_at)
-  const trialEndMs = ms(sub.trial_end_at)
-  const canceledAtTrialEnd = canceled && !Number.isNaN(canceledMs) && !Number.isNaN(trialEndMs) &&
-    Math.abs(canceledMs - trialEndMs) <= SAME_INSTANT_MS
-  const canceledDuringTrial = canceled && !Number.isNaN(canceledMs) && !Number.isNaN(trialEndMs) &&
-    canceledMs < trialEndMs - SAME_INSTANT_MS
+  const accessThrough = live && sub.current_billing_period_end ? fmt.lastDay(sub.current_billing_period_end) : null
 
-  let accessThrough: string | null = null
-  if (trialing && sub.trial_end_at) accessThrough = fmt.lastDay(sub.trial_end_at)
-  else if (live && sub.current_billing_period_end) accessThrough = fmt.lastDay(sub.current_billing_period_end)
-
-  // cancel_effective_at is the server's answer (ADR-069): on a trialing
-  // subscription the flag cancels at trial end, not at the first paid
-  // period's end.
+  // cancel_effective_at is the server's answer: cancel_at when set, else the
+  // end of the current period.
   const cancelAt = scheduled ? (sub.cancel_effective_at || sub.cancel_at || sub.current_billing_period_end) : undefined
   const cancelsOn = cancelAt ? fmt.date(cancelAt) : null
 
-  const renewAt = live && !scheduled && !trialing ? (sub.next_billing_at || sub.current_billing_period_end) : undefined
+  const renewAt = live && !scheduled ? (sub.next_billing_at || sub.current_billing_period_end) : undefined
   const renewsOn = renewAt ? fmt.date(renewAt) : null
-
-  const trialEndsOn = sub.trial_end_at && (trialing || canceledAtTrialEnd || canceledDuringTrial) ? fmt.date(sub.trial_end_at) : null
-
-  let firstChargeOn: string | null = null
-  if (trialing && !scheduled) {
-    const at = firstChargeTiming === 'in_advance' ? sub.trial_end_at : sub.next_billing_at
-    if (at) firstChargeOn = fmt.date(at)
-  }
 
   const canceledOn = canceled && sub.canceled_at ? fmt.date(sub.canceled_at) : null
 
   let next: NextEvent | null = null
   if (canceled) {
-    if (canceledOn) {
-      next = {
-        label: canceledAtTrialEnd ? 'Canceled at trial end' : canceledDuringTrial ? 'Canceled during trial' : 'Canceled',
-        value: canceledOn,
-        tone: 'ended',
-      }
-    }
+    if (canceledOn) next = { label: 'Canceled', value: canceledOn, tone: 'ended' }
   } else if (cancelsOn) {
-    next = { label: trialing ? 'Cancels at trial end' : 'Cancels', value: cancelsOn, tone: 'scheduled' }
-  } else if (firstChargeOn) {
-    next = { label: 'First charge', value: firstChargeOn, tone: 'normal' }
-  } else if (trialing && trialEndsOn) {
-    next = { label: 'Trial ends', value: trialEndsOn, tone: 'normal' }
+    next = { label: 'Cancels', value: cancelsOn, tone: 'scheduled' }
   } else if (renewsOn) {
     next = { label: 'Renews', value: renewsOn, tone: 'normal' }
   }
 
-  return { accessThrough, renewsOn, cancelsOn, canceledOn, trialEndsOn, firstChargeOn, canceledAtTrialEnd, canceledDuringTrial, next }
+  return { accessThrough, renewsOn, cancelsOn, canceledOn, next }
 }
 
 // The "At period end" choice in the cancel dialog, and the scheduled-cancel
@@ -152,10 +98,4 @@ export function nextBillCell(labels: PeriodLabels): { text: string; tone: NextEv
   if (!labels.next) return null
   if (labels.next.tone === 'ended') return { text: `Ended ${labels.next.value}`, tone: 'ended' }
   return { text: `${labels.next.label} ${labels.next.value}`, tone: labels.next.tone }
-}
-
-// A trial's length in whole days ("14-day trial"). Trial bounds sit on
-// midnights in the billing timezone; rounding absorbs a DST hour.
-export function trialLength(startISO: string, endISO: string): number {
-  return Math.max(0, Math.round((new Date(endISO).getTime() - new Date(startISO).getTime()) / 86_400_000))
 }

@@ -1,7 +1,6 @@
 package billing_test
 
 import (
-	"database/sql"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
-	"github.com/gethardcount/hardcount/internal/subscription"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/usage"
 )
@@ -184,98 +182,6 @@ func TestPreview_MatchesCycleClose(t *testing.T) {
 				if strings.Contains(w, "excludes mid-period proration") {
 					t.Fatalf("preview still disclaims proration it now applies: %q", w)
 				}
-			}
-		})
-	}
-}
-
-// A trialing subscription's preview is the first invoice after the trial.
-// Calendar billing, trial ending Oct 30: the first paid period is the stub
-// [Oct 30, Nov 1), billed 2/31 of the $49 base — on the trial-end invoice
-// for an in_advance plan (BillOnCreateTx), on the Nov 1 close for an
-// in_arrears one (emitBaseSegmentLine). Before, the preview of a trialing
-// sub showed the full $49 either way. Each case previews mid-trial, then
-// produces the real invoice (the trial-end flip as the expiry sweep runs it,
-// plus the close for in_arrears) and compares line for line.
-//
-// Mutation-verify: send trialing subs back to the flat window in
-// previewCycle → both cases red (4900 shown, 316 billed).
-func TestPreview_TrialEndingOn30thMatchesFirstInvoice(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	trialStart := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-	trialEnd := time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC)
-	firstEnd := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
-
-	for _, timing := range []domain.BillTiming{domain.BillInArrears, domain.BillInAdvance} {
-		t.Run(string(timing), func(t *testing.T) {
-			f := newParityFixture(t, db, "trial30-"+string(timing))
-			p, err := f.pricing.CreatePlan(f.ctx, f.tenantID, domain.Plan{
-				Code: "trial30", Name: "trial30", Currency: "USD",
-				BillingInterval: domain.BillingMonthly, BaseBillTiming: timing,
-				BaseAmountCents: 4900, Status: domain.PlanActive,
-			})
-			if err != nil {
-				t.Fatalf("create plan: %v", err)
-			}
-			// Created the way the API creates a trial: subscription.Service.Create
-			// with 29 trial days from Oct 1 stamps trial_end Oct 30 and, through
-			// firstPeriodAfterTrial, the first PAID period [Oct 30, Nov 1) as
-			// the current period.
-			created, err := subscription.NewService(f.subs, nil).Create(clock.WithEffectiveNow(f.ctx, trialStart), f.tenantID, subscription.CreateInput{
-				Code: "sub-trial30", DisplayName: "sub-trial30", CustomerID: f.custID,
-				BillingTime: domain.BillingTimeCalendar, TrialDays: 29,
-				Items: []subscription.CreateItemInput{{PlanID: p.ID, Quantity: 1}},
-			})
-			if err != nil {
-				t.Fatalf("create trialing sub: %v", err)
-			}
-			if created.Status != domain.SubscriptionTrialing || created.TrialEndAt == nil || !created.TrialEndAt.Equal(trialEnd) ||
-				created.CurrentBillingPeriodStart == nil || !created.CurrentBillingPeriodStart.Equal(trialEnd) ||
-				created.CurrentBillingPeriodEnd == nil || !created.CurrentBillingPeriodEnd.Equal(firstEnd) {
-				t.Fatalf("created sub status=%s trial_end=%v period=[%v, %v), want trialing, trial_end %v, period [%v, %v)",
-					created.Status, created.TrialEndAt, created.CurrentBillingPeriodStart, created.CurrentBillingPeriodEnd, trialEnd, trialEnd, firstEnd)
-			}
-			sub, err := f.subs.Get(f.ctx, f.tenantID, created.ID)
-			if err != nil {
-				t.Fatalf("reload sub: %v", err)
-			}
-
-			pv := f.createPreview(t, time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC), sub)
-			var got []string
-			for _, l := range pv.Lines {
-				got = append(got, previewFingerprint(l.LineType, l.Description, l.Quantity, l.AmountCents))
-			}
-			sort.Strings(got)
-			var pvTotal int64
-			if len(pv.Totals) == 1 {
-				pvTotal = pv.Totals[0].AmountCents
-			}
-
-			// The trial ends: flip + day-1 invoice in one tx, as the expiry
-			// sweep (ProcessExpiredTrials) does.
-			endEng := f.engine(t, trialEnd)
-			if _, err := f.subs.ActivateAfterTrialWithBill(f.ctx, f.tenantID, sub.ID, trialEnd, func(tx *sql.Tx, activated domain.Subscription) error {
-				_, _, err := endEng.BillOnCreateTx(f.ctx, tx, activated, trialEnd)
-				return err
-			}); err != nil {
-				t.Fatalf("trial end: %v", err)
-			}
-			if timing == domain.BillInArrears {
-				// The first invoice is the close of the first paid period.
-				if _, errs := f.engine(t, firstEnd.Add(time.Nanosecond)).RunCycleForTenant(f.ctx, f.tenantID, 50); len(errs) > 0 {
-					t.Fatalf("cycle close: %v", errs)
-				}
-			}
-			want := f.invoiceLinesNoPeriod(t, sub.ID)
-			if len(want) == 0 {
-				t.Fatal("no invoice was issued — the scenario is not exercising billing")
-			}
-			if strings.Join(got, "\n") != strings.Join(want, "\n") {
-				t.Fatalf("preview diverges from the first invoice after the trial:\npreview:\n%s\ninvoice:\n%s",
-					strings.Join(got, "\n"), strings.Join(want, "\n"))
-			}
-			if pvTotal != 316 { // 4900 × 2/31
-				t.Fatalf("preview total = %d, want 316 (2/31 of $49)", pvTotal)
 			}
 		})
 	}

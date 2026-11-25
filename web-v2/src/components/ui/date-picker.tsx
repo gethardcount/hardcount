@@ -303,8 +303,8 @@ export function DatePicker({ value, onChange, timeZone, now, min, placeholder = 
               // the lower bound to minDate when provided so disabled
               // years don't pollute the menu; otherwise default to a
               // 5-year past + 10-year future window from today. The
-              // upper bound is generous because annual-billing trial
-              // extensions and credit-grant expiries reach years out.
+              // upper bound is generous because credit-grant expiries
+              // reach years out.
               startMonth={minDate ? new Date(minDate.getFullYear(), 0) : new Date(todayDate.getFullYear() - 5, 0)}
               endMonth={new Date(todayDate.getFullYear() + 10, 11)}
             />

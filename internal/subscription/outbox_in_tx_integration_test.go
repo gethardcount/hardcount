@@ -217,31 +217,30 @@ func checkStatus(t *testing.T, what string, rr *httptest.ResponseRecorder, want 
 	}
 }
 
-// newTrial creates a trialing subscription on the basic and keeper plans for
-// the rig's customer, its trial ending June 24, 2026.
-func (r *eventRig) newTrial(t *testing.T) domain.Subscription {
+// newLastHours creates an active subscription on the basic and keeper plans
+// for the rig's customer whose period ends six hours after proNow: under half
+// a day is left, so an item change on it at proNow prorates nothing.
+func (r *eventRig) newLastHours(t *testing.T) domain.Subscription {
 	t.Helper()
 	active, err := r.store.Get(r.ctx, r.tenantID, r.subID)
 	if err != nil {
 		t.Fatalf("get subscription: %v", err)
 	}
-	trialStart := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
-	trialEnd := time.Date(2026, 6, 24, 0, 0, 0, 0, time.UTC)
-	periodEnd := trialEnd.AddDate(0, 1, 0)
-	trial, err := r.store.Create(r.ctx, r.tenantID, domain.Subscription{
-		Code: "sub-outbox-trial", DisplayName: "Outbox Trial", CustomerID: active.CustomerID,
-		Status: domain.SubscriptionTrialing, BillingTime: domain.BillingTimeCalendar,
-		TrialStartAt: &trialStart, TrialEndAt: &trialEnd, StartedAt: &trialStart,
-		CurrentBillingPeriodStart: &trialEnd, CurrentBillingPeriodEnd: &periodEnd, NextBillingAt: &periodEnd,
+	periodStart := time.Date(2026, 5, 16, 6, 0, 0, 0, time.UTC)
+	periodEnd := proNow.Add(6 * time.Hour)
+	sub, err := r.store.Create(r.ctx, r.tenantID, domain.Subscription{
+		Code: "sub-outbox-last-hours", DisplayName: "Outbox Last Hours", CustomerID: active.CustomerID,
+		Status: domain.SubscriptionActive, BillingTime: domain.BillingTimeAnniversary,
+		StartedAt: &periodStart, CurrentBillingPeriodStart: &periodStart, CurrentBillingPeriodEnd: &periodEnd, NextBillingAt: &periodEnd,
 		Items: []domain.SubscriptionItem{
 			{PlanID: r.plans["basic"].ID, Quantity: 1},
 			{PlanID: r.plans["keeper"].ID, Quantity: 1},
 		},
 	})
 	if err != nil {
-		t.Fatalf("create trialing subscription: %v", err)
+		t.Fatalf("create last-hours subscription: %v", err)
 	}
-	return trial
+	return sub
 }
 
 // itemOn returns the id of sub's item on planID.
@@ -257,8 +256,8 @@ func itemOn(t *testing.T, sub domain.Subscription, planID string) string {
 }
 
 // TestLifecycleEvents_ContextEndsAfterCommit_EventIsQueued: the operator's
-// schedule and clear of a cancel, pause and resume of collection, and trial
-// extension. Each request's context ends right after its change commits, and
+// schedule and clear of a cancel, and pause and resume of collection. Each
+// request's context ends right after its change commits, and
 // the event is saved. A clear or resume that changes nothing sends none.
 func TestLifecycleEvents_ContextEndsAfterCommit_EventIsQueued(t *testing.T) {
 	db := testutil.SetupTestDB(t)
@@ -281,17 +280,12 @@ func TestLifecycleEvents_ContextEndsAfterCommit_EventIsQueued(t *testing.T) {
 	r.checkOneEvent(t, domain.EventSubscriptionCollectionResumed, r.subID, operator)
 	checkStatus(t, "resume again", r.call(t, proNow, (*Handler).resumeCollection, nil, sub...), http.StatusOK)
 	r.checkOneEvent(t, domain.EventSubscriptionCollectionResumed, r.subID, operator)
-
-	trial := r.newTrial(t)
-	newEnd := time.Date(2026, 6, 28, 0, 0, 0, 0, time.UTC)
-	checkStatus(t, "extend trial", r.call(t, proNow, (*Handler).extendTrial, map[string]any{"trial_end": newEnd}, "id", trial.ID), http.StatusOK)
-	r.checkOneEvent(t, domain.EventSubscriptionTrialExtended, trial.ID, operator)
 }
 
 // TestItemEvents_ContextEndsAfterCommit_EventIsQueued: each item change, on
 // the path that writes its proration in the change's transaction (an active
-// subscription mid-period) and on the path that writes none (a trialing
-// subscription, a scheduled change). Each request's context ends right after
+// subscription mid-period) and on the path that writes none (the last hours
+// of a period, a scheduled change). Each request's context ends right after
 // its change commits, and the event is saved.
 func TestItemEvents_ContextEndsAfterCommit_EventIsQueued(t *testing.T) {
 	db := testutil.SetupTestDB(t)
@@ -314,22 +308,22 @@ func TestItemEvents_ContextEndsAfterCommit_EventIsQueued(t *testing.T) {
 	checkStatus(t, "remove item", r.call(t, proNow, (*Handler).removeItem, nil, "id", r.subID, "itemID", added), http.StatusNoContent)
 	r.checkOneEvent(t, domain.EventSubscriptionItemRemoved, r.subID, map[string]any{"item_id": added})
 
-	// Not prorated: a scheduled plan change, and an add and a removal on a
-	// trialing subscription.
+	// Not prorated: a scheduled plan change, and an add and a removal in the
+	// last hours of a period.
 	checkStatus(t, "schedule plan change", r.call(t, proNow, (*Handler).updateItem, UpdateItemInput{NewPlanID: r.plans["meter-a"].ID}, "id", r.subID, "itemID", r.keeperID), http.StatusOK)
 	r.checkOneEvent(t, domain.EventSubscriptionPendingChangeScheduled, r.subID, map[string]any{"item_id": r.keeperID})
 
-	trial := r.newTrial(t)
-	checkStatus(t, "add item to a trial", r.call(t, proNow, (*Handler).addItem, AddItemInput{PlanID: r.plans["pro"].ID, Quantity: 1}, "id", trial.ID), http.StatusCreated)
-	trial, err = r.store.Get(r.ctx, r.tenantID, trial.ID)
+	last := r.newLastHours(t)
+	checkStatus(t, "add item in the last hours", r.call(t, proNow, (*Handler).addItem, AddItemInput{PlanID: r.plans["pro"].ID, Quantity: 1}, "id", last.ID), http.StatusCreated)
+	last, err = r.store.Get(r.ctx, r.tenantID, last.ID)
 	if err != nil {
-		t.Fatalf("get trial: %v", err)
+		t.Fatalf("get last-hours subscription: %v", err)
 	}
-	trialAdded := itemOn(t, trial, r.plans["pro"].ID)
-	r.checkOneEvent(t, domain.EventSubscriptionItemAdded, trial.ID, map[string]any{"item_id": trialAdded})
+	lastAdded := itemOn(t, last, r.plans["pro"].ID)
+	r.checkOneEvent(t, domain.EventSubscriptionItemAdded, last.ID, map[string]any{"item_id": lastAdded})
 
-	checkStatus(t, "remove item from a trial", r.call(t, proNow, (*Handler).removeItem, nil, "id", trial.ID, "itemID", trialAdded), http.StatusNoContent)
-	r.checkOneEvent(t, domain.EventSubscriptionItemRemoved, trial.ID, map[string]any{"item_id": trialAdded})
+	checkStatus(t, "remove item in the last hours", r.call(t, proNow, (*Handler).removeItem, nil, "id", last.ID, "itemID", lastAdded), http.StatusNoContent)
+	r.checkOneEvent(t, domain.EventSubscriptionItemRemoved, last.ID, map[string]any{"item_id": lastAdded})
 }
 
 // TestCrossIntervalSwap_ContextEndsAfterCommit_ItemUpdatedIsQueued: an

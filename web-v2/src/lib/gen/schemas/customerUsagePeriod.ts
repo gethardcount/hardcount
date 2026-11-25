@@ -31,8 +31,8 @@ export type CustomerUsagePeriod = {
      * the amounts are what the period's invoices bill.
      * `explicit`: the window you sent. Its amounts are an
      * estimate, so a past window can differ from its invoices.
-     * Only active and trialing subscriptions are counted: the
-     * usage of a canceled subscription is left out. Each
+     * Only active subscriptions are counted: the usage of a
+     * canceled subscription is left out. Each
      * subscription's usage in the window is priced at the
      * prices of its current billing period.
      */

@@ -115,7 +115,7 @@ type AuditWriter interface {
 
 // SetAuditLogger wires the audit logger used by the engine to record
 // background-fired lifecycle events (scheduled cancellation, engine-
-// finalized invoices, trial auto-expiry). Without this, those auto-fires
+// finalized invoices). Without this, those auto-fires
 // only show in outbound webhooks and slog — the operator Activity feed
 // and the audit log miss them.
 func (e *Engine) SetAuditLogger(a AuditWriter) {
@@ -459,21 +459,7 @@ type SubscriptionReader interface {
 	// stale either way.
 	FireScheduledCancellationTx(ctx context.Context, tx *sql.Tx, tenantID, id string, expected subscription.PeriodSnapshot, at time.Time) (domain.Subscription, error)
 
-	// ActivateAfterTrialWithBill atomically transitions a sub from
-	// 'trialing' to 'active' AND runs billFn (the day-1 in_advance invoice)
-	// in the SAME tx (ADR-056 — the old post-flip bill was a revenue leak on
-	// failure). The UPDATE refuses when a cancel schedule is due at trial
-	// end and returns domain.ErrTrialCancelDue (ADR-069) — the caller routes
-	// to CancelAtTrialEnd instead of billing a customer who canceled.
-	// Already-active rows return InvalidState (caller re-reads and routes).
-	ActivateAfterTrialWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error)
-	// CancelAtTrialEnd is the dedicated FREE trialing→canceled transition
-	// (ADR-069): no invoice, canceled_at = trial_end_at, CAS on the observed
-	// trial end + a due schedule (domain.ErrTrialCancelConflict on a lost
-	// race — the sub is not handled this pass).
-	CancelAtTrialEnd(ctx context.Context, tenantID, id string, observedTrialEnd time.Time) (domain.Subscription, error)
-
-	// ListWithThresholds returns active+trialing subscriptions in the given
+	// ListWithThresholds returns active subscriptions in the given
 	// livemode partition that have at least one billing threshold configured
 	// (amount or per-item). Drives the threshold scan tick — each row is
 	// rated against its current partial-cycle running totals to decide
@@ -545,7 +531,7 @@ type InvoiceWriter interface {
 	// plan-swap / downgrade clawback) is sized off the post-change base, which
 	// can exceed the single base invoice's total; fanning the credit across the
 	// full funding set lets each piece stay within its own invoice's
-	// credit-note cap. ErrNotFound when nothing funded the period (trial / pure
+	// credit-note cap. ErrNotFound when nothing funded the period (pure
 	// in_arrears) so callers keep their existing no-op behavior.
 	FindFundingInvoicesForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) ([]domain.Invoice, error)
 	// GetLatestThresholdInvoiceForCycle returns the threshold watermark: the
@@ -1038,30 +1024,22 @@ func mergeUsageIntervals(ivs []usageInterval) []usageInterval {
 // 2026-10-22). Periods start at midnight of the day they started (ADR-012),
 // and usage is aggregated per customer and meter with no subscription key, so
 // a window that opens at the period start can reach usage that is not this
-// subscription's:
-//
-//   - trialEnd: usage before the trial end is trial usage, which is free. The
-//     first paid period starts at midnight of the trial-end day.
-//   - coverageEnds: per meter, where another subscription of the customer
-//     stopped covering it (domain.MeterCoverageEnd). The guard against two
-//     live subscriptions on one meter (rejectMeterOverlap) means an end
-//     inside this window came before this subscription took the meter, and
-//     the usage up to it was that subscription's to bill.
+// subscription's. coverageEnds holds, per meter, where another subscription
+// of the customer stopped covering it (domain.MeterCoverageEnd). The guard
+// against two live subscriptions on one meter (rejectMeterOverlap) means an
+// end inside this window came before this subscription took the meter, and
+// the usage up to it was that subscription's to bill.
 type usageFloors struct {
-	trialEnd     *time.Time
 	coverageEnds map[string][]time.Time
 }
 
 // start is where a usage window [s, e) for meter mid opens: at s, moved to
-// the trial end when that is later, then to the latest coverage end of
-// another subscription strictly inside the window. Strictly before e is what
+// the latest coverage end of another subscription strictly inside the
+// window. Strictly before e is what
 // keeps an earlier subscription's window whole: a later subscription's
 // coverage always ends after the earlier one's window does, so it never
 // moves it. The result can be at or past e, an empty window.
 func (f usageFloors) start(mid string, s, e time.Time) time.Time {
-	if f.trialEnd != nil && f.trialEnd.After(s) {
-		s = *f.trialEnd
-	}
 	for _, t := range f.coverageEnds[mid] {
 		if t.After(s) && t.Before(e) {
 			s = t
@@ -1072,22 +1050,19 @@ func (f usageFloors) start(mid string, s, e time.Time) time.Time {
 
 // loadUsageFloors reads sub's usage floors for windows inside [from, to].
 // A read failure is returned: a window built without its floor bills usage
-// another subscription already billed, or trial usage.
+// another subscription already billed.
 func (e *Engine) loadUsageFloors(ctx context.Context, sub domain.Subscription, from, to time.Time) (usageFloors, error) {
 	ends, err := e.intervalSnap.ListCustomerMeterCoverageEnds(ctx, sub.TenantID, sub.CustomerID, sub.ID, from, to)
 	if err != nil {
 		return usageFloors{}, fmt.Errorf("usage window: other subscriptions' meter coverage: %w", err)
 	}
-	return floorsOf(sub, ends), nil
+	return floorsOf(ends), nil
 }
 
-// floorsOf is sub's usage floors given the coverage ends read for its window.
-func floorsOf(sub domain.Subscription, ends []domain.MeterCoverageEnd) usageFloors {
+// floorsOf is the usage floors given the coverage ends read for a
+// subscription's window.
+func floorsOf(ends []domain.MeterCoverageEnd) usageFloors {
 	var f usageFloors
-	if sub.TrialEndAt != nil {
-		te := *sub.TrialEndAt
-		f.trialEnd = &te
-	}
 	for _, end := range ends {
 		if f.coverageEnds == nil {
 			f.coverageEnds = make(map[string][]time.Time)
@@ -1109,8 +1084,7 @@ func floorsOf(sub domain.Subscription, ends []domain.MeterCoverageEnd) usageFloo
 // previews, the live credit read (unbilledUsageCents) and customer usage.
 //
 // floors moves each window's start first (usageFloors.start), in both maps:
-// trial usage and another subscription's usage are nobody's here, whatever
-// the bucket.
+// another subscription's usage is nobody's here, whatever the bucket.
 //
 // TWO maps (ADR-066 §4): clamped carries the watermark-CLAMPED windows that
 // additive (sum/count) buckets bill from; usage in
@@ -1879,8 +1853,8 @@ func (e *Engine) applyTax(ctx context.Context, ts domain.TenantSettings, inclusi
 // errStillDue marks a subscription that was billed without error in this run
 // and came back due on a later page. billSubscription returns cleanly while the
 // sub is still due only when a concurrent change raced it: another closer won
-// its period twice in a row (errPeriodMoved), or a cancel or trial change was
-// rescheduled while it fired. The drain does not bill a sub twice in one run,
+// its period twice in a row (errPeriodMoved), or a cancel was rescheduled
+// while it fired. The drain does not bill a sub twice in one run,
 // so it reports the sub.
 //
 // It is saved as a counted failure (ADR-119), so the retry comes after the
@@ -2118,7 +2092,7 @@ const maxPeriodsPerSubPerCall = 10000
 // of debt before each scheduler tick); after downtime it bills every
 // missed period in one call.
 //
-// Returns the number of invoices generated (skipped/trial periods
+// Returns the number of invoices generated (skipped periods
 // don't count) and any fatal error encountered. Partial progress
 // is preserved on error: invoices generated before the error stay
 // committed (each iteration is its own DB tx via billOnePeriod).
@@ -2449,121 +2423,6 @@ func (e *Engine) resolveBillingInputs(ctx context.Context, sub domain.Subscripti
 	return plans, invoiceCurrency, nil
 }
 
-// handleTrialState runs the trial lifecycle for a trialing subscription:
-// cancel-free when a cancel is due at trial end, or atomically flip to
-// active (billing day-1 in-advance coverage) when the trial has elapsed.
-// Returns the (possibly-updated) subscription and done=true when the caller
-// should stop billing this sub this tick (canceled, or resolved to a
-// non-active state by a concurrent writer); done=false
-// means continue to normal billing with the returned subscription.
-// Non-trialing subscriptions return (sub, false, nil) immediately.
-// Extracted from billOnePeriod (behavior-preserving).
-func (e *Engine) handleTrialState(ctx context.Context, sub domain.Subscription, now, periodStart, periodEnd time.Time) (domain.Subscription, bool, error) {
-	if sub.Status == domain.SubscriptionTrialing {
-		// A trialing row's period ends after its trial (the trial's first
-		// paid period, firstPeriodAfterTrial), so it is not due before the
-		// trial ends.
-		if sub.TrialEndAt != nil && now.Before(*sub.TrialEndAt) {
-			return sub, true, fmt.Errorf("subscription %s is due before its trial ends at %s", sub.ID, sub.TrialEndAt.Format(time.RFC3339))
-		}
-		// ADR-069: a due cancel schedule means CANCEL FREE — never
-		// activate-and-bill. Pre-route on the snapshot; the activation
-		// UPDATE's SQL guard is the atomic backstop for a schedule landing
-		// after it.
-		if trialCancelsFree(sub) {
-			return sub, true, e.cancelTrialAtEndFromEngine(ctx, sub)
-		}
-		var firstInv domain.Invoice
-		var haveFirstInv bool
-		updated, err := e.subs.ActivateAfterTrialWithBill(ctx, sub.TenantID, sub.ID, now, func(tx *sql.Tx, activated domain.Subscription) error {
-			// Day-1 in_advance coverage rides the activation tx (ADR-056
-			// alignment — the old post-flip BillOnCreate lost the fee on
-			// failure while WARNing it was "deferred"). The invoice is
-			// CAPTURED for the post-commit finalize below — discarding it
-			// left day-1 invoices durable but never tax-committed, audited,
-			// or auto-charged (spec-verifier catch, ADR-069 item 8).
-			inv, ok, billErr := e.BillOnCreateTx(ctx, tx, activated, now)
-			if billErr != nil {
-				return billErr
-			}
-			firstInv, haveFirstInv = inv, ok
-			return nil
-		})
-		if err != nil {
-			if errors.Is(err, domain.ErrTrialNotDue) {
-				// Extend trial committed after the snapshot: the trial now
-				// ends after this close. Nothing was written; the close
-				// reads the subscription again.
-				return sub, true, errPeriodMoved
-			}
-			if errors.Is(err, domain.ErrTrialCancelDue) {
-				// Schedule committed after the snapshot — route to the free
-				// cancel. NO invoice, NO cycle advance either way.
-				fresh, gErr := e.subs.Get(ctx, sub.TenantID, sub.ID)
-				if gErr != nil {
-					return sub, true, fmt.Errorf("re-read after trial-cancel guard: %w", gErr)
-				}
-				return sub, true, e.cancelTrialAtEndFromEngine(ctx, fresh)
-			}
-			if errors.Is(err, errs.ErrInvalidState) {
-				// The row left 'trialing' concurrently. Pre-ADR-069 this
-				// fell through and BILLED the stale trialing snapshot —
-				// which, once a concurrent scan can CANCEL the sub, means
-				// invoicing a canceled customer. Re-read and route on the
-				// truth: active → bill fresh below; anything else → done,
-				// no invoice, no advance.
-				fresh, gErr := e.subs.Get(ctx, sub.TenantID, sub.ID)
-				if gErr != nil {
-					return sub, true, fmt.Errorf("re-read after activation conflict: %w", gErr)
-				}
-				if fresh.Status != domain.SubscriptionActive {
-					slog.Info("trial resolved to a non-active state by a concurrent writer; skipping billing",
-						"subscription_id", sub.ID, "status", fresh.Status)
-					return sub, true, nil
-				}
-				sub = fresh
-			} else {
-				// Loud: an activation failure must not silently bill the
-				// stale snapshot (the pre-fix fall-through).
-				return sub, true, fmt.Errorf("auto-activate after trial: %w", err)
-			}
-		} else {
-			sub = updated
-			// Post-commit external finalize for the day-1 invoice (audit row,
-			// tax commit, auto-charge / retry enrollment) — Stripe calls never
-			// ride a DB tx; same contract as the three service-side
-			// activation writers.
-			if haveFirstInv {
-				e.FinalizeOnCreateInvoice(ctx, updated, firstInv)
-			}
-			slog.Info("trial ended, transitioned to active",
-				"subscription_id", sub.ID,
-				"tenant_id", sub.TenantID,
-			)
-			// Audit the auto-flip — third trial-end path (cycle-close);
-			// matches the row the operator EndTrial and the scheduler's
-			// expiry scan write.
-			if e.auditLogger != nil {
-				meta := map[string]any{
-					"action":       domain.SubAuditTrialEnded,
-					"customer_id":  sub.CustomerID,
-					"triggered_by": "schedule",
-				}
-				if sub.TrialEndAt != nil {
-					meta["trial_end_at"] = sub.TrialEndAt.UTC().Format(time.RFC3339)
-				}
-				_ = e.auditLogger.Log(ctx, sub.TenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, meta)
-			}
-			// ADR-031 trial-end in_advance coverage now rides the
-			// activation tx above (BillOnCreateTx via WithBill) — atomic
-			// with the flip, ADR-056/069.
-			// subscription.trial_ended (triggered_by=schedule) is enqueued
-			// IN the ActivateAfterTrial tx (store-level DispatchTx subset).
-		}
-	}
-	return sub, false, nil
-}
-
 // nominalRate returns the actually-billed CONFIGURED per-unit rate (decimal
 // cents) for a per_unit usage line, so the invoice shows the clean rate-card
 // figure ($0.000003) instead of the effective amount÷quantity rate, which the
@@ -2739,10 +2598,8 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	)
 	defer span.End()
 
-	// Guard: only bill active or trialing subscriptions. Trialing subs flow
-	// through to the trial state machine below, which cancels free or
-	// atomically flips to active and then bills.
-	if sub.Status != domain.SubscriptionActive && sub.Status != domain.SubscriptionTrialing {
+	// Guard: only bill active subscriptions.
+	if sub.Status != domain.SubscriptionActive {
 		slog.Info("skipping billing (not active)", "subscription_id", sub.ID, "status", sub.Status)
 		return false, nil
 	}
@@ -2763,8 +2620,6 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	//   - The pause is read at the cycle close: the period ending May 1
 	//     stays a draft when the pause resumes May 5, even when the
 	//     close runs May 20.
-	//   - Trial-end activation stamps `activated_at` at the cycle's
-	//     own boundary.
 	//   - Cancel-at-period-end / scheduled-change applications stamp
 	//     their `canceled_at` / `applied_at` at the cycle boundary.
 	//   - Tax calculation date matches the cycle, so the tax rate
@@ -2800,16 +2655,9 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	periodStart := *sub.CurrentBillingPeriodStart
 	periodEnd := *sub.CurrentBillingPeriodEnd
 
-	// Trial lifecycle: cancel-free, or flip-to-active.
-	sub, trialDone, err := e.handleTrialState(ctx, sub, now, periodStart, periodEnd)
-	if trialDone {
-		return false, err
-	}
-
-	// ADR-115: the snapshot every write below proves. `sub` here is the
-	// RETURNING row of any trial flip — its period is the one this close
-	// bills — so a threshold fire, plan swap, cancel or sibling close that
-	// commits from here on makes this close's CAS miss and nothing written.
+	// ADR-115: the snapshot every write below proves. A threshold fire, plan
+	// swap, cancel or sibling close that commits from here on makes this
+	// close's CAS miss and nothing written.
 	expected := subscription.SnapshotOf(sub)
 
 	// Gather pricing inputs for this period (plans, currency); buildLineItems
@@ -2857,7 +2705,6 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	//   - in_arrears item removed mid-period: pre-remove segment
 	//     emits, but post-remove there's no current item, so the
 	//     next cycle's invoice may have zero base lines.
-	//   - Pure-trial period closure: nothing to bill yet.
 	//
 	// Still advance the cycle (or fire the scheduled cancel) so the period
 	// anchor moves forward — the absence of an invoice doesn't mean the
@@ -3058,16 +2905,15 @@ func (e *Engine) nextInvoiceNumber(ctx context.Context, tx *sql.Tx, tenantID str
 // inserts the day-1 in_advance invoice on the caller's tx but does NOT finalize
 // (audit / tax-commit / auto-charge are external and must run after the tx
 // commits). The caller commits, then calls FinalizeOnCreateInvoice post-commit.
-// Used by create and the trial flip, so the day-1 invoice commits
-// atomically with the subscription write. (The cross-interval plan swap uses
+// Used by create, so the day-1 invoice commits atomically with the
+// subscription write. (The cross-interval plan swap uses
 // BillOnPlanSwapTx, which also bills the old period's usage.)
 // Returns ok=false (nil error) for the no-op cases (no in_advance items / zero
 // subtotal). A unique violation is an error: it poisons the caller's tx.
 //
 // startAt is the instant the billed period began for this subscription: the
-// trial end on a trial flip, the request's now on create and early
-// trial end (and the swap instant for BillOnPlanSwapTx). The pause is read as it stood then, because a trial
-// flip can run after resumes_at for a period that began while still paused.
+// request's now on create (and the swap instant for BillOnPlanSwapTx). The
+// pause is read as it stood then.
 func (e *Engine) BillOnCreateTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, startAt time.Time) (domain.Invoice, bool, error) {
 	ctx, span := telemetry.Tracer("billing").Start(ctx, "billing.BillOnCreateTx",
 		trace.WithAttributes(
@@ -3244,11 +3090,9 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 	}
 
 	// The invoice is issued when its period began. Every caller passes that
-	// instant: effective-now for create, early trial end and the
-	// plan swap; trial_end_at for the trial-expiry scans; the cycle close for
-	// the engine's own trial flip. Reading the clock here would date a day-1
-	// invoice billed late (a catch-up after downtime) after the cycle
-	// invoices it precedes (B12, P-3).
+	// instant: effective-now for create and the plan swap. Reading the clock
+	// here would date a day-1 invoice billed late after the cycle invoices it
+	// precedes (B12, P-3).
 	now := startAt
 	periodStart := *sub.CurrentBillingPeriodStart
 	periodEnd := *sub.CurrentBillingPeriodEnd
@@ -3370,9 +3214,8 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 // onCreateBaseLines is the day-1 in_advance invoice's base-fee lines for
 // [periodStart, periodEnd]: one line per in_advance item, prorated when the
 // period is shorter than a full plan cycle (a calendar stub). The day-1
-// invoice (buildOnCreateInvoice), the in-advance swap's new period
-// (BillOnPlanSwapTx) and the operator preview of a trialing subscription
-// (previewTrialEnd) share this one copy of the math.
+// invoice (buildOnCreateInvoice) and the in-advance swap's new period
+// (BillOnPlanSwapTx) share this one copy of the math.
 func onCreateBaseLines(sub domain.Subscription, plans map[string]domain.Plan, advanceItems []domain.SubscriptionItem, periodStart, periodEnd time.Time, invoiceCurrency string, billingLoc *time.Location) ([]closeBaseLine, error) {
 	out := make([]closeBaseLine, 0, len(advanceItems))
 	periodDays := roundDays(periodEnd.Sub(periodStart))
@@ -3716,7 +3559,7 @@ type finalOnCancelKind int
 
 const (
 	// finalOnCancelNone: a guard found nothing to bill (not canceled, no
-	// period, a never-activated trial, no items). Nothing is written.
+	// period, no items). Nothing is written.
 	finalOnCancelNone finalOnCancelKind = iota
 	// finalOnCancelZero: the subtotal is zero or less. No invoice is written,
 	// only the row for usage below zero, if there is any.
@@ -3773,26 +3616,6 @@ func (e *Engine) priceFinalOnCancel(ctx context.Context, sub domain.Subscription
 	// canceled_at at or before period_start is defensive: nothing of this
 	// period ran, so there is nothing to bill.
 	if !canceledAt.After(periodStart) {
-		return p, nil
-	}
-
-	// Never-activated trial write-off (ADR-069): a sub canceled straight out
-	// of 'trialing' (activated_at never stamped) emits NO final invoice —
-	// trials are free. The reachable window is the post-trial LAG: the trial
-	// elapsed but the activation scan hadn't flipped the row yet, so
-	// canceled_at lands at or after trial_end, which is after period_start
-	// (the first paid period starts at midnight of the trial-end day,
-	// firstPeriodAfterTrial), and this function would otherwise bill
-	// prorated base + usage for a
-	// never-activated sub. Decided: write off — matches the trial-end
-	// scheduled-cancel semantics ("you won't be charged") rather than
-	// billing on scan lag the customer can't see. Subs created active carry
-	// activated_at (or no trial fields) and are unaffected. It sits above the
-	// period-end refusal so a trial stays a free cancel however far behind
-	// its activation is.
-	if sub.TrialEndAt != nil && sub.ActivatedAt == nil {
-		slog.Info("immediate cancel of a never-activated trial — no final invoice (trials are free)",
-			"subscription_id", sub.ID, "tenant_id", sub.TenantID)
 		return p, nil
 	}
 
@@ -4229,7 +4052,7 @@ func (e *Engine) planRelief(ctx context.Context, sub domain.Subscription, in can
 	p := reliefPlan{reason: reason, what: what, desc: in.Desc}
 	sources, err := e.invoices.FindFundingInvoicesForPeriod(ctx, sub.TenantID, sub.ID, in.PeriodStart, in.PeriodEnd)
 	if errors.Is(err, errs.ErrNotFound) {
-		// No in_advance invoice funded this period (e.g. trial cancel) — nothing to relieve.
+		// No in_advance invoice funded this period — nothing to relieve.
 		slog.InfoContext(ctx, what+": no in_advance invoice for period; no relief to apply",
 			"subscription_id", sub.ID, "customer_id", sub.CustomerID, "period_start", in.PeriodStart)
 		return reliefPlan{}, nil
@@ -5209,46 +5032,4 @@ func (e *Engine) tenantLocation(ctx context.Context, tenantID string) (*time.Loc
 		return nil, refuse(refusalTimezone, fmt.Errorf("load tenant timezone %q: %w", ts.Timezone, err))
 	}
 	return loc, nil
-}
-
-// cancelTrialAtEndFromEngine routes the engine's trial branch (the fourth
-// activation writer, ADR-069) through the dedicated free cancel and fires
-// the same terminal vocabulary as the subscription service's winner-once
-// helper: subscription.canceled (canceled_by=schedule,
-// reason=trial_end_cancel) + an AuditActionCancel row. NO trial_ended, NO
-// invoice, NO cycle advance. A CAS conflict is a silent no-op — another
-// site handled the sub, or the schedule was rescinded and the next tick
-// routes the fresh state.
-func (e *Engine) cancelTrialAtEndFromEngine(ctx context.Context, sub domain.Subscription) error {
-	if sub.TrialEndAt == nil {
-		return nil
-	}
-	canceled, err := e.subs.CancelAtTrialEnd(ctx, sub.TenantID, sub.ID, *sub.TrialEndAt)
-	if errors.Is(err, domain.ErrTrialCancelConflict) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("cancel at trial end: %w", err)
-	}
-	if e.auditLogger != nil {
-		meta := map[string]any{
-			"action":       domain.SubAuditTrialEndCancel,
-			"customer_id":  canceled.CustomerID,
-			"triggered_by": "schedule",
-		}
-		if canceled.CanceledAt != nil {
-			meta["canceled_at"] = canceled.CanceledAt.UTC().Format(time.RFC3339)
-		}
-		// trial_end_at is its own fact, under its own key, as in
-		// subscription.cancelTrialAtEnd, the other writer of this vocabulary.
-		if sub.TrialEndAt != nil {
-			meta["trial_end_at"] = sub.TrialEndAt.UTC().Format(time.RFC3339)
-		}
-		_ = e.auditLogger.Log(ctx, sub.TenantID, domain.AuditActionCancel, "subscription", canceled.ID, canceled.Code, meta)
-	}
-	// subscription.canceled (schedule + trial_end_cancel) is enqueued IN the
-	// CancelAtTrialEnd tx (store-level DispatchTx subset).
-	slog.Info("trial ended with a due cancel schedule — canceled free of charge (engine path)",
-		"subscription_id", canceled.ID, "tenant_id", sub.TenantID)
-	return nil
 }

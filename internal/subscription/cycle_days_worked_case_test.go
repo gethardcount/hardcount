@@ -58,20 +58,20 @@ func TestCycleDays_WorkedCase_ProrationInAOneDaySeam(t *testing.T) {
 	}
 }
 
-// A trialing subscription's period starts at its trial end, after now, so
-// the days to its end can exceed the period. An item change on it is refused
-// (only an active subscription's items change), and the update path does not
-// work out days left for it, as the add and remove paths do not.
-func TestUpdateItem_TrialingSubscription_RefusedWithNoProration(t *testing.T) {
+// An item change on a canceled subscription is refused (only an active
+// subscription's items change), though its last period has days left, and
+// nothing is prorated.
+func TestUpdateItem_CanceledSubscription_RefusedWithNoProration(t *testing.T) {
 	now := time.Date(2027, 1, 10, 0, 0, 0, 0, time.UTC)
-	start := time.Date(2027, 1, 20, 0, 0, 0, 0, time.UTC) // the trial ends on Jan 20
-	end := time.Date(2027, 2, 20, 0, 0, 0, 0, time.UTC)
+	start := time.Date(2026, 12, 20, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2027, 1, 20, 0, 0, 0, 0, time.UTC)
+	canceledAt := time.Date(2027, 1, 5, 0, 0, 0, 0, time.UTC)
 	ctx := clock.WithEffectiveNow(context.Background(), now)
 	store := newMemStore()
 	sub, err := store.CreateWithBill(context.Background(), "t1", domain.Subscription{
-		Code: "trial", DisplayName: "Trial", CustomerID: "cus_1",
-		Status: domain.SubscriptionTrialing, BillingTime: domain.BillingTimeAnniversary, BillingAnchorDay: 20,
-		TrialEndAt: &start, CurrentBillingPeriodStart: &start, CurrentBillingPeriodEnd: &end,
+		Code: "canceled", DisplayName: "Canceled", CustomerID: "cus_1",
+		Status: domain.SubscriptionCanceled, BillingTime: domain.BillingTimeAnniversary, BillingAnchorDay: 20,
+		CanceledAt: &canceledAt, CurrentBillingPeriodStart: &start, CurrentBillingPeriodEnd: &end,
 		Items: []domain.SubscriptionItem{{PlanID: "plan_seats", Quantity: 1}},
 	}, nil)
 	if err != nil {
@@ -89,11 +89,14 @@ func TestUpdateItem_TrialingSubscription_RefusedWithNoProration(t *testing.T) {
 	body, _ := json.Marshal(UpdateItemInput{Quantity: &qty})
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, updateItemURL(auth.WithTenantID(ctx, "t1"), sub.ID, sub.Items[0].ID, body))
-	if rr.Code < 400 {
-		t.Fatalf("status %d, want a refusal: only an active subscription's items change. body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status %d, want 409: only an active subscription's items change. body=%s", rr.Code, rr.Body.String())
 	}
 	if len(invoices.createdInvoices) != 0 {
 		t.Errorf("proration invoices = %d, want 0", len(invoices.createdInvoices))
+	}
+	if got, _ := store.Get(context.Background(), "t1", sub.ID); got.Items[0].Quantity != 1 {
+		t.Errorf("quantity after the refused change = %d, want 1", got.Items[0].Quantity)
 	}
 }
 

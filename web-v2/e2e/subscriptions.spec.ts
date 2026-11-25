@@ -74,7 +74,7 @@ function itemsCard(page: Page) {
   return page.getByRole('main').locator('[data-slot="card"]').filter({ has: page.getByRole('columnheader', { name: 'Pending change' }) })
 }
 
-// The "Billing cycle" (or "Trial") cell of the summary card and its value.
+// The "Billing cycle" cell of the summary card and its value.
 function summaryCell(page: Page, label: string) {
   return page.getByRole('main').getByText(label, { exact: true }).locator('..')
 }

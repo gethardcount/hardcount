@@ -115,7 +115,7 @@ func (s *PostgresStore) finishCancelTx(ctx context.Context, tx *sql.Tx, id strin
 // ---------------------------------------------------------------------------
 
 const subCols = `id, tenant_id, code, display_name, customer_id, status, billing_time,
-	trial_start_at, trial_end_at, started_at, activated_at, canceled_at,
+	started_at, canceled_at,
 	cancel_at, COALESCE(cancel_at_period_end, false),
 	pause_collection_behavior, pause_collection_resumes_at, pause_collection_invoice_id,
 	billing_threshold_amount_gte,
@@ -204,21 +204,19 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 
 	err = scanSubRow(tx.QueryRowContext(ctx, `
 		INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status,
-			billing_time, trial_start_at, trial_end_at, started_at,
+			billing_time, started_at,
 			current_billing_period_start, current_billing_period_end, next_billing_at,
 			billing_anchor_day,
-			activated_at,
 			created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13)
 		RETURNING `+subCols,
 		id, tenantID, sub.Code, sub.DisplayName, sub.CustomerID,
-		sub.Status, sub.BillingTime, postgres.NullableTime(sub.TrialStartAt),
-		postgres.NullableTime(sub.TrialEndAt), postgres.NullableTime(sub.StartedAt),
+		sub.Status, sub.BillingTime, postgres.NullableTime(sub.StartedAt),
 		postgres.NullableTime(sub.CurrentBillingPeriodStart),
 		postgres.NullableTime(sub.CurrentBillingPeriodEnd),
 		postgres.NullableTime(sub.NextBillingAt),
 		sub.BillingAnchorDay,
-		postgres.NullableTime(sub.ActivatedAt), now,
+		now,
 	), &sub)
 
 	if err != nil {
@@ -265,13 +263,10 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 		return domain.Subscription{}, err
 	}
 
-	// ADR-101: a start-now create IS the items' billable open — one interval
-	// per item at the (already day-snapped) period start, same tx. A
-	// trialing create opens nothing; the trial's end opens them.
-	if sub.Status == domain.SubscriptionActive {
-		if err := intervalOpenForItems(ctx, tx, sub, "create"); err != nil {
-			return domain.Subscription{}, err
-		}
+	// ADR-101: a create IS the items' billable open — one interval per item
+	// at the (already day-snapped) period start, same tx.
+	if err := intervalOpenForItems(ctx, tx, sub, "create"); err != nil {
+		return domain.Subscription{}, err
 	}
 
 	// subscription.created rides the create tx (DispatchTx subscription
@@ -401,10 +396,10 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.S
 	return subs, total, nil
 }
 
-// ListLiveByCustomer returns every active and trialing subscription of the
-// customer, items and thresholds hydrated, in one transaction. It backs
-// usage ingest's open-period read (usage.OpenPeriodReader), which runs
-// before every event write, so it is one narrow read: no count, no page.
+// ListLiveByCustomer returns every active subscription of the customer,
+// items and thresholds hydrated, in one transaction. It backs usage ingest's
+// open-period read (usage.OpenPeriodReader), which runs before every event
+// write, so it is one narrow read: no count, no page.
 // Capped at 1000 subscriptions, far above the live ones one customer holds.
 func (s *PostgresStore) ListLiveByCustomer(ctx context.Context, tenantID, customerID string) ([]domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -415,7 +410,7 @@ func (s *PostgresStore) ListLiveByCustomer(ctx context.Context, tenantID, custom
 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
-		WHERE s.customer_id = $1 AND s.status IN ('active', 'trialing')
+		WHERE s.customer_id = $1 AND s.status = 'active'
 		ORDER BY s.created_at ASC, s.id ASC LIMIT 1000
 	`, customerID)
 	if err != nil {
@@ -452,14 +447,13 @@ func (s *PostgresStore) ListLiveByCustomer(ctx context.Context, tenantID, custom
 // may be nil. billFn gets the row as the flip left it; the row returned, and
 // the one subscription.canceled carries, is the retired one (finishCancelTx).
 //
-// The first statement is a compare-and-set (ADR-115, ADR-139). It matches a
-// trialing or active row only: trialing (a customer leaving during a trial;
-// Stripe, Lago, Recurly and Chargebee all allow it) and active. It also
-// requires the row to still hold `expected`, the status, period start and
-// next_billing_at the caller priced the bill from. Zero rows resolve to
-// ErrNotFound (row gone), InvalidState "already terminated" (canceled,
-// today's answer to a second cancel), or ErrWatermarkMoved (anything else
-// moved; nothing was written, and the caller plans again from the new row).
+// The first statement is a compare-and-set (ADR-115, ADR-139). It matches an
+// active row only, and requires the row to still hold `expected`, the
+// status, period start and next_billing_at the caller priced the bill from.
+// Zero rows resolve to ErrNotFound (row gone), InvalidState "already
+// terminated" (canceled, today's answer to a second cancel), or
+// ErrWatermarkMoved (anything else moved; nothing was written, and the
+// caller plans again from the new row).
 func (s *PostgresStore) CancelAtomicWithBill(ctx context.Context, tenantID, id string, expected PeriodSnapshot, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -472,7 +466,7 @@ func (s *PostgresStore) CancelAtomicWithBill(ctx context.Context, tenantID, id s
 		UPDATE subscriptions
 		SET status = 'canceled', canceled_at = $1, updated_at = $1
 		WHERE id = $2
-		  AND status IN ('trialing', 'active')
+		  AND status = 'active'
 		  AND status = $3
 		  AND current_billing_period_start IS NOT DISTINCT FROM $4
 		  AND next_billing_at              IS NOT DISTINCT FROM $5
@@ -568,21 +562,15 @@ func retireLiveOnlyStateTx(ctx context.Context, tx *sql.Tx, id string) (domain.S
 	return sub, nil
 }
 
-// ScheduleCancellation persists the soft-cancel intent. The schedule fires
-// through TWO consumers (ADR-069): the billing cycle scan at period
-// boundaries for ACTIVE subs, and the trial-end guard/CancelAtTrialEnd for
-// TRIALING subs (a free, no-invoice cancel at trial_end_at). Returns the
-// updated subscription with hydrated items so the handler can echo the
-// same shape it returns elsewhere, and queues subscription.cancel_scheduled
-// in the same transaction.
+// ScheduleCancellation persists the soft-cancel intent, which the billing
+// cycle scan fires. Returns the updated subscription with hydrated items so
+// the handler can echo the same shape it returns elsewhere, and queues
+// subscription.cancel_scheduled in the same transaction.
 //
-// The UPDATE CAS-es on observedStatus — the status the caller validated the
-// intent under — because the flag's MEANING is status-polymorphic: landing
-// a "free at trial end" intent on a sub an activation writer just flipped
-// would silently turn it into a paid-period cancel. Status drift returns
-// InvalidState (409, re-read). Paused subs remain schedulable (Stripe
-// parity); canceled is rejected — nothing to schedule once
-// terminated.
+// The UPDATE CAS-es on observedStatus, the status the caller validated the
+// intent under. Status drift returns InvalidState (409, re-read). Paused
+// subs remain schedulable (Stripe parity); canceled is rejected — nothing
+// to schedule once terminated.
 func (s *PostgresStore) ScheduleCancellation(ctx context.Context, tenantID, id string, cancelAt *time.Time, cancelAtPeriodEnd bool, observedStatus domain.SubscriptionStatus) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -592,12 +580,8 @@ func (s *PostgresStore) ScheduleCancellation(ctx context.Context, tenantID, id s
 
 	now := clock.Now(ctx)
 	var sub domain.Subscription
-	// CAS on the status the caller VALIDATED the intent under (ADR-069): the
-	// schedule flag is status-polymorphic — on a trialing sub AtPeriodEnd
-	// means "cancel free at trial end", on an active sub it means "cancel at
-	// paid-period end, charged". Landing the flag on a sub an activation
-	// writer just flipped would silently invert the promise the operator was
-	// shown. Zero rows with a live row = state changed → 409, re-read.
+	// CAS on the status the caller validated the intent under. Zero rows
+	// with a live row = state changed → 409, re-read.
 	err = scanSubRow(tx.QueryRowContext(ctx, `
 		UPDATE subscriptions
 		SET cancel_at = $1, cancel_at_period_end = $2, updated_at = $3
@@ -629,7 +613,7 @@ func (s *PostgresStore) ScheduleCancellation(ctx context.Context, tenantID, id s
 		return domain.Subscription{}, err
 	}
 	// The row carries cancel_at, cancel_at_period_end and the derived
-	// cancel_effective_at (ADR-069: when the cancel actually lands).
+	// cancel_effective_at (when the cancel lands).
 	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionCancelScheduled, sub, nil); err != nil {
 		return domain.Subscription{}, err
 	}
@@ -872,8 +856,7 @@ func (s *PostgresStore) FireScheduledCancellationWithBill(ctx context.Context, t
 // its audit row). Rejects a
 // canceled row since collection-pause on a terminated sub has no meaning —
 // the engine wouldn't observe the row anyway, but failing loudly here keeps
-// the API honest. Trialing and active are allowed; there is no paused
-// status.
+// the API honest. Active is allowed; there is no paused status.
 func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection, onResume ResumeAudit) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1269,285 +1252,6 @@ func (s *PostgresStore) ResumeLiftedPause(ctx context.Context, tenantID string, 
 	return cleared, nil
 }
 
-// ActivateAfterTrial flips status 'trialing' → 'active' atomically. Sets
-// activated_at = at if currently NULL (preserves the original activation
-// timestamp on re-runs). Used by the billing engine when the trial window
-// has elapsed during a cycle scan, and by the operator-facing EndTrial
-// service action. Returns errs.InvalidState if the row's status was not
-// 'trialing' at UPDATE time (e.g. it was already activated or canceled);
-// the caller distinguishes this from missing-row by querying current
-// status when no row matches.
-func (s *PostgresStore) ActivateAfterTrial(ctx context.Context, tenantID, id string, at time.Time) (domain.Subscription, error) {
-	return s.ActivateAfterTrialWithBill(ctx, tenantID, id, at, nil)
-}
-
-// ActivateAfterTrialWithBill flips 'trialing' → 'active' AND runs billFn (the
-// day-1 in_advance invoice insert) in the SAME transaction, so a billing
-// failure rolls the activation back rather than leaving an active sub with no
-// first-period invoice (the cycle scheduler skips the just-elapsed in_advance
-// segment, so a lost day-1 invoice is a permanent revenue leak). ADR-056.
-// billFn may be nil.
-func (s *PostgresStore) ActivateAfterTrialWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	sub, err := s.activateAfterTrialInTx(ctx, tx, id, at)
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-	if billFn != nil {
-		if err := billFn(tx, sub); err != nil {
-			return domain.Subscription{}, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.Subscription{}, err
-	}
-	return sub, nil
-}
-
-func (s *PostgresStore) activateAfterTrialInTx(ctx context.Context, tx *sql.Tx, id string, at time.Time) (domain.Subscription, error) {
-	var sub domain.Subscription
-	// The schedule-empty predicate is the ADR-069 TOCTOU killer: a
-	// cancel-at-trial-end committing between a scan's snapshot and this
-	// UPDATE must WIN — activating (and billing) a customer who canceled is
-	// the audit bug this arc exists to fix. Callers route the typed
-	// domain.ErrTrialCancelDue to the dedicated cancel transition. The
-	// trial-end predicate proves the end the caller acts for: an Extend trial
-	// that commits after the caller read the row moves the end past at, and
-	// the flip refuses (domain.ErrTrialNotDue) instead of activating and
-	// billing at the old end.
-	err := scanSubRow(tx.QueryRowContext(ctx, `
-		UPDATE subscriptions
-		SET status = 'active',
-		    activated_at = COALESCE(activated_at, $1),
-		    updated_at = $1
-		WHERE id = $2 AND status = 'trialing'
-		  AND cancel_at IS NULL AND cancel_at_period_end = false
-		  AND (trial_end_at IS NULL OR trial_end_at <= $1)
-		RETURNING `+subCols,
-		at, id,
-	), &sub)
-	if err == sql.ErrNoRows {
-		return domain.Subscription{}, s.classifyActivationConflict(ctx, tx, id, &at)
-	}
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
-		return domain.Subscription{}, err
-	}
-	if err := lockPlansTx(ctx, tx, itemPlanIDs(sub.Items)); err != nil {
-		return domain.Subscription{}, err
-	}
-	// ADR-101: trial conversion IS the items' billable open — at the
-	// post-trial period start stamped at creation (kept current by
-	// ExtendTrial), not at the flip instant.
-	if err := intervalOpenForItems(ctx, tx, sub, "trial_convert"); err != nil {
-		return domain.Subscription{}, err
-	}
-	// Schedule-driven trial end (engine catchup / expiry sweep) — enqueue
-	// in-tx with the provenance the prior post-commit dispatches stamped.
-	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionTrialEnded, sub, map[string]any{
-		"ended_at":     at.UTC(),
-		"triggered_by": "schedule",
-	}); err != nil {
-		return domain.Subscription{}, err
-	}
-	return sub, nil
-}
-
-// classifyActivationConflict names WHY a trialing→active UPDATE matched no
-// row: gone, already non-trialing, blocked by a pending cancel schedule
-// (domain.ErrTrialCancelDue — the caller routes to CancelAtTrialEnd), or
-// trialing with an end after at (domain.ErrTrialNotDue — extended since the
-// caller read it; nothing to do yet). at is nil for an early end, which ends
-// the trial before its end on purpose.
-func (s *PostgresStore) classifyActivationConflict(ctx context.Context, tx *sql.Tx, id string, at *time.Time) error {
-	var currentStatus string
-	var cancelAt, trialEndAt sql.NullTime
-	var cancelAtPeriodEnd bool
-	err := tx.QueryRowContext(ctx,
-		`SELECT status, cancel_at, cancel_at_period_end, trial_end_at FROM subscriptions WHERE id = $1`, id,
-	).Scan(&currentStatus, &cancelAt, &cancelAtPeriodEnd, &trialEndAt)
-	if err == sql.ErrNoRows {
-		return errs.ErrNotFound
-	}
-	if err != nil {
-		return err
-	}
-	if currentStatus == "trialing" && (cancelAt.Valid || cancelAtPeriodEnd) {
-		return domain.ErrTrialCancelDue
-	}
-	if currentStatus == "trialing" && at != nil && trialEndAt.Valid && trialEndAt.Time.After(*at) {
-		return domain.ErrTrialNotDue
-	}
-	return errs.InvalidState(fmt.Sprintf("Only a trialing subscription's trial can be ended. This one is %s.", currentStatus))
-}
-
-// EndTrialEarly atomically flips status 'trialing' → 'active', stamps
-// activated_at, truncates trial_end_at to `at` (historical evidence
-// that the operator ended the trial before its scheduled end), and
-// resets the period anchor to (periodStart, periodEnd) so the first
-// chargeable cycle starts immediately. The caller (Service.EndTrial)
-// computes periodStart/periodEnd via firstPeriodFromStart so the
-// reset honors billing_time. Returns errs.InvalidState if status is
-// not 'trialing' at UPDATE time.
-func (s *PostgresStore) EndTrialEarly(ctx context.Context, tenantID, id string, at, periodStart, periodEnd, nextBilling time.Time, anchorDay int) (domain.Subscription, error) {
-	return s.EndTrialEarlyWithBill(ctx, tenantID, id, at, periodStart, periodEnd, nextBilling, anchorDay, nil)
-}
-
-// EndTrialEarlyWithBill flips 'trialing' → 'active' (resetting the period anchor)
-// AND runs billFn (the day-1 in_advance invoice insert) in the SAME transaction,
-// so a billing failure rolls the early-end back rather than leaving an active
-// sub with no first-period invoice (revenue leak). ADR-056. billFn may be nil.
-func (s *PostgresStore) EndTrialEarlyWithBill(ctx context.Context, tenantID, id string, at, periodStart, periodEnd, nextBilling time.Time, anchorDay int, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	sub, err := s.endTrialEarlyInTx(ctx, tx, id, at, periodStart, periodEnd, nextBilling, anchorDay)
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-	if billFn != nil {
-		if err := billFn(tx, sub); err != nil {
-			return domain.Subscription{}, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.Subscription{}, err
-	}
-	return sub, nil
-}
-
-func (s *PostgresStore) endTrialEarlyInTx(ctx context.Context, tx *sql.Tx, id string, at, periodStart, periodEnd, nextBilling time.Time, anchorDay int) (domain.Subscription, error) {
-	var sub domain.Subscription
-	err := scanSubRow(tx.QueryRowContext(ctx, `
-		UPDATE subscriptions
-		SET status = 'active',
-		    activated_at = COALESCE(activated_at, $1),
-		    trial_end_at = $1,
-		    current_billing_period_start = $2,
-		    current_billing_period_end = $3,
-		    next_billing_at = $4,
-		    billing_anchor_day = $5,
-		    updated_at = $1
-		WHERE id = $6 AND status = 'trialing'
-		  AND cancel_at IS NULL AND cancel_at_period_end = false
-		RETURNING `+subCols,
-		at, periodStart, periodEnd, nextBilling, anchorDay, id,
-	), &sub)
-	if err == sql.ErrNoRows {
-		// A pending schedule blocks the early end IN SQL (ADR-069): the
-		// service-level 409 alone is a snapshot check that loses the exact
-		// race it exists to prevent (ScheduleCancel committing in the gap →
-		// active + day-1 invoice + a schedule that now means paid-period
-		// cancel). classifyActivationConflict maps it to domain.ErrTrialCancelDue;
-		// EndTrial translates that to the operator 409.
-		return domain.Subscription{}, s.classifyActivationConflict(ctx, tx, id, nil)
-	}
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
-		return domain.Subscription{}, err
-	}
-	if err := lockPlansTx(ctx, tx, itemPlanIDs(sub.Items)); err != nil {
-		return domain.Subscription{}, err
-	}
-	// ADR-101: the early end resets the period anchor above, so the open
-	// lands at the just-stamped period start.
-	if err := intervalOpenForItems(ctx, tx, sub, "trial_convert"); err != nil {
-		return domain.Subscription{}, err
-	}
-	// Operator-driven early trial end — enqueue in-tx.
-	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionTrialEnded, sub, map[string]any{
-		"ended_at":     at.UTC(),
-		"triggered_by": "operator",
-	}); err != nil {
-		return domain.Subscription{}, err
-	}
-	return sub, nil
-}
-
-// ExtendTrial atomically updates trial_end_at AND the period anchor on
-// a 'trialing' row. The caller (Service.ExtendTrial) validates that
-// newTrialEnd makes sense (in the future, after the existing
-// trial_end_at) and computes the new period via firstPeriodAfterTrial. It
-// is the operator's action, and queues subscription.trial_extended
-// (triggered_by operator) in the same transaction.
-// Returns errs.InvalidState if the row's status is not 'trialing' at
-// UPDATE time — distinguishes operator-already-ended / canceled from
-// missing-row by re-querying status when no row matches.
-func (s *PostgresStore) ExtendTrial(ctx context.Context, tenantID, id string, newTrialEnd, periodStart, periodEnd, nextBilling time.Time, anchorDay int) (domain.Subscription, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	now := clock.Now(ctx)
-	var sub domain.Subscription
-	err = scanSubRow(tx.QueryRowContext(ctx, `
-		UPDATE subscriptions
-		SET trial_end_at = $1,
-		    current_billing_period_start = $2,
-		    current_billing_period_end = $3,
-		    next_billing_at = $4,
-		    billing_anchor_day = $5,
-		    updated_at = $6
-		WHERE id = $7 AND status = 'trialing'
-		  AND cancel_at IS NULL
-		RETURNING `+subCols,
-		newTrialEnd, periodStart, periodEnd, nextBilling, anchorDay, now, id,
-	), &sub)
-	if err == sql.ErrNoRows {
-		// A pending EXPLICIT cancel_at blocks the extension in SQL (ADR-069):
-		// extending past a pinned timestamp strands it — nothing fires inside
-		// a running trial, so the sub would silently outlive the operator's
-		// echoed-in-GET cancel date. Flag-only schedules
-		// (cancel_at_period_end) pass through: they MOVE with the trial by
-		// design. Same two-layer shape as the EndTrial guard.
-		var currentStatus string
-		var cancelAt sql.NullTime
-		err2 := tx.QueryRowContext(ctx, `SELECT status, cancel_at FROM subscriptions WHERE id = $1`, id).Scan(&currentStatus, &cancelAt)
-		if err2 == sql.ErrNoRows {
-			return domain.Subscription{}, errs.ErrNotFound
-		}
-		if err2 != nil {
-			return domain.Subscription{}, err2
-		}
-		if currentStatus == "trialing" && cancelAt.Valid {
-			return domain.Subscription{}, errs.InvalidState("This subscription is scheduled to cancel on a set date. Undo the scheduled cancellation first, then extend the trial.")
-		}
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("Only a trialing subscription's trial can be extended. This one is %s.", currentStatus))
-	}
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-
-	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
-		return domain.Subscription{}, err
-	}
-	// The new trial end is the row's trial_end_at.
-	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionTrialExtended, sub, map[string]any{
-		"triggered_by": "operator",
-	}); err != nil {
-		return domain.Subscription{}, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return domain.Subscription{}, err
-	}
-	return sub, nil
-}
-
 // GetDueBilling takes two instants. now is the run's anchored wall-clock
 // instant, and the billing-failure gate compares against it, so a failing
 // sub's wait (ADR-119) is not stretched. dueBy is now less the invoice grace
@@ -1592,14 +1296,13 @@ func (s *PostgresStore) GetDueBilling(ctx context.Context, now, dueBy time.Time,
 	// Billing-failure gate (ADR-119): a sub whose saved failure is parked, or
 	// whose next attempt is after this run's instant, is skipped. The filter
 	// runs before the LIMIT, so failing subs no longer fill the head of every
-	// oldest-first page. The same clause is in GetDueBillingForTenant and
-	// ListExpiredTrials.
+	// oldest-first page. The same clause is in GetDueBillingForTenant.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
-		WHERE s.status IN ('active', 'trialing')
+		WHERE s.status = 'active'
 		  AND s.livemode = $1
 		  AND (s.next_billing_at <= $7
-		       OR (s.status = 'active' AND s.cancel_at IS NOT NULL AND s.cancel_at <= $7))
+		       OR (s.cancel_at IS NOT NULL AND s.cancel_at <= $7))
 		  AND `+domain.SubscriptionBillingGateSQL("s", "$2")+`
 		  AND leader_fence($4, $5)
 		  AND NOT (s.id = ANY(COALESCE($6::text[], '{}')))
@@ -1666,9 +1369,9 @@ func (s *PostgresStore) GetDueBillingForTenant(ctx context.Context, tenantID str
 	// and park exactly as the scheduler does (ADR-119).
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
-		WHERE s.status IN ('active', 'trialing')
+		WHERE s.status = 'active'
 		  AND (s.next_billing_at <= $4
-		       OR (s.status = 'active' AND s.cancel_at IS NOT NULL AND s.cancel_at <= $4))
+		       OR (s.cancel_at IS NOT NULL AND s.cancel_at <= $4))
 		  AND `+domain.SubscriptionBillingGateSQL("s", "$1")+`
 		  AND NOT (s.id = ANY(COALESCE($3::text[], '{}')))
 		ORDER BY s.next_billing_at ASC LIMIT $2
@@ -1710,21 +1413,16 @@ func (s *PostgresStore) GetDueBillingForTenant(ctx context.Context, tenantID str
 // instant equal to resumes_at bills as resumed. The status and cancel
 // arms mirror the due scans (GetDueBilling), so a subscription the billing
 // run will never close again (canceled) is not held. A parked billing
-// failure holds the pause until the period is billed. A trial that ended
-// before resumes_at but has not been flipped yet (the trial scan is batched
-// and can fail) holds it too: the flip's first invoice reads the pause at
-// trial end, and next_billing_at alone lies past the trial.
+// failure holds the pause until the period is billed.
 func resumeNotWaitingOnCloseSQL(a string) string {
-	return `NOT (` + a + `.status IN ('active', 'trialing') AND (
+	return `NOT (` + a + `.status = 'active' AND (
 			(` + a + `.next_billing_at IS NOT NULL AND ` + a + `.next_billing_at < ` + a + `.pause_collection_resumes_at)
-			OR (` + a + `.status = 'active' AND ` + a + `.cancel_at IS NOT NULL AND ` + a + `.cancel_at < ` + a + `.pause_collection_resumes_at)
-			OR (` + a + `.status = 'trialing' AND ` + a + `.trial_end_at IS NOT NULL AND ` + a + `.trial_end_at < ` + a + `.pause_collection_resumes_at)))`
+			OR (` + a + `.cancel_at IS NOT NULL AND ` + a + `.cancel_at < ` + a + `.pause_collection_resumes_at)))`
 }
 
 // ListExpiredPauseCollections returns subs whose
 // pause_collection_resumes_at has passed. Used by the scheduler's
-// pause-resume tick (the dedicated scan that pairs with the trial-
-// expiry scan — independent of cycle billing).
+// pause-resume tick (a dedicated scan, independent of cycle billing).
 //
 // Stripe-parity rationale: Stripe resumes collection AT resumes_at
 // rather than at the next cycle close. Before this method existed,
@@ -1840,9 +1538,7 @@ func (s *PostgresStore) ClosePeriodTx(ctx context.Context, tx *sql.Tx, tenantID,
 //     manual run that lost the race) matches nothing.
 //   - The count the row holds for this due instant equals the count the
 //     attempt read. Two runs that fail the same attempt count once.
-//   - Status is in (active, trialing) but is not compared with the status
-//     read: the trial flip commits on its own and leaves the due instant
-//     unchanged, so a failure right after it is still recorded.
+//   - Status is active.
 //
 // Columns left by an older due instant count as zero, so the count restarts
 // at 1 for new work.
@@ -1862,7 +1558,7 @@ func (s *PostgresStore) RecordBillingFailure(ctx context.Context, tenantID, id s
 		       billing_next_attempt_at = $5,
 		       billing_last_error      = $6
 		 WHERE s.id = $1
-		   AND s.status IN ('active','trialing')
+		   AND s.status = 'active'
 		   AND `+due+` IS NOT NULL
 		   AND `+due+` IS NOT DISTINCT FROM $2::timestamptz
 		   AND (CASE WHEN s.billing_failed_for IS NOT DISTINCT FROM `+due+`
@@ -2111,7 +1807,7 @@ func refuseMeterOverlapTx(ctx context.Context, tx *sql.Tx, items []itemPlan) err
 		JOIN subscription_items ni ON ni.id = n.item_id
 		JOIN subscriptions own ON own.id = ni.subscription_id
 		JOIN plan_prices pp ON pp.plan_id = n.plan_id
-		JOIN subscriptions s2 ON s2.customer_id = own.customer_id AND s2.status IN ('trialing', 'active')
+		JOIN subscriptions s2 ON s2.customer_id = own.customer_id AND s2.status = 'active'
 		JOIN subscription_items b ON b.subscription_id = s2.id AND b.deleted_at IS NULL AND b.id <> n.item_id
 		JOIN plan_prices pb ON pb.meter_id = pp.meter_id AND (pb.plan_id = b.plan_id OR pb.plan_id = b.pending_plan_id)
 		ORDER BY pp.meter_id, s2.code
@@ -2679,7 +2375,7 @@ func (s *PostgresStore) removeItemInTx(ctx context.Context, tx *sql.Tx, itemID s
 }
 
 // FindMeterConflicts implements the double-billing guard's conflict scan:
-// one query walks the customer's live (trialing/active) subs → live
+// one query walks the customer's live (active) subs → live
 // items → the meters their plans have ever priced, intersected with the
 // candidate set. pending_plan_id joins too — a scheduled swap starts billing
 // its meters at the next cycle boundary, so admitting an overlap against it
@@ -2707,7 +2403,7 @@ func (s *PostgresStore) FindMeterConflicts(ctx context.Context, tenantID, custom
 		JOIN plan_prices m
 		  ON m.plan_id = si.plan_id OR m.plan_id = si.pending_plan_id
 		WHERE sub.customer_id = $1
-		  AND sub.status IN ('trialing', 'active')
+		  AND sub.status = 'active'
 		  AND si.id <> $2
 		  AND m.meter_id IN (SELECT jsonb_array_elements_text($3::jsonb))
 		ORDER BY m.meter_id, sub.code`,
@@ -2877,8 +2573,8 @@ func (s *PostgresStore) ClearBillingThresholds(ctx context.Context, tenantID, id
 	return sub, nil
 }
 
-// ListWithThresholds returns active or trialing subscriptions in the
-// given livemode partition that have at least one threshold configured
+// ListWithThresholds returns active subscriptions in the given livemode
+// partition that have at least one threshold configured
 // (amount_gte set, OR at least one row in subscription_item_thresholds).
 // Used by the threshold scan tick. Result is hydrated with items +
 // thresholds so the caller can run the cycle math without a second
@@ -2905,7 +2601,7 @@ func (s *PostgresStore) ListWithThresholds(ctx context.Context, livemode bool, a
 	// an offset or a shrinking predicate). "" starts from the beginning.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
-		WHERE s.status IN ('active', 'trialing')
+		WHERE s.status = 'active'
 		  AND s.livemode = $1
 		  AND s.id > $2
 		  AND (s.billing_threshold_amount_gte IS NOT NULL
@@ -2930,74 +2626,6 @@ func (s *PostgresStore) ListWithThresholds(ctx context.Context, livemode bool, a
 		return nil, err
 	}
 
-	for i := range subs {
-		if err := hydrateSubChildrenTx(ctx, tx, &subs[i]); err != nil {
-			return nil, err
-		}
-	}
-	return subs, nil
-}
-
-// ListExpiredTrials returns, for the cron tick, trialing subs whose
-// trial_end_at has elapsed, scoped per livemode; uses TxBypass to cross
-// tenants (scheduler-wide sweep) with an explicit livemode filter (TxBypass
-// doesn't set app.livemode for RLS).
-//
-// FOR UPDATE SKIP LOCKED so concurrent scheduler ticks (multi-
-// replica) don't double-process the same trialing sub.
-//
-// Billing-failure gate (ADR-119): this scan performs the same activation the
-// billing run's trial flip does, and runs before it on every tick. Without the
-// gate it would attempt a parked trial flip on every tick, and could activate
-// a sub whose saved failure then still gates its first close. The billing run
-// writes the record; this scan only respects it.
-//
-// The gate covers the activation branch only. A row with a cancel due at
-// trial end (the same test as trialCancelDue) is always returned: the free
-// trial-end cancel is not the work that failed, and a cancel the API accepted
-// on a parked trialing sub must still fire. Cancelling it moves the row out of
-// active/trialing, which ends the record. If the free cancel itself keeps
-// failing, it is re-attempted every tick with a log line, as before ADR-119.
-func (s *PostgresStore) ListExpiredTrials(ctx context.Context, before time.Time, livemode bool, limit int) ([]domain.Subscription, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
-	if err != nil {
-		return nil, err
-	}
-	defer postgres.Rollback(tx)
-
-	if limit <= 0 {
-		limit = 100
-	}
-
-	rows, err := tx.QueryContext(ctx, `
-		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
-		WHERE s.status = 'trialing'
-		  AND s.livemode = $1
-		  AND s.trial_end_at IS NOT NULL
-		  AND s.trial_end_at <= $2
-		  AND (COALESCE(s.cancel_at_period_end, false)
-		       OR (s.cancel_at IS NOT NULL AND s.cancel_at <= s.trial_end_at)
-		       OR `+domain.SubscriptionBillingGateSQL("s", "$2")+`)
-		ORDER BY s.trial_end_at ASC
-		LIMIT $3
-		FOR UPDATE OF s SKIP LOCKED
-	`, livemode, before, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var subs []domain.Subscription
-	for rows.Next() {
-		var sub domain.Subscription
-		if err := scanSubRow(rows, &sub); err != nil {
-			return nil, err
-		}
-		subs = append(subs, sub)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
 	for i := range subs {
 		if err := hydrateSubChildrenTx(ctx, tx, &subs[i]); err != nil {
 			return nil, err
@@ -3129,8 +2757,7 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 	var lastError string
 	dest := []any{
 		&sub.ID, &sub.TenantID, &sub.Code, &sub.DisplayName, &sub.CustomerID,
-		&sub.Status, &sub.BillingTime, &sub.TrialStartAt, &sub.TrialEndAt, &sub.StartedAt,
-		&sub.ActivatedAt, &sub.CanceledAt,
+		&sub.Status, &sub.BillingTime, &sub.StartedAt, &sub.CanceledAt,
 		&sub.CancelAt, &sub.CancelAtPeriodEnd,
 		&pauseBehavior, &pauseResumesAt, &pauseInvoiceID,
 		&thresholdAmountGTE,
@@ -3168,9 +2795,9 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 			ItemThresholds: []domain.SubscriptionItemThreshold{},
 		}
 	}
-	// ADR-069: derive the read-only cancel_effective_at at THE scan choke
-	// point so every read path (Get/List/scans/API) agrees on when the sub
-	// actually cancels.
+	// Derive the read-only cancel_effective_at at the one place every read
+	// scans a row, so Get, List, the scans and the API agree on when the
+	// subscription cancels.
 	sub.DeriveCancelEffectiveAt()
 	return nil
 }
@@ -3188,7 +2815,7 @@ func composeBillingFailure(sub domain.Subscription, failedFor sql.NullTime, coun
 	if !failedFor.Valid {
 		return nil
 	}
-	if sub.Status != domain.SubscriptionActive && sub.Status != domain.SubscriptionTrialing {
+	if sub.Status != domain.SubscriptionActive {
 		return nil
 	}
 	due := domain.DueInstant(sub)
@@ -3292,7 +2919,6 @@ var subscriptionSort = listorder.New(
 	listorder.Key{Name: "status", Column: "s.status"},
 	listorder.Key{Name: "display_name", Column: "s.display_name"},
 	listorder.Key{Name: "name", Column: "s.display_name"},
-	listorder.Key{Name: "trial_end_at", Column: "s.trial_end_at"},
 )
 
 // subscriptionOrderBy returns the ORDER BY clause for the subscription list,
@@ -3338,7 +2964,7 @@ func buildSubWhere(f ListFilter) (string, []any) {
 		// a timed pause stops holding collection at resumes_at, though the
 		// resumer leaves it on the row while a period that ended before then
 		// is still open.
-		clauses = append(clauses, `(s.pause_collection_behavior IS NOT NULL AND s.status IN ('active','trialing')
+		clauses = append(clauses, `(s.pause_collection_behavior IS NOT NULL AND s.status = 'active'
 			AND (s.pause_collection_resumes_at IS NULL OR s.pause_collection_resumes_at > now()))`)
 	}
 	if f.Search != "" {
@@ -3375,8 +3001,8 @@ func buildSubWhere(f ListFilter) (string, []any) {
 // field mutations — once any live sub attaches, the plan's base
 // price / timing / meter set is frozen.
 //
-// "Live" excludes canceled. Trialing and active both qualify because they
-// can still produce future invoices and need deterministic terms.
+// "Live" excludes canceled. An active subscription qualifies because it can
+// still produce future invoices and needs deterministic terms.
 func (s *PostgresStore) CountLiveSubsByPlan(ctx context.Context, tenantID, planID string) (int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -3450,60 +3076,6 @@ func (s *PostgresStore) ListItemChangesInPeriod(ctx context.Context, tenantID, s
 		out = append(out, c)
 	}
 	return out, rows.Err()
-}
-
-// CancelAtTrialEnd is the dedicated trialing→canceled transition (ADR-069):
-// trials are free, so it emits NO invoice, stamps canceled_at = trial_end_at
-// (never the observing site's `now` — the engine path fires up to a full
-// interval late), and clears the schedule fields. The CAS predicates on the
-// exact state that justified the cancel — observed trial_end_at (an
-// ExtendTrial in the gap must win) and a schedule actually due at trial end
-// (a ClearScheduledCancel in the gap must win) — so a customer who rescinded
-// or was extended is never terminated by a stale snapshot.
-func (s *PostgresStore) CancelAtTrialEnd(ctx context.Context, tenantID, id string, observedTrialEnd time.Time) (domain.Subscription, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	now := clock.Now(ctx)
-	var sub domain.Subscription
-	err = scanSubRow(tx.QueryRowContext(ctx, `
-		UPDATE subscriptions
-		SET status = 'canceled',
-		    canceled_at = trial_end_at,
-		    cancel_at = NULL,
-		    cancel_at_period_end = false,
-		    updated_at = $1
-		WHERE id = $2
-		  AND status = 'trialing'
-		  AND trial_end_at = $3
-		  AND (cancel_at_period_end = true OR (cancel_at IS NOT NULL AND cancel_at <= trial_end_at))
-		RETURNING `+subCols,
-		now, id, observedTrialEnd,
-	), &sub)
-	if err == sql.ErrNoRows {
-		return domain.Subscription{}, domain.ErrTrialCancelConflict
-	}
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
-		return domain.Subscription{}, err
-	}
-	// ADR-101: no interval work — the CAS admits only trialing rows, and a
-	// trialing sub has never opened an interval (the activation writer
-	// would have been the first). Nothing to seal on a free cancel.
-	// Free trialing→canceled (ADR-069) — enqueue in-tx with the provenance
-	// both prior dispatch sites (service + engine) stamped.
-	if sub, err = s.finishCancelTx(ctx, tx, id, map[string]any{"canceled_by": "schedule", "reason": "trial_end_cancel"}); err != nil {
-		return domain.Subscription{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.Subscription{}, err
-	}
-	return sub, nil
 }
 
 // subRowWithExtra lets StreamForExport reuse scanSubRow unchanged while
@@ -3594,7 +3166,7 @@ func (s *PostgresStore) CustomerSubPlanCurrencies(ctx context.Context, tenantID,
 		JOIN plans p
 		  ON p.id = si.plan_id OR p.id = si.pending_plan_id
 		WHERE sub.customer_id = $1
-		  AND sub.status IN ('trialing', 'active')
+		  AND sub.status = 'active'
 		  AND sub.id <> $2
 		ORDER BY sub.code`,
 		customerID, excludeSubID)

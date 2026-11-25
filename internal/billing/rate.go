@@ -59,7 +59,7 @@ type ratePin struct {
 // on the plan from before the period reads it at the period start, so a
 // change made after that applies from its next period. One that joins the
 // plan in the period reads it where it joined: a new subscription at its
-// start (its trial end after a trial), an immediate swap onto the plan at
+// start, an immediate swap onto the plan at
 // the swap, an added item at the add. One that leaves the plan and joins it
 // again in the period keeps the first pin, so a period is never repriced.
 type periodPins struct {
@@ -88,7 +88,7 @@ type planStretch struct {
 }
 
 // itemJoined is the instant item it joined its current plan: its last swap
-// onto it, its add, or the subscription's billing start.
+// onto it, its add, or the subscription's start.
 func itemJoined(sub domain.Subscription, it domain.SubscriptionItem) time.Time {
 	var swapped time.Time
 	if it.PlanChangedAt != nil {
@@ -99,12 +99,9 @@ func itemJoined(sub domain.Subscription, it domain.SubscriptionItem) time.Time {
 
 // planStretches is every stretch of [start, end] during which an item of sub
 // was on a plan: each segment of segsByItem (billing_intervals, items that
-// left during the window included). With no intervals read (segsByItem nil:
-// a trialing subscription, which has none until its conversion opens one
-// per item at the period start), each current item is on its plan for the
-// whole of [start, end]. With intervals read, a current item with no segment
-// had no billable time in the window (added after it, as in a close run
-// late) and has no stretch.
+// left during the window included). A current item with no segment had no
+// billable time in the window (added after it, as in a close run late) and
+// has no stretch.
 func planStretches(sub domain.Subscription, segsByItem map[string][]baseSegment, start, end time.Time) []planStretch {
 	var out []planStretch
 	add := func(itemID string, seg baseSegment) {
@@ -117,12 +114,6 @@ func planStretches(sub domain.Subscription, segsByItem map[string][]baseSegment,
 	present := make(map[string]bool, len(sub.Items))
 	for _, it := range sub.Items {
 		present[it.ID] = true
-		if segsByItem == nil {
-			if it.PlanID != "" {
-				out = append(out, planStretch{itemID: it.ID, planID: it.PlanID, start: start, end: end, joined: itemJoined(sub, it)})
-			}
-			continue
-		}
 		for _, seg := range segsByItem[it.ID] {
 			add(it.ID, seg)
 		}
@@ -187,49 +178,38 @@ type UsageWindow struct {
 // once the plans' meters are read at those pins, the usage windows
 // (UsageWindows).
 type PeriodPlan struct {
-	sub       domain.Subscription
 	stretches []planStretch
 	// Pins holds, by plan id, the plan's pin of the period.
 	Pins map[string]time.Time
 	// BilledFrom is the start of the subscription's earliest billing
 	// interval: where the close began to bill it, the start of its first
-	// period (ADR-101). Nil for a trialing subscription, which has none
-	// yet.
+	// period (ADR-101).
 	BilledFrom *time.Time
 }
 
 // PeriodPlans reads sub's billing period [start, end) as the close bills it:
 // every stretch during which an item was on a plan, an item removed in the
 // period and a plan swapped away from included, and the pin of each plan of
-// the period, and where the close began to bill the subscription. An
-// active subscription's stretches come from its billing intervals, read
-// through intervals. A trialing one has none until its trial ends, and each
-// current item is on its plan for the whole period.
-func PeriodPlans(sub domain.Subscription, start, end time.Time, intervals func() ([]domain.ItemInterval, error)) (PeriodPlan, error) {
-	var segs map[string][]baseSegment
+// the period, and where the close began to bill the subscription. The
+// stretches come from rows, the subscription's billing intervals.
+func PeriodPlans(sub domain.Subscription, start, end time.Time, rows []domain.ItemInterval) PeriodPlan {
 	var billedFrom *time.Time
-	if sub.Status != domain.SubscriptionTrialing {
-		rows, err := intervals()
-		if err != nil {
-			return PeriodPlan{}, fmt.Errorf("billing intervals of %s: %w", sub.ID, err)
+	rowsByItem := map[string][]domain.ItemInterval{}
+	for _, iv := range rows {
+		rowsByItem[iv.SubscriptionItemID] = append(rowsByItem[iv.SubscriptionItemID], iv)
+		if billedFrom == nil || iv.StartsAt.Before(*billedFrom) {
+			at := iv.StartsAt
+			billedFrom = &at
 		}
-		rowsByItem := map[string][]domain.ItemInterval{}
-		for _, iv := range rows {
-			rowsByItem[iv.SubscriptionItemID] = append(rowsByItem[iv.SubscriptionItemID], iv)
-			if billedFrom == nil || iv.StartsAt.Before(*billedFrom) {
-				at := iv.StartsAt
-				billedFrom = &at
-			}
-		}
-		segs = intervalSegmentsByItem(rowsByItem, start, end)
 	}
+	segs := intervalSegmentsByItem(rowsByItem, start, end)
 	stretches := planStretches(sub, segs, start, end)
 	pins := pinsOf(sub, stretches, start)
 	byPlan := make(map[string]time.Time, len(pins.byPlan))
 	for planID, pin := range pins.byPlan {
 		byPlan[planID] = pin.at
 	}
-	return PeriodPlan{sub: sub, stretches: stretches, Pins: byPlan, BilledFrom: billedFrom}, nil
+	return PeriodPlan{stretches: stretches, Pins: byPlan, BilledFrom: billedFrom}
 }
 
 // Stretches is the period's plan stretches.
@@ -243,13 +223,13 @@ func (p PeriodPlan) Stretches() []PlanStretch {
 
 // UsageWindows is, by meter, the windows over which the close bills the
 // meter's usage, and the plan that bills each (meterUsageIntervals, with no
-// threshold watermark): a stretch's window starts no earlier than the trial
-// end or another subscription's coverage end of the meter (usageFloors), and
+// threshold watermark): a stretch's window starts no earlier than another
+// subscription's coverage end of the meter (usageFloors), and
 // each instant of a meter is in one window (oneWindowPerInstant). planMeters
 // is the meters each plan prices at its pin; coverageEnds is what the close
 // reads for the period (ListCustomerMeterCoverageEnds over [start, end]).
 func (p PeriodPlan) UsageWindows(planMeters map[string][]string, coverageEnds []domain.MeterCoverageEnd) map[string][]UsageWindow {
-	windows, _ := meterUsageIntervals(p.stretches, planMeters, nil, floorsOf(p.sub, coverageEnds))
+	windows, _ := meterUsageIntervals(p.stretches, planMeters, nil, floorsOf(coverageEnds))
 	out := map[string][]UsageWindow{}
 	for _, k := range slices.SortedFunc(maps.Keys(windows), func(a, b planMeter) int {
 		return cmp.Or(cmp.Compare(a.meterID, b.meterID), cmp.Compare(a.planID, b.planID))

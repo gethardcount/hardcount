@@ -32,9 +32,9 @@ export type GetPublicCostDashboard200BillingPeriod = {
      * Check this before you show the period.
      * `subscription`: the period runs from the earliest
      * start to the latest end of the current billing
-     * periods of the customer's active and trialing
-     * subscriptions. `no_subscription`: the customer has
-     * no active or trialing subscription; `subscriptions`,
+     * periods of the customer's active subscriptions.
+     * `no_subscription`: the customer has no active
+     * subscription; `subscriptions`,
      * `usage` and `totals` are empty (`credits` is not),
      * and `start` and `end` hold the zero time, not a real
      * range.

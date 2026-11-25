@@ -17,7 +17,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 )
 
-// A released row is "in an open period" only inside an active or trialing
+// A released row is "in an open period" only inside an active
 // subscription's CURRENT period. Before the subscription started it is
 // outside; in an earlier period whose invoice is built it is outside too
 // (after_close), whatever its plan prices now: Hardcount never re-times usage

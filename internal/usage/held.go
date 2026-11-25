@@ -169,9 +169,8 @@ type ReleaseResult struct {
 	// subscription's current billing period and that a price of the plan the
 	// subscription was on then takes. Rows Hardcount does not check count here
 	// too: a row after the period end, released before that period's invoice
-	// is built (the grace), when the subscription goes on, and a row at or
-	// after the trial end of a subscription still trialing. A row of a sum or count
-	// meter before the time a threshold invoice of the period billed
+	// is built (the grace), when the subscription goes on. A row of a sum or
+	// count meter before the time a threshold invoice of the period billed
 	// through does not count here: see PendingThresholdInvoice and
 	// OutsideOpenPeriod.
 	InOpenPeriod int `json:"in_open_period"`
@@ -190,9 +189,9 @@ type ReleaseResult struct {
 	// plan does not price.
 	NotOnPlan int `json:"not_on_plan"`
 	// OutsideOpenPeriod counts released rows outside every subscription's
-	// time (before it started, in a free trial, after it ends or after its
-	// scheduled cancel, or in another, ended subscription's time), and rows
-	// in a period whose invoice is already built. It also counts rows of a
+	// time (before it started, after it ends or after its scheduled cancel,
+	// or in another, ended subscription's time), and rows in a period whose
+	// invoice is already built. It also counts rows of a
 	// sum or count meter stamped before the time a paid threshold invoice of
 	// the current period billed through. Bill them with a one-off invoice if
 	// they should be charged.
@@ -390,8 +389,7 @@ func (s *Service) releaseBuckets(ctx context.Context, tx *sql.Tx, in ReleaseInpu
 //
 //   - InOpenPeriod (InOpen, Later): a price of an open period's plan takes
 //     it, or it is not checked: after the current period's end, in a period
-//     not invoiced yet, or after the trial end of a subscription still
-//     trialing.
+//     not invoiced yet.
 //   - NoPrice (NoPrice): the time falls in an open period whose plan prices
 //     the meter, but no price takes the row's labels.
 //   - NotOnPlan (NotOnPlan): the time falls in an open period, but its

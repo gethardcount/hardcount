@@ -18,17 +18,16 @@ import (
 // as the dashboard receives them (ADR-128, the activity line standard's PR 4):
 // a `line` on every row, keyed by its audit row, with the actor from that row;
 // and description / detail / detail_timestamp / error / status filled from it.
-// Each case is one line the standard words, or one fix it names: B2 (a trial
-// that ran out reads "Trial ended early"), B5 (an applied scheduled plan change
-// has a status the dashboard does not know), B9 (raw cents on spend
-// thresholds) and B10 (a raw Go error on a failed proration).
+// Each case is one line the standard words, or one fix it names: B5 (an
+// applied scheduled plan change has a status the dashboard does not know), B9
+// (raw cents on spend thresholds) and B10 (a raw Go error on a failed
+// proration).
 func TestActivityLines_SubscriptionWire(t *testing.T) {
 	tenantID := "t1"
 	store := newMemStore()
 	subID, _ := seedSubWithItem(t, store, tenantID, "cus_1", "plan_a")
 
 	base := time.Date(2026, 10, 19, 5, 3, 0, 0, time.UTC)
-	trialEnd := time.Date(2026, 11, 9, 5, 3, 0, 0, time.UTC)
 	periodEnd := time.Date(2026, 11, 19, 5, 3, 0, 0, time.UTC)
 	resumes := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
 
@@ -40,17 +39,11 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 	// and reversed below.
 	rows := []row{
 		{"aud_created", domain.AuditActionCreate, "api_key", "billing-sync", map[string]any{"customer_id": "cus_1"}},
-		{"aud_extended", domain.AuditActionUpdate, "user", "alice@example.com", map[string]any{
-			"action": "trial_extended", "trial_end": trialEnd.Format(time.RFC3339)}},
 		{"aud_thresholds", domain.AuditActionUpdate, "api_key", "billing-sync", map[string]any{
 			"action": "billing_thresholds_set", "amount_gte": float64(50000), "item_threshold_count": float64(2), "currency": "USD"}},
 		{"aud_cancel_sched", domain.AuditActionUpdate, "user", "alice@example.com", map[string]any{
-			"action": "cancel_scheduled", "cancel_at_period_end": true, "status": "active",
+			"action": "cancel_scheduled", "cancel_at_period_end": true,
 			"cancel_effective_at": periodEnd.Format(time.RFC3339)}},
-		{"aud_trial_ran_out", domain.AuditActionUpdate, "system", "", map[string]any{
-			"action": "trial_ended", "triggered_by": "schedule"}},
-		{"aud_trial_ended_by_hand", domain.AuditActionUpdate, "user", "alice@example.com", map[string]any{
-			"action": "trial_ended"}},
 		{"aud_paused", domain.AuditActionUpdate, "system", "", map[string]any{
 			"action": "collection_paused", "triggered_by": "dunning", "behavior": "keep_as_draft"}},
 		{"aud_paused_until", domain.AuditActionUpdate, "user", "alice@example.com", map[string]any{
@@ -74,8 +67,6 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 			"meters": []any{map[string]any{"meter_id": "mtr_1", "event_name": "api_calls", "meter_name": "API calls", "quantity": "-120"}}}},
 		{"aud_canceled", domain.AuditActionCancel, "system", "", map[string]any{
 			"canceled_by": "schedule", "prorated_credit_cents": float64(1200), "currency": "USD"}},
-		{"aud_trial_end_cancel", domain.AuditActionCancel, "system", "", map[string]any{
-			"action": "trial_end_cancel", "triggered_by": "schedule"}},
 		{"aud_item_added", domain.AuditActionUpdate, "user", "alice@example.com", map[string]any{
 			"action": "item_added", "plan_id": "plan_b", "quantity": float64(3), "proration_type": "invoice",
 			"proration_amount_cents": float64(1800), "currency": "USD", "proration_invoice_id": "hc_inv_gone"}},
@@ -127,17 +118,14 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 	}
 	cases := map[string]want{
 		"aud_created":    {title: "Subscription created", status: "neutral", actor: "api_key/billing-sync"},
-		"aud_extended":   {title: "Trial extended", status: "neutral", detail: "Trial now ends", detailTS: trialEnd.Format(time.RFC3339), actor: "person/alice@example.com"},
 		"aud_thresholds": {title: "Spend thresholds set", status: "neutral", detail: "$500.00 usage total · 2 item thresholds", actor: "api_key/billing-sync"},
 		"aud_cancel_sched": {title: "Cancellation scheduled", status: "neutral", detail: "At the end of the current period",
 			detailTS: periodEnd.Format(time.RFC3339), actor: "person/alice@example.com"},
-		"aud_trial_ran_out":       {title: "Trial ended", status: "neutral", detail: "Subscription is now active", actor: "automatic/"},
-		"aud_trial_ended_by_hand": {title: "Trial ended early", status: "neutral", detail: "Subscription is now active", actor: "person/alice@example.com"},
-		"aud_paused":              {title: "Collection paused", status: "warning", detail: "Payment retries ran out", actor: "automatic/"},
-		"aud_paused_until":        {title: "Collection paused", status: "warning", detail: "Resumes", detailTS: resumes.Format(time.RFC3339), actor: "person/alice@example.com"},
-		"aud_resumed":             {title: "Collection resumed", status: "neutral", detail: "On its scheduled date", actor: "automatic/"},
-		"aud_qty":                 {title: "Quantity changed", status: "neutral", detail: "plan_a · 3 → 5", actor: "person/alice@example.com"},
-		"aud_qty_legacy":          {title: "Quantity changed", status: "neutral", detail: "To 5", actor: "person/alice@example.com"},
+		"aud_paused":       {title: "Collection paused", status: "warning", detail: "Payment retries ran out", actor: "automatic/"},
+		"aud_paused_until": {title: "Collection paused", status: "warning", detail: "Resumes", detailTS: resumes.Format(time.RFC3339), actor: "person/alice@example.com"},
+		"aud_resumed":      {title: "Collection resumed", status: "neutral", detail: "On its scheduled date", actor: "automatic/"},
+		"aud_qty":          {title: "Quantity changed", status: "neutral", detail: "plan_a · 3 → 5", actor: "person/alice@example.com"},
+		"aud_qty_legacy":   {title: "Quantity changed", status: "neutral", detail: "To 5", actor: "person/alice@example.com"},
 		"aud_plan_scheduled": {title: "Plan change scheduled", status: "neutral", detail: "plan_a → plan_b at renewal on",
 			detailTS: periodEnd.Format(time.RFC3339), actor: "person/alice@example.com"},
 		"aud_plan_applied": {title: "Scheduled plan change applied", status: "neutral", detail: "plan_a → plan_b", actor: "automatic/"},
@@ -148,11 +136,10 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 		"aud_below_zero": {title: "Usage below zero billed as zero", status: "warning", detail: "API calls -120",
 			problem: "Usage corrections were larger than the usage they offset. If an earlier invoice billed that usage, issue a credit note on it.",
 			actor:   "automatic/"},
-		"aud_canceled":         {title: "Subscription canceled", status: "neutral", detail: "Scheduled cancellation · Prorated credit $12.00", actor: "automatic/"},
-		"aud_trial_end_cancel": {title: "Subscription canceled", status: "neutral", detail: "At trial end", actor: "automatic/"},
-		"aud_item_added":       {title: "Item added", status: "neutral", detail: "plan_b · Quantity 3 · Proration invoice $18.00", actor: "person/alice@example.com"},
-		"aud_unknown":          {title: "Subscription changed", status: "neutral", actor: "automatic/"},
-		"aud_cancel_cleared":   {title: "Scheduled cancellation cleared", status: "neutral", actor: "person/alice@example.com"},
+		"aud_canceled":       {title: "Subscription canceled", status: "neutral", detail: "Scheduled cancellation · Prorated credit $12.00", actor: "automatic/"},
+		"aud_item_added":     {title: "Item added", status: "neutral", detail: "plan_b · Quantity 3 · Proration invoice $18.00", actor: "person/alice@example.com"},
+		"aud_unknown":        {title: "Subscription changed", status: "neutral", actor: "automatic/"},
+		"aud_cancel_cleared": {title: "Scheduled cancellation cleared", status: "neutral", actor: "person/alice@example.com"},
 	}
 	for id, w := range cases {
 		e := byID[id]
@@ -189,9 +176,9 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 	}
 
 	// The time parts travel inside the line, for the dashboard to format.
-	ext := byID["aud_extended"]["line"].(map[string]any)
-	if got := mustJSONString(t, ext["detail"]); got != `[[{"text":"Trial now ends "},{"time":"`+trialEnd.Format(time.RFC3339)+`"}]]` {
-		t.Errorf("trial extended detail parts: %s", got)
+	until := byID["aud_paused_until"]["line"].(map[string]any)
+	if got := mustJSONString(t, until["detail"]); got != `[[{"text":"Resumes "},{"time":"`+resumes.Format(time.RFC3339)+`"}]]` {
+		t.Errorf("collection paused until a date, detail parts: %s", got)
 	}
 	// The spend threshold crossing links its invoice.
 	crossed := byID["aud_crossed"]["line"].(map[string]any)

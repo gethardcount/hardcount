@@ -18,8 +18,8 @@ export type CreateInvoicePreviewBody = {
   customer_id: string;
   /**
      * Optional. The subscription to preview; it must belong to
-     * `customer_id`. Defaults to the customer's active or
-     * trialing subscription whose current period started last.
+     * `customer_id`. Defaults to the customer's active
+     * subscription whose current period started last.
      */
   subscription_id?: string;
   /**

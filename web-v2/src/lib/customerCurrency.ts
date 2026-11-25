@@ -12,7 +12,7 @@
 // invoice in (engine.invoiceCurrency, ADR-100), so the page shows the
 // currency the next invoice will use:
 //  1. the billing profile's currency;
-//  2. the plan of the customer's trialing or active subscription (the
+//  2. the plan of the customer's active subscription (the
 //     one whose period started last, the same "primary" pick
 //     GET /v1/customers/{id}/usage makes). A plan has exactly one currency;
 //  3. the newest invoice's currency;
@@ -21,6 +21,8 @@
 // Credit is not such a figure: each ledger row stores its own currency and
 // pays only invoices in it (ADR-129), so credit amounts are shown in theirs.
 
+import type { SubscriptionStatus } from './gen/schemas/subscriptionStatus'
+
 export type CustomerCurrencySource = 'subscription' | 'billing_profile' | 'invoice' | 'workspace'
 
 export interface CustomerCurrency {
@@ -28,12 +30,8 @@ export interface CustomerCurrency {
   source: CustomerCurrencySource
 }
 
-// A subscription in these states fixes the customer's currency. They are the
-// states POST /v1/invoices pins a manual invoice to (ADR-100).
-const LIVE_STATUSES = new Set(['trialing', 'active'])
-
 export interface CurrencySubscription {
-  status: string
+  status: SubscriptionStatus
   items?: readonly { plan_id: string }[]
   current_billing_period_start?: string
   created_at?: string
@@ -58,8 +56,10 @@ function customerOwnCurrency(input: Omit<CurrencyInput, 'workspaceDefault'>): Cu
     return { currency: input.billingProfileCurrency.toUpperCase(), source: 'billing_profile' }
   }
   const planCurrency = new Map((input.plans ?? []).map(p => [p.id, p.currency]))
+  // An active subscription fixes the customer's currency: POST /v1/invoices
+  // pins a manual invoice to it too (ADR-100).
   const live = (input.subscriptions ?? [])
-    .filter(s => LIVE_STATUSES.has(s.status))
+    .filter(s => s.status === 'active')
     .sort((a, b) =>
       (b.current_billing_period_start ?? b.created_at ?? '').localeCompare(a.current_billing_period_start ?? a.created_at ?? ''))
   for (const sub of live) {

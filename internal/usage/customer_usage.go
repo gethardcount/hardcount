@@ -11,7 +11,6 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/subscription"
 )
 
@@ -192,7 +191,7 @@ type CustomerUsageBucket struct {
 
 // Get composes the customer-usage view (ADR-130 §10). Order:
 //  1. Customer existence (RLS makes cross-tenant IDs return ErrNotFound).
-//  2. Active+trialing subscriptions for the customer.
+//  2. Active subscriptions for the customer.
 //  3. Period resolution (current cycle from primary sub, or explicit
 //     ?from=&to= validated for partial bounds, ordering, 1-year cap).
 //  4. Each subscription through billing's rater: with no window, its own
@@ -227,7 +226,7 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 	}
 	activeSubs := filterActiveSubs(subs)
 
-	from, to, source, err := resolvePeriod(period, activeSubs, clock.Now(ctx))
+	from, to, source, err := resolvePeriod(period, activeSubs)
 	if err != nil {
 		return CustomerUsageResult{}, err
 	}
@@ -385,10 +384,7 @@ func composeDailyBuckets(rows []DailyBucketRow, from, to time.Time) []CustomerUs
 // have from < to and span at most one calendar year (to ≤ from + 1y).
 //
 // Returns a DomainError so the handler maps to 422 with the right code.
-//
-// now is the read's instant. The default uses it to skip cycles that have not
-// started.
-func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription, now time.Time) (time.Time, time.Time, string, error) {
+func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription) (time.Time, time.Time, string, error) {
 	hasFrom := !period.From.IsZero()
 	hasTo := !period.To.IsZero()
 
@@ -412,31 +408,16 @@ func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription, now t
 	}
 
 	// Default: pick the primary subscription — the one whose cycle started
-	// last. A cycle that starts after now has not started: a trialing sub
-	// stores its FIRST PAID period (firstPeriodAfterTrial), which begins at
-	// trial end. Picking it while another sub's cycle is running rated every
-	// meter over a future window, so the running cycle's usage read $0.
-	// Only when NO cycle has started (e.g. the customer's only sub is
-	// trialing) do we fall back to the latest-start pick across all subs,
-	// which is the long-standing behaviour for that case.
-	var primary, primaryAny *domain.Subscription
+	// last.
+	var primary *domain.Subscription
 	for i := range subs {
 		sub := &subs[i]
 		if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 			continue
 		}
-		if primaryAny == nil || sub.CurrentBillingPeriodStart.After(*primaryAny.CurrentBillingPeriodStart) {
-			primaryAny = sub
-		}
-		if sub.CurrentBillingPeriodStart.After(now) {
-			continue
-		}
 		if primary == nil || sub.CurrentBillingPeriodStart.After(*primary.CurrentBillingPeriodStart) {
 			primary = sub
 		}
-	}
-	if primary == nil {
-		primary = primaryAny
 	}
 	if primary == nil {
 		return time.Time{}, time.Time{}, "", errs.Invalid(
@@ -563,13 +544,13 @@ func unitAmountOf(rows []domain.RatedUsage, planID, priceID string, amount int64
 	return rate.String()
 }
 
-// filterActiveSubs returns only active and trialing subs. A canceled sub
+// filterActiveSubs returns only active subs. A canceled sub
 // doesn't contribute to "what is this customer using right now"; its events
 // are still queryable via /v1/usage-events with an explicit window.
 func filterActiveSubs(subs []domain.Subscription) []domain.Subscription {
 	out := make([]domain.Subscription, 0, len(subs))
 	for _, sub := range subs {
-		if sub.Status == domain.SubscriptionActive || sub.Status == domain.SubscriptionTrialing {
+		if sub.Status == domain.SubscriptionActive {
 			out = append(out, sub)
 		}
 	}

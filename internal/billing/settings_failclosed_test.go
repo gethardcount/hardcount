@@ -274,22 +274,36 @@ func TestScanThresholds_HonorsDueOnReceipt(t *testing.T) {
 	}
 }
 
-// A trial that is still running advances its period without billing; that
-// advance is computed in the tenant zone, so a failed read must not advance
-// the period in UTC.
-func TestRunCycle_TrialAdvanceTimezoneUnreadableFailsClosed(t *testing.T) {
-	engine, subs, _, _, invoices := setupEngine()
-	sub := subs.subs["sub_1"]
-	trialEnd := sub.CurrentBillingPeriodEnd.AddDate(0, 3, 0)
-	sub.Status = domain.SubscriptionTrialing
-	sub.TrialEndAt = &trialEnd
-	subs.subs["sub_1"] = sub
-	engine.settings = &flakySettings{ts: defaultTermsSettings(), failOn: 1}
-
-	if _, runErrs := engine.RunCycle(context.Background(), 50, nil); len(runErrs) == 0 {
-		t.Fatal("trial advance succeeded with an unreadable timezone; want an error")
+// A period with nothing to bill closes with no invoice, and its advance is
+// computed in the tenant zone, so a failed settings read must not advance the
+// period in UTC. The clean run proves the fixture reaches that advance.
+func TestRunCycle_NoInvoiceAdvanceSettingsUnreadableFailsClosed(t *testing.T) {
+	setup := func(s *flakySettings) (*Engine, *mockSubs, *mockInvoices) {
+		engine, subs, usage, pricing, invoices := setupEngine()
+		pln := pricing.plans["pln_1"]
+		pln.BaseAmountCents = 0
+		pricing.plans["pln_1"] = pln
+		pricing.prices = nil
+		usage.totals = map[string]int64{}
+		engine.settings = s
+		return engine, subs, invoices
 	}
-	if subs.cycleUpdated["sub_1"] || len(invoices.invoices) != 0 {
-		t.Errorf("trial period advanced (%v) or invoices written (%d) despite the failure", subs.cycleUpdated["sub_1"], len(invoices.invoices))
+	clean := &flakySettings{ts: defaultTermsSettings()}
+	engine, subs, invoices := setup(clean)
+	ctx := postgres.WithLivemode(context.Background(), true)
+	if _, runErrs := engine.RunCycle(ctx, 50, nil); len(runErrs) != 0 || !subs.cycleUpdated["sub_1"] || len(invoices.invoices) != 0 {
+		t.Fatalf("clean run: errs=%v advanced=%v invoices=%d, want no error, an advance and no invoice", runErrs, subs.cycleUpdated["sub_1"], len(invoices.invoices))
+	}
+	if clean.calls == 0 {
+		t.Fatal("the close read no settings; want at least the tenant zone")
+	}
+	for k := 1; k <= clean.calls; k++ {
+		engine, subs, invoices := setup(&flakySettings{ts: defaultTermsSettings(), failOn: k})
+		if _, runErrs := engine.RunCycle(ctx, 50, nil); len(runErrs) == 0 {
+			t.Errorf("settings read %d of %d failed but the close succeeded", k, clean.calls)
+		}
+		if subs.cycleUpdated["sub_1"] || len(invoices.invoices) != 0 {
+			t.Errorf("settings read %d of %d failed but the period advanced (%v) or invoices were written (%d)", k, clean.calls, subs.cycleUpdated["sub_1"], len(invoices.invoices))
+		}
 	}
 }

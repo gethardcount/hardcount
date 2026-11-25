@@ -690,34 +690,6 @@
     ]
   },
   {
-    "case": "update/cancel_scheduled/at period end while trialing",
-    "line": {
-      "id": "update/cancel_scheduled/at period end while trialing",
-      "kind": "subscription.cancel_scheduled",
-      "title": "Cancellation scheduled",
-      "detail": [
-        [
-          {
-            "text": "At trial end ("
-          },
-          {
-            "time": "2027-02-15T04:30:00Z"
-          },
-          {
-            "text": ")"
-          }
-        ]
-      ],
-      "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Cancellation scheduled",
-      "meta: At trial end (Feb 15, 2027 04:30 UTC)",
-      "tone: neutral"
-    ]
-  },
-  {
     "case": "update/cancel_scheduled/at period end legacy",
     "line": {
       "id": "update/cancel_scheduled/at period end legacy",
@@ -919,90 +891,6 @@
     "text": [
       "Collection resumed",
       "meta: The overdue invoice was paid",
-      "tone: neutral"
-    ]
-  },
-  {
-    "case": "update/trial_ended/on schedule",
-    "line": {
-      "id": "update/trial_ended/on schedule",
-      "kind": "subscription.trial_ended",
-      "title": "Trial ended",
-      "detail": [
-        [
-          {
-            "text": "Subscription is now active"
-          }
-        ]
-      ],
-      "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Trial ended",
-      "meta: Subscription is now active",
-      "tone: neutral"
-    ]
-  },
-  {
-    "case": "update/trial_ended/by hand",
-    "line": {
-      "id": "update/trial_ended/by hand",
-      "kind": "subscription.trial_ended_early",
-      "title": "Trial ended early",
-      "detail": [
-        [
-          {
-            "text": "Subscription is now active"
-          }
-        ]
-      ],
-      "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Trial ended early",
-      "meta: Subscription is now active",
-      "tone: neutral"
-    ]
-  },
-  {
-    "case": "update/trial_extended",
-    "line": {
-      "id": "update/trial_extended",
-      "kind": "subscription.trial_extended",
-      "title": "Trial extended",
-      "detail": [
-        [
-          {
-            "text": "Trial now ends "
-          },
-          {
-            "time": "2027-02-22T04:30:00Z"
-          }
-        ]
-      ],
-      "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Trial extended",
-      "meta: Trial now ends Feb 22, 2027 04:30 UTC",
-      "tone: neutral"
-    ]
-  },
-  {
-    "case": "update/trial_extended/no date",
-    "line": {
-      "id": "update/trial_extended/no date",
-      "kind": "subscription.trial_extended",
-      "title": "Trial extended",
-      "detail": [],
-      "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Trial extended",
       "tone: neutral"
     ]
   },
@@ -1745,28 +1633,6 @@
     },
     "text": [
       "Scheduled plan change canceled",
-      "tone: neutral"
-    ]
-  },
-  {
-    "case": "cancel/trial_end_cancel",
-    "line": {
-      "id": "cancel/trial_end_cancel",
-      "kind": "subscription.canceled",
-      "title": "Subscription canceled",
-      "detail": [
-        [
-          {
-            "text": "At trial end"
-          }
-        ]
-      ],
-      "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Subscription canceled",
-      "meta: At trial end",
       "tone: neutral"
     ]
   },

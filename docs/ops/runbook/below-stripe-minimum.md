@@ -23,8 +23,8 @@ One of these:
   and creates no payment, so nothing is charged. The minimum depends on the
   currency, and for a charge that Stripe converts, on your Stripe account's
   settlement currency ([Stripe's list](https://docs.stripe.com/currencies#minimum-and-maximum-charge-amounts)).
-  A light usage month, a trial tail or a proration (a charge for only part
-  of a period) can come out below it.
+  A light usage month or a proration (a charge for only part of a period)
+  can come out below it.
 - **Hardcount does not treat it as a failed payment.** The invoice stays
   finalized with `payment_status` `pending`. Hardcount does not charge it again
   automatically, starts no dunning run, and does not email the

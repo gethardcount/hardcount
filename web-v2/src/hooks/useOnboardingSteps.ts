@@ -109,8 +109,8 @@ export function useOnboardingSteps() {
     queryFn: () => listCreditBalances({ limit: 1 }),
     enabled,
   })
-  // Any subscription at all, in any state, so a first subscription on a
-  // trial counts. Home's welcome card reads the same answer.
+  // Any subscription at all, in any state, so a first subscription that was
+  // canceled still counts. Home's welcome card reads the same answer.
   const { data: anySubscription } = useQuery({
     queryKey: ['onboarding-any-subscription'],
     queryFn: () => api.listSubscriptions('limit=1'),
