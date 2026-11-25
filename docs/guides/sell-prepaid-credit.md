@@ -266,10 +266,11 @@ and no usage reported):
 - **How much:** `retire_all` takes all the unused credit, but no more than
   the payment has left once money went back another way: a refund made in
   Stripe, or a dispute the customer's bank won. `retire_cents` takes part of
-  it; more answers `422` with the figure. With nothing left, it answers
-  `409` "This payment has already been returned in full." A refund that
-  returns the rest of the payment takes all the unused credit, so none
-  outlives the money.
+  it; more answers `422` with the figure. A `retire_cents` whose money is
+  the rest of the payment answers `422` asking for `retire_all`, since that
+  refund takes all the unused credit, so none outlives the money. With
+  nothing left, it answers `409` "This payment has already been returned
+  in full."
 - **Where the money goes:** to the card that paid. The card gets at most
   what it paid less every refund of that payment, including refunds made in
   the Stripe dashboard; put the rest in `out_of_band_amount_cents`. For a
@@ -286,7 +287,9 @@ and no usage reported):
   ([Card disputes](../ops/runbook/card-disputes.md)). A refund of what is
   left cannot go to the card: it answers `422` and says to send the money
   as `out_of_band_amount_cents` if you pay it back another way. Hardcount
-  does not choose that for you.
+  does not choose that for you. While the loss's credit note is not
+  written yet, relief answers `409` `dispute_loss_unrecorded` and names
+  `record-loss`, which writes it.
 - **A card refund that fails** leaves the credit note's `refund_status`
   `failed`. When it failed because a chargeback opened during the refund,
   don't pay the customer back while the dispute is open. If you win it,
@@ -315,7 +318,12 @@ money recorded as returned by the bank.
 - **A refund for credit already used, then a void** of the usage invoice
   that used it, gives the credit back on a payment already refunded. Both
   are your own acts, and no more money can follow by card. If the customer
-  should not keep that credit, refund it or remove it.
+  should not keep that credit, refund it with commit relief while the
+  payment's credit notes leave part of it to return. Once they return all
+  of it, relief answers `409`, so remove the credit with
+  `POST /v1/credits/adjust` and a negative `amount_cents`; a removal draws
+  the customer's credit in the order invoices do, promotional credit
+  first.
 - **Never top up automatically when the balance falls by `refund`**
   (below): that credit went back because its money went back.
 

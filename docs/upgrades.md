@@ -149,6 +149,39 @@ Run one version at a time for this upgrade. A copy of the previous version
 that keeps running can no longer create a draft: the database refuses the
 row.
 
+### Migration 00248: paid prepaid-credit invoices become top-ups
+
+The release with migration `00248_dispute_loss_credit_note` makes each paid
+invoice from v0.10.0 that sold prepaid credit and nothing else, with no tax
+and with its credit grant, a top-up (`billing_reason` `topup`). A credit
+note on it then takes the unused credit back, as commit relief does. The
+others stay as they were, and nothing stops a credit note on them:
+
+- **Taxed.** A credit note on a taxed prepaid-commit invoice from v0.10.0
+  refunds the money and reverses its tax, but doesn't take the credit back,
+  so deduct that credit by hand (`POST /v1/credits/adjust` with a negative
+  `amount_cents`).
+- **With more than one line.** The same: its credit note leaves the
+  credit, so deduct it by hand.
+- **Finalized and not paid.** The earlier release's note covers it: void it
+  before you upgrade.
+- **Voided.** It takes no credit note.
+- **With no grant.** `hardcount-doctor` lists it
+  (`paid_commit_invoice_without_grant`).
+
+To list the paid ones that stayed as they were, after the upgrade:
+
+```sql
+SET app.bypass_rls = 'on';
+SELECT i.id, i.tenant_id, i.invoice_number, i.tax_amount_cents
+FROM invoices i
+WHERE i.status = 'paid' AND (i.billing_reason IS NULL OR i.billing_reason = 'manual')
+  AND EXISTS (SELECT 1 FROM invoice_line_items l
+              WHERE l.invoice_id = i.id AND l.commit_granted_cents IS NOT NULL);
+```
+
+**You see:** one row for each, or `(0 rows)`.
+
 ### Coming from Velox
 
 Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it

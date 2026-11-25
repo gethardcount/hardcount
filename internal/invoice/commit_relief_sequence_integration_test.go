@@ -30,12 +30,12 @@ var (
 // made in Stripe and disputes, on one customer with top-ups (every other one
 // discounted) and promotional credit. A refund made in Stripe and a lost
 // dispute write their own notes, which take credit back, and a void of a
-// usage invoice gives drawn credit back to its grants. Six invariants are
-// checked after every step, and each kind of step must have succeeded a few
-// times, so a change that refuses every relief cannot pass. Stripe and the
-// bank never return more than the payment has left, as they do not, so the
-// first invariant catches Hardcount returning too much. A failure names its
-// seed; -relief-seed replays it.
+// usage invoice gives drawn credit back to its grants. Stripe never refunds
+// more than the card has left; the bank may take the whole charge back after
+// part of it was refunded. Seven invariants are checked after every step, and
+// each kind of step must have succeeded a few times, so a change that
+// refuses every relief cannot pass. A failure names its seed; -relief-seed
+// replays it.
 func TestCommitRelief_RandomSequence(t *testing.T) {
 	seeds := []int64{1, 2, 3}
 	if *reliefSeed != 0 {
@@ -61,6 +61,7 @@ type seqTopup struct {
 	pi             string
 	price, granted int64
 	disputeID      string
+	givenBack      int64 // credit voids gave back to its grant once its notes returned all of it (ADR-132)
 }
 
 type reliefSequence struct {
@@ -69,6 +70,7 @@ type reliefSequence struct {
 	h        *commitHarness
 	ctx      context.Context
 	rng      *rand.Rand
+	bank     *rand.Rand // whether the bank takes the whole charge: its own stream, so the other steps draw as before
 	svc      *creditnote.Service
 	cards    *stripeRefunds
 	unbilled *unbilledUsage
@@ -87,15 +89,16 @@ type stripeRefundMade struct {
 	cents  int64
 }
 
-// seqGrant is a top-up's grant as the ledger holds it.
+// seqGrant is a top-up's grant as the ledger holds it; live is what is left
+// of it while it has not expired.
 type seqGrant struct {
-	id                          string
-	amount, consumed, cnRetired int64
+	id                                string
+	amount, consumed, cnRetired, live int64
 }
 
 func newReliefSequence(t *testing.T, seed int64) *reliefSequence {
 	h, ctx := newCommitHarness(t, "Relief Sequence")
-	s := &reliefSequence{t: t, seed: seed, h: h, ctx: ctx, rng: rand.New(rand.NewSource(seed)),
+	s := &reliefSequence{t: t, seed: seed, h: h, ctx: ctx, rng: rand.New(rand.NewSource(seed)), bank: rand.New(rand.NewSource(seed)),
 		unbilled: &unbilledUsage{}, eventAt: time.Now().UTC().Truncate(time.Second), cards: &stripeRefunds{}, done: map[string]int{}}
 	s.svc = newCardReliefService(h, s.cards)
 	s.svc.SetUnbilledUsageReader(s.unbilled)
@@ -323,8 +326,19 @@ func (s *reliefSequence) void() string {
 	i := s.rng.Intn(len(s.closes))
 	id := s.closes[i]
 	s.closes = append(s.closes[:i], s.closes[i+1:]...)
+	consumed := map[*seqTopup]int64{}
+	for _, tp := range s.tops {
+		consumed[tp] = s.grant(tp).consumed
+	}
 	if _, err := s.h.invSvc.Void(s.ctx, s.h.tenantID, id); err != nil {
 		s.t.Fatalf("void %s: %v", id, err)
+	}
+	// A void can also write off a share whose grant expired, which raises
+	// consumed; only what it gave back counts.
+	for _, tp := range s.tops {
+		if back := consumed[tp] - s.grant(tp).consumed; back > 0 && s.issuedTotal(tp) >= tp.price {
+			tp.givenBack += back
+		}
 	}
 	s.done["void gave credit back"]++
 	return "voided " + id
@@ -449,10 +463,13 @@ func (s *reliefSequence) dispute() string {
 		domain.DisputeLost, // twice, so a loss is recorded on every seed
 	}
 	status := statuses[s.rng.Intn(len(statuses))]
-	// The bank takes what the payment has left, and nothing from one
-	// returned in full.
+	// The bank takes what the payment has left, or, after part of it went
+	// back, one time in three the whole charge.
 	wasLost := s.lost(tp)
 	amount := tp.price - s.cash(tp)
+	if amount < tp.price && s.bank.Intn(3) == 0 {
+		amount = tp.price
+	}
 	if wasLost {
 		amount = s.disputeAmount(tp)
 	}
@@ -537,6 +554,17 @@ func (s *reliefSequence) disputeAmount(tp *seqTopup) int64 {
 	return d.AmountCents
 }
 
+// issuedTotal adds up the totals of the top-up's issued notes.
+func (s *reliefSequence) issuedTotal(tp *seqTopup) int64 {
+	var total int64
+	for _, cn := range reliefNotes(s.t, s.ctx, s.svc, s.h.tenantID, tp.inv.ID) {
+		if cn.Status == domain.CreditNoteIssued {
+			total += cn.TotalCents
+		}
+	}
+	return total
+}
+
 func (s *reliefSequence) heldByNote(refundID string) bool {
 	var held bool
 	s.query(func(tx *sql.Tx) error {
@@ -560,12 +588,14 @@ func (s *reliefSequence) undocumented(tp *seqTopup) int64 {
 	return cents
 }
 
-// cash is the money that went back to the customer for the top-up, or may
-// still, by every channel: the card (the card refunds of notes not voided,
+// cash is the money the top-up's documents and Stripe say went back to the
+// customer, or may still: the card (the card refunds of notes not voided,
 // failed ones too since a retry may send them, and the refunds made in
 // Stripe of the payment that no note holds and that moved or may move
-// money), money paid back another way (out_of_band, except a loss's note,
-// whose money is the bank's), and what the bank took in a dispute it won.
+// money), and money returned another way, a loss's note included (the
+// bank's money, as much of it as the documents had room for). What the bank
+// took beyond that room is the customer's money twice, which Hardcount
+// reports and does not return.
 func (s *reliefSequence) cash(tp *seqTopup) int64 {
 	var cash int64
 	s.query(func(tx *sql.Tx) error {
@@ -578,10 +608,7 @@ func (s *reliefSequence) cash(tp *seqTopup) int64 {
 			     AND r.status IN ('succeeded', 'pending', 'requires_action') AND r.credit_note_id IS NULL
 			     AND NOT EXISTS (SELECT 1 FROM credit_notes h WHERE h.stripe_refund_id = r.stripe_refund_id))
 			+ (SELECT COALESCE(SUM(n.out_of_band_amount_cents), 0) FROM credit_notes n
-			   WHERE n.invoice_id = $1 AND n.status <> 'voided'
-			     AND NOT EXISTS (SELECT 1 FROM invoice_disputes d WHERE d.credit_note_id = n.id))
-			+ (SELECT COALESCE(SUM(d.amount_cents), 0) FROM invoice_disputes d
-			   WHERE d.invoice_id = $1 AND d.stripe_payment_intent_id = $2 AND d.status = 'lost')`,
+			   WHERE n.invoice_id = $1 AND n.status <> 'voided')`,
 			tp.inv.ID, tp.pi).Scan(&cash)
 	})
 	return cash
@@ -591,8 +618,10 @@ func (s *reliefSequence) grant(tp *seqTopup) seqGrant {
 	var g seqGrant
 	s.query(func(tx *sql.Tx) error {
 		return tx.QueryRowContext(s.ctx, `
-			SELECT id, amount_cents, consumed_cents, cn_retired_cents FROM customer_credit_ledger
-			WHERE source_invoice_id = $1 AND grant_kind = 'commit'`, tp.inv.ID).Scan(&g.id, &g.amount, &g.consumed, &g.cnRetired)
+			SELECT id, amount_cents, consumed_cents, cn_retired_cents,
+			       CASE WHEN expires_at IS NULL OR expires_at >= now() THEN amount_cents - consumed_cents ELSE 0 END
+			FROM customer_credit_ledger
+			WHERE source_invoice_id = $1 AND grant_kind = 'commit'`, tp.inv.ID).Scan(&g.id, &g.amount, &g.consumed, &g.cnRetired, &g.live)
 	})
 	return g
 }
@@ -628,6 +657,13 @@ func (s *reliefSequence) checkInvariants(did string) {
 		if total > tp.price || reliefs > anchor || (onlyReliefs && total != anchor) {
 			s.t.Errorf("invariant 3: after %s, notes of %s add up to %d (reliefs %d) for %d credit taken back, anchor %d, paid %d",
 				did, tp.inv.ID, total, reliefs, g.cnRetired, anchor, tp.price)
+		}
+		// Once the notes return the whole payment, the top-up has no unused
+		// credit: what is left of its grant is the usage not invoiced yet,
+		// which draws it, and what a void gave back since.
+		if total >= tp.price && g.live > s.unbilled.cents+tp.givenBack {
+			s.t.Errorf("invariant 7: after %s, the notes of %s return all %d paid, and its grant still has %d (unbilled %d, given back by voids %d)",
+				did, tp.inv.ID, tp.price, g.live, s.unbilled.cents, tp.givenBack)
 		}
 	}
 	// Invariants 4 and 5 are checked by each relief, against its own read.

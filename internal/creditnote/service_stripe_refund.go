@@ -422,7 +422,7 @@ func (s *Service) recordRefundCreditNoteTx(ctx context.Context, tx *sql.Tx, tena
 		if err != nil {
 			return domain.CreditNote{}, nil, err
 		}
-		cn, err := buildCreditNote(input, inv, amount, existingTotal, existingTax, card)
+		cn, err := buildCreditNote(input, inv, amount, existingTotal, existingTax, card, false)
 		if err != nil {
 			return domain.CreditNote{}, nil, err
 		}
@@ -434,7 +434,11 @@ func (s *Service) recordRefundCreditNoteTx(ctx context.Context, tx *sql.Tx, tena
 			if err != nil {
 				return domain.CreditNote{}, nil, err
 			}
-			cn.CommitRetiredCents = hold.takes(hold.worth(amount), amount, inv.TotalAmountCents-existingTotal)
+			room, err := documentsRoom(inv, existing, card)
+			if err != nil {
+				return domain.CreditNote{}, nil, err
+			}
+			cn.CommitRetiredCents = hold.takes(hold.worth(amount), amount, room)
 		}
 		return cn, []domain.CreditNoteLineItem{line}, nil
 	})
@@ -483,7 +487,9 @@ func (s *Service) recordRefundCreditNoteTx(ctx context.Context, tx *sql.Tx, tena
 // unbilledForRefund reads, before RecordStripeRefund's transaction, the
 // usage not invoiced yet of the customer whose top-up the refund is on: what
 // a note on a top-up counts as credit already used. 0 for a refund on any
-// other invoice, or on none: the transaction looks it up again.
+// other invoice. A read that fails is an error, never zero: the transaction
+// then records a refund on a top-up without its note
+// (credit_note_not_written), and finds the invoice again itself.
 func (s *Service) unbilledForRefund(ctx context.Context, tenantID string, snap domain.StripeRefundSnapshot) (int64, error) {
 	tx, err := s.store.BeginTx(ctx, tenantID)
 	if err != nil {
@@ -495,13 +501,24 @@ func (s *Service) unbilledForRefund(ctx context.Context, tenantID string, snap d
 	}
 	postgres.Rollback(tx)
 	if err != nil {
-		return 0, nil
+		return 0, fmt.Errorf("find the refund's invoice: %w", err)
 	}
 	inv, err := s.invoices.Get(ctx, tenantID, invoiceID)
-	if err != nil || inv.BillingReason != domain.BillingReasonTopup {
+	if err != nil {
+		return 0, fmt.Errorf("read the refund's invoice: %w", err)
+	}
+	if inv.BillingReason != domain.BillingReasonTopup {
 		return 0, nil
 	}
 	return s.UnbilledUsageCents(ctx, tenantID, inv)
+}
+
+// errUsageUnread answers an operator's action on a top-up whose note cannot
+// be written because the usage not invoiced yet could not be read: nothing
+// was written, and the same request can be sent again.
+func errUsageUnread(err error) error {
+	return errs.Unavailable("unbilled_usage_unavailable",
+		"Hardcount could not read the customer's usage not invoiced yet, so it wrote nothing; try again in a moment.", err)
 }
 
 // applyNoteRefundStatusTx moves the refund status of the credit note holding
@@ -724,10 +741,14 @@ func (s *Service) linkUnderLockTx(ctx context.Context, tx *sql.Tx, invoiceID str
 func (s *Service) createAndIssueLinked(ctx context.Context, tenantID string, input CreateInput) (domain.CreditNote, error) {
 	// On a top-up the note takes back the credit the refund paid for, which
 	// needs the usage not invoiced yet, read before the transaction.
+	pre, err := s.invoices.Get(ctx, tenantID, input.InvoiceID)
+	if err != nil {
+		return domain.CreditNote{}, fmt.Errorf("read the invoice: %w", err)
+	}
 	var unbilled int64
-	if pre, err := s.invoices.Get(ctx, tenantID, input.InvoiceID); err == nil && pre.BillingReason == domain.BillingReasonTopup {
+	if pre.BillingReason == domain.BillingReasonTopup {
 		if unbilled, err = s.UnbilledUsageCents(ctx, tenantID, pre); err != nil {
-			return domain.CreditNote{}, err
+			return domain.CreditNote{}, errUsageUnread(err)
 		}
 	}
 	tx, err := s.store.BeginTx(ctx, tenantID)
@@ -816,7 +837,7 @@ func (s *Service) linkedTopupNoteTx(ctx context.Context, tx *sql.Tx, tenantID st
 		if err != nil {
 			return domain.CreditNote{}, nil, err
 		}
-		cn, err := buildCreditNote(input, inv, subtotal, existingTotal, existingTax, card)
+		cn, err := buildCreditNote(input, inv, subtotal, existingTotal, existingTax, card, false)
 		if err != nil {
 			return domain.CreditNote{}, nil, err
 		}
@@ -827,7 +848,11 @@ func (s *Service) linkedTopupNoteTx(ctx context.Context, tx *sql.Tx, tenantID st
 		if err != nil {
 			return domain.CreditNote{}, nil, err
 		}
-		cn.CommitRetiredCents = hold.takes(hold.worth(subtotal), subtotal, inv.TotalAmountCents-existingTotal)
+		room, err := documentsRoom(inv, existing, card)
+		if err != nil {
+			return domain.CreditNote{}, nil, err
+		}
+		cn.CommitRetiredCents = hold.takes(hold.worth(subtotal), subtotal, room)
 		return cn, lines, nil
 	})
 	if err != nil {
@@ -885,11 +910,20 @@ var (
 // still in flight), the operator may have refunded by hand what the action
 // would send. The action is refused until that refund is recorded, attached
 // to a note, or dismissed.
-func (s *Service) refundBlockedByStripeRefund(ctx context.Context, tenantID, invoiceID string, action blockedAction) error {
+//
+// tx is the caller's transaction when it holds the credit-note lock, so the
+// read takes no second connection under it; nil reads on one of its own.
+func (s *Service) refundBlockedByStripeRefund(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, action blockedAction) error {
 	if s.refunds == nil {
 		return nil
 	}
-	rows, err := s.refunds.ListStripeRefundsByInvoice(ctx, tenantID, invoiceID)
+	var rows []domain.InvoiceStripeRefund
+	var err error
+	if tx != nil {
+		rows, err = s.refunds.ListStripeRefundsByInvoiceTx(ctx, tx, invoiceID)
+	} else {
+		rows, err = s.refunds.ListStripeRefundsByInvoice(ctx, tenantID, invoiceID)
+	}
 	if err != nil {
 		return fmt.Errorf("read refunds made in Stripe on the invoice: %w", err)
 	}

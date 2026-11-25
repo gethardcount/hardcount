@@ -181,7 +181,8 @@ first:
 | `credit_note_exceeds_invoice`, `invoice_not_open_receivable` | A credit note no longer fits the invoice, which changed while the request ran | Read the invoice, then retry with the right amount |
 | `customer_currency_conflict` | A one-off invoice's currency is not the customer's billing currency | Use the customer's currency |
 | `tax_calculation_expired` | Stripe Tax's calculation for the invoice is too old to finalize | Retry the tax, then finalize |
-| `stripe_refund_unresolved` | Retrying a credit note's refund while a refund made in Stripe for this invoice is not recorded yet, or is still in progress at Stripe | If it is not recorded: record it, attach it or dismiss it on the invoice. If it is in progress: wait for Stripe to settle it. Then retry. |
+| `stripe_refund_unresolved` | Retrying a credit note's refund, refunding a top-up's unused credit (commit relief), or marking a refund as returned another way, while a refund made in Stripe for this invoice is not recorded yet, or is still in progress at Stripe | If it is not recorded: record it, attach it or dismiss it on the invoice. If it is in progress: wait for Stripe to settle it. Then send the request again. |
+| `dispute_loss_unrecorded` | Refunding a top-up's unused credit (commit relief) while a dispute the customer's bank won on its payment has no credit note yet | Write it with `POST /v1/invoices/{id}/disputes/{dispute_id}/record-loss`, then refund what is left |
 | `credit_block_changed` | The customer's credit changed while it was being returned | Retry |
 
 **Setup on this server**
@@ -264,6 +265,7 @@ Each sends a `Retry-After` header with the seconds to wait.
 | `currency_unavailable` | `POST /v1/invoices` could not read the customer's currency. No invoice was made. | Retry the same request, with the same `Idempotency-Key` if you sent one |
 | `proration_unavailable` | Adding an item, or an immediate quantity or plan change that costs more, could not check whether the current period's invoice is paid. The change was not made. | Retry the same request after `Retry-After` (1 second), with the same `Idempotency-Key` if you sent one |
 | `settings_unavailable` | `POST /v1/invoices/{id}/finalize` could not read the account's time zone, which sets the due date of a draft created before invoices carried their own zone. The invoice was not finalized. | Retry the same request after `Retry-After` (1 second), with the same `Idempotency-Key` if you sent one |
+| `unbilled_usage_unavailable` | Record-loss, or a credit note with `stripe_refund_id` on a top-up, could not read the customer's usage not invoiced yet, which the note counts as credit already used. Nothing was written. | Retry the same request after `Retry-After` (1 second), with the same `Idempotency-Key` if you sent one |
 
 ### 504 Gateway Timeout
 
@@ -286,8 +288,8 @@ Each sends a `Retry-After` header with the seconds to wait.
   the same request with the same key. Nothing ran.
 - **`503` `ingest_unavailable`:** send the same events with the same keys.
   Nothing was recorded.
-- **`503` `currency_unavailable`, `proration_unavailable` and
-  `settings_unavailable`:** the change was not made, and a `503` is never
+- **`503` `currency_unavailable`, `proration_unavailable`,
+  `settings_unavailable` and `unbilled_usage_unavailable`:** the change was not made, and a `503` is never
   stored. Send the same request with the same key.
 - **`500`, `502` and `504` on a usage route:** send the same events with
   the same keys. A key is never counted twice.

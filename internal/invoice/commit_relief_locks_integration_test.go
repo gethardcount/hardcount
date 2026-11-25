@@ -24,7 +24,8 @@ import (
 // recorder and the dispute recorder write such notes; a drawdown, the expiry
 // sweep, a top-up's payment and another relief share their locks. Each
 // writer is held inside its locks while a note is written, and the note's
-// writer is held at its last lock (the number row) while each runs. Nothing
+// writer is held at its last lock (the number row) while each runs; so are
+// record-loss and the linked create, which write such notes too. Nothing
 // may deadlock or time out, and a writer that shares no lock with relief
 // must not wait for it.
 
@@ -209,6 +210,54 @@ func (r *lockRig) loss(store *invoice.PostgresStore, pi string) func(context.Con
 		_, err := store.RecordStripeDispute(ctx, r.h.tenantID, domain.DisputeSnapshot{
 			StripeEventID: du + "_lost", EventAt: at, StripeDisputeID: du, StripePaymentIntentID: pi,
 			Status: domain.DisputeLost, AmountCents: 1000, Currency: "usd", OpenedAt: at,
+		})
+		return err
+	}
+}
+
+// unrecordedLoss records a lost dispute of 10.00 on the payment without its
+// note (the usage not invoiced yet could not be read), and returns its id,
+// for record-loss to write the note.
+func (r *lockRig) unrecordedLoss(t *testing.T, inv domain.Invoice, pi string) string {
+	t.Helper()
+	svc := newCardReliefService(r.h, r.refunds)
+	failing := &switchableUnbilled{}
+	failing.fail.Store(true)
+	svc.SetUnbilledUsageReader(failing)
+	if err := r.loss(r.lossStore(svc), pi)(r.ctx); err != nil {
+		t.Fatalf("loss without its note: %v", err)
+	}
+	ds, err := r.h.invStore.ListDisputesByInvoice(r.ctx, r.h.tenantID, inv.ID)
+	if err != nil || len(ds) != 1 || ds[0].CreditNoteID != "" {
+		t.Fatalf("disputes %+v, %v; want one loss without its note", ds, err)
+	}
+	return ds[0].ID
+}
+
+// flaggedRefund records a refund made in Stripe of 1.00 of the payment that
+// Hardcount hears of two days late, so it is flagged for the linked create.
+func (r *lockRig) flaggedRefund(t *testing.T, pi string) string {
+	t.Helper()
+	r.n++
+	re := fmt.Sprintf("re_lock_late_%d", r.n)
+	now := time.Now().UTC()
+	if _, err := r.relief.RecordStripeRefund(r.ctx, r.h.tenantID, domain.StripeRefundSnapshot{
+		StripeEventID: "evt_" + re, EventAt: now, StripeRefundID: re, StripePaymentIntentID: pi,
+		AmountCents: 100, Currency: "usd", Status: domain.StripeRefundSucceeded, CreatedAt: now.Add(-48 * time.Hour),
+	}); err != nil {
+		t.Fatalf("flagged refund: %v", err)
+	}
+	return re
+}
+
+// linked records the flagged refund re with the operator's linked create
+// through svc.
+func (r *lockRig) linked(svc *creditnote.Service, inv domain.Invoice, pi, re string) func(context.Context) error {
+	svc.SetRefundReader(fixedRefund{domain.StripeRefundFacts{ID: re, PaymentIntentID: pi, AmountCents: 100, Currency: "usd", Status: domain.StripeRefundSucceeded}})
+	return func(ctx context.Context) error {
+		_, err := svc.Create(ctx, r.h.tenantID, creditnote.CreateInput{
+			InvoiceID: inv.ID, Reason: "Refunded in Stripe", RefundAmountCents: 100, AutoIssue: true, StripeRefundID: re,
+			Lines: []creditnote.CreditLineInput{{Description: "Refund made in Stripe (" + re + ")", Quantity: 1, UnitAmountCents: 100}},
 		})
 		return err
 	}
@@ -426,30 +475,58 @@ func TestCommitRelief_LockOrder(t *testing.T) {
 		})
 	}
 
-	// The two recorders writing a note on a top-up, against the writers
-	// that share its locks: each writer held while a recorder runs, then the
-	// recorder held at its number row while each writer runs. The recorder
-	// takes the customer's credit lock before the number row, as relief does;
-	// numbering first deadlocks with the payment of the customer's other
-	// top-up, which holds the credit lock and waits for the number row.
+	// The two recorders, record-loss and the linked create writing a note
+	// on a top-up, against the writers that share its locks: each writer
+	// held while one runs, then it held at its number row while each writer
+	// runs. Each takes the customer's credit lock before the number row, as
+	// relief does; numbering first deadlocks with the payment of the
+	// customer's other top-up, which holds the credit lock and waits for the
+	// number row.
 	recorders := []struct {
 		name string
-		// note writes the recorder's note on the top-up paid by pi; held, it
-		// holds after its number row.
-		note func(held *pause, pi string) func(context.Context) error
+		// prepare readies the top-up before any writer is held: the loss
+		// record-loss writes, the refund the linked create records.
+		prepare func(t *testing.T, inv domain.Invoice, pi string) string
+		// note writes the note on the top-up paid by pi; held, it holds
+		// after its number row.
+		note func(held *pause, inv domain.Invoice, pi, prepared string) func(context.Context) error
 	}{
-		{"the Stripe refund recorder", func(held *pause, pi string) func(context.Context) error {
+		{"the Stripe refund recorder", nil, func(held *pause, _ domain.Invoice, pi, _ string) func(context.Context) error {
 			if held == nil {
 				return r.recorder(r.relief, pi)
 			}
 			return r.recorder(r.pausedRelief(held), pi)
 		}},
-		{"the dispute recorder", func(held *pause, pi string) func(context.Context) error {
+		{"the dispute recorder", nil, func(held *pause, _ domain.Invoice, pi, _ string) func(context.Context) error {
 			if held == nil {
 				return r.loss(r.h.invStore, pi)
 			}
 			return r.loss(r.lossStore(r.pausedRelief(held)), pi)
 		}},
+		{"record-loss", r.unrecordedLoss, func(held *pause, inv domain.Invoice, _, disputeID string) func(context.Context) error {
+			store := r.h.invStore
+			if held != nil {
+				store = r.lossStore(r.pausedRelief(held))
+			}
+			return func(ctx context.Context) error {
+				_, err := store.RecordDisputeLoss(ctx, r.h.tenantID, inv.ID, disputeID)
+				return err
+			}
+		}},
+		{"the linked create", func(t *testing.T, _ domain.Invoice, pi string) string { return r.flaggedRefund(t, pi) },
+			func(held *pause, inv domain.Invoice, pi, re string) func(context.Context) error {
+				svc := newCardReliefService(r.h, r.refunds)
+				if held != nil {
+					svc = r.pausedRelief(held)
+				}
+				return r.linked(svc, inv, pi, re)
+			}},
+	}
+	prepared := func(t *testing.T, prepare func(*testing.T, domain.Invoice, string) string, inv domain.Invoice, pi string) string {
+		if prepare == nil {
+			return ""
+		}
+		return prepare(t, inv, pi)
 	}
 	for _, rec := range recorders {
 		for _, tc := range held {
@@ -458,8 +535,9 @@ func TestCommitRelief_LockOrder(t *testing.T) {
 			}
 			t.Run(rec.name+" while held: "+tc.name, func(t *testing.T) {
 				inv, pi := r.paidTopup(t)
+				id := prepared(t, rec.prepare, inv, pi)
 				release, w := tc.setup(t, inv, pi)
-				note := start(r.ctx, rec.note(nil, pi))
+				note := start(r.ctx, rec.note(nil, inv, pi, id))
 				if !note.finishedWithin(3 * time.Second) {
 					testutil.WaitForLockWaitersOrDone(t, r.ctx, r.admin, "pg_advisory_xact_lock", 1, note.done)
 				}
@@ -485,7 +563,8 @@ func TestCommitRelief_LockOrder(t *testing.T) {
 				other, _ := r.paidTopup(t)
 				return r.reliefOf(r.relief, other.ID)
 			}},
-			// After a loss nothing more goes to the card, so this relief may be
+			// After a loss nothing more goes to the card, and a flagged refund
+			// or a loss without its note stops relief, so this relief may be
 			// refused, under the same locks.
 			{"a relief of the same top-up", func(t *testing.T, inv domain.Invoice) func(context.Context) error {
 				return refusalIsAnEnd(r.reliefOf(r.relief, inv.ID))
@@ -493,9 +572,10 @@ func TestCommitRelief_LockOrder(t *testing.T) {
 		} {
 			t.Run(rec.name+" held: "+tc.name, func(t *testing.T) {
 				inv, pi := r.paidTopup(t)
+				id := prepared(t, rec.prepare, inv, pi)
 				writer := tc.w(t, inv)
 				p := newPause()
-				note := start(r.ctx, rec.note(p, pi))
+				note := start(r.ctx, rec.note(p, inv, pi, id))
 				reachedWithin(t, p, rec.name)
 				w := start(r.ctx, writer)
 				w.finishedWithin(3 * time.Second)

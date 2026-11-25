@@ -115,7 +115,7 @@ func (s *PostgresStore) SetDunningPauseReleaser(r DunningPauseReleaser) { s.dunn
 // TakeBackForLostDisputeTx returns the note's id, or "" when the payment's
 // credit notes already return all of it. Satisfied by *creditnote.Service;
 // declared consumer-side so the invoice store needs no creditnote import.
-// Unwired, a loss is recorded with no note.
+// Unwired, a loss on a top-up is refused, and boot refuses the server.
 type DisputeLossRecorder interface {
 	UnbilledUsageCents(ctx context.Context, tenantID string, inv domain.Invoice) (int64, error)
 	TakeBackForLostDisputeTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, d domain.InvoiceDispute, unbilledCents int64) (creditNoteID string, err error)
@@ -125,6 +125,14 @@ type DisputeLossRecorder interface {
 // top-up. A setter, because the credit-note service is built after this
 // store.
 func (s *PostgresStore) SetDisputeLossRecorder(r DisputeLossRecorder) { s.disputeLoss = r }
+
+// MustHaveDisputeLossRecorder stops boot when a lost dispute on a top-up
+// could not be recorded as its credit note.
+func (s *PostgresStore) MustHaveDisputeLossRecorder() {
+	if s.disputeLoss == nil {
+		panic("invoice.PostgresStore: no dispute loss recorder is wired (SetDisputeLossRecorder)")
+	}
+}
 
 // SetEncryptor wires AES-256-GCM encryption for the hosted-invoice public_token
 // at rest. When set (non-noop), the raw token is encrypted before storage and

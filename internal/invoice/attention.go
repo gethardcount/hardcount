@@ -163,11 +163,15 @@ type attentionContext struct {
 	// and in GET /v1/invoices/{id}/disputes.
 	LostDispute *domain.InvoiceDispute
 
-	// TopupNotes are the issued credit notes on a top-up with a lost
-	// dispute: the lost notice reads its figures from them (what the bank's
-	// note records, the credit taken back, earlier refunds). The invoice
-	// service reads them only for that case.
-	TopupNotes []domain.CreditNote
+	// TopupNotes are the issued credit notes on a top-up whose lost dispute
+	// names its note: the lost notice reads that note's figures (what it
+	// records, the credit taken back). LossRoomCents is what the payment's
+	// documents still leave to return (creditnote.DocumentsRoom), read for a
+	// top-up whose lost dispute has no note yet: whether record-loss can
+	// still write one. The invoice service reads each only for its case; a
+	// read error leaves it empty.
+	TopupNotes    []domain.CreditNote
+	LossRoomCents *int64
 
 	// OpenChargeback is the newest chargeback still open on one of the
 	// invoice's payments (an appeal included, an inquiry not); nil when none
@@ -179,7 +183,8 @@ type attentionContext struct {
 	UnusedCreditCents *int64
 
 	// Location is the zone a date in a notice is shown in, the invoice's
-	// display zone; nil shows UTC.
+	// display zone. decorateInvoice always sets it (invoiceDisplayLocCached
+	// never returns nil).
 	Location *time.Location
 
 	// StripeRefundReview is the newest refund made in Stripe outside
@@ -210,8 +215,24 @@ func docURL(slug string) string {
 
 // classifyInvoiceAttention returns the one notice an invoice shows its
 // operator, or nil when it needs none: the CAUSE of the invoice's trouble,
-// one reason, highest urgency first. Its first matching branch wins, in the
-// order written here.
+// one reason, highest urgency first. Its first matching branch wins, in this
+// order:
+//
+//  1. a payment anomaly (a lost dispute or a flagged refund made in Stripe
+//     rewrites its words);
+//  2. a lost dispute while its notice is Critical (on an ordinary invoice,
+//     or on a top-up whose loss is not recorded yet);
+//  3. a refund made in Stripe whose credit note on a top-up is not written
+//     (Critical: the customer can spend the credit it paid for);
+//  4. a lost dispute's Warning;
+//  5. a chargeback open on a top-up's payment;
+//  6. any other flagged refund made in Stripe;
+//  7. a bad-debt recovery charge in flight;
+//  8. nothing more on a paid, voided or written-off invoice; on the others,
+//     the payment and tax states in the switch at the end.
+//
+// Steps 1 to 7 pierce the paid-invoice early return: anomalies, disputes and
+// refunds land on paid invoices.
 //
 // It reads only its arguments and does no I/O.
 func classifyInvoiceAttention(inv domain.Invoice, atc attentionContext) *domain.Attention {
@@ -241,21 +262,25 @@ func classifyInvoiceAttention(inv domain.Invoice, atc attentionContext) *domain.
 		}
 		return att
 	}
-	// A lost dispute pierces it too: disputes land on paid invoices, so the
-	// early return would hide every one of them. Lost before open: one
-	// payment has one live dispute, and lost is its later state.
+	// Steps 2 to 6. Lost before open: one payment has one live dispute, and
+	// lost is its later state.
+	var lost *domain.Attention
 	if atc.LostDispute != nil {
-		return classifyDisputeLost(inv, *atc.LostDispute, atc)
+		lost = classifyDisputeLost(inv, *atc.LostDispute, atc)
 	}
-	// A chargeback open on a top-up's payment, while the credit it bought
-	// can still be spent.
-	if d := atc.OpenChargeback; d != nil && d.OnTopupPayment(inv) && !d.Status.Inquiry() && !d.Status.Closed() {
-		return classifyOpenChargeback(inv, *d, atc)
-	}
-	// A refund made in Stripe that Hardcount did not record pierces it as
-	// well: refunds land on paid invoices.
-	if atc.StripeRefundReview != nil {
-		return classifyRefundedInStripe(inv, *atc.StripeRefundReview)
+	refund := atc.StripeRefundReview
+	open := atc.OpenChargeback
+	switch {
+	case lost != nil && lost.Severity == domain.AttentionSeverityCritical:
+		return lost
+	case refund != nil && refund.ReviewReason == domain.StripeRefundReviewCreditNoteNotWritten:
+		return classifyRefundedInStripe(inv, *refund)
+	case lost != nil:
+		return lost
+	case open != nil && open.OnTopupPayment(inv) && !open.Status.Inquiry() && !open.Status.Closed():
+		return classifyOpenChargeback(inv, *open, atc)
+	case refund != nil:
+		return classifyRefundedInStripe(inv, *refund)
 	}
 	// A BAD-DEBT RECOVERY charge in flight pierces the early-return, for the
 	// same reason the anomaly does: the state lives only on a row the return
@@ -1120,7 +1145,7 @@ func classifyDisputeLost(inv domain.Invoice, d domain.InvoiceDispute, atc attent
 	}
 	detail += "."
 	if d.OnTopupPayment(inv) {
-		return classifyTopupDisputeLost(inv, d, atc.TopupNotes, detail, since)
+		return classifyTopupDisputeLost(inv, d, atc, detail, since)
 	}
 	return &domain.Attention{
 		Severity: domain.AttentionSeverityCritical,
@@ -1137,30 +1162,22 @@ func classifyDisputeLost(inv domain.Invoice, d domain.InvoiceDispute, atc attent
 
 // classifyTopupDisputeLost is the lost notice on a top-up's own payment,
 // whose loss Hardcount records as a credit note that takes the credit back
-// (domain.InvoiceDispute.LossTakesCredit). A Warning with plain figures read
-// from the notes: what the bank returned, the credit taken back, and earlier
-// refunds on the payment when there are any. It is Critical only while the
-// note is not written and the payment's documents still have room: the
-// customer can spend the credit until record-loss writes it. A dispute in
+// (domain.InvoiceDispute.LossTakesCredit). The loss is recorded when the
+// dispute names its note (CreditNoteID); the figures come from that note. A
+// Warning; Critical only while the note is not written and the payment's
+// documents still have room (LossRoomCents): the customer can spend the
+// credit until record-loss writes it. When the bank returned more than the
+// documents had left, an earlier refund already returned the rest, and the
+// notice says in money what the customer has back twice. A dispute in
 // another currency writes no note, and the notice says why.
-func classifyTopupDisputeLost(inv domain.Invoice, d domain.InvoiceDispute, notes []domain.CreditNote, detail string, since time.Time) *domain.Attention {
+func classifyTopupDisputeLost(inv domain.Invoice, d domain.InvoiceDispute, atc attentionContext, detail string, since time.Time) *domain.Attention {
+	money := func(cents int64) string { return domain.FormatMoneyMinor(cents, inv.Currency) }
 	took := "The customer's bank took back " + domain.FormatMoneyMinor(d.AmountCents, d.Currency) + " after a lost dispute"
-	var loss *domain.CreditNote
-	var earlier, returned int64
-	for i, cn := range notes {
-		if cn.Status != domain.CreditNoteIssued {
-			continue
+	twice := func(cents int64) string {
+		if cents <= 0 {
+			return ""
 		}
-		returned += cn.TotalCents
-		if cn.ID == d.CreditNoteID {
-			loss = &notes[i]
-		} else {
-			earlier += cn.TotalCents
-		}
-	}
-	earlierRefunds := ""
-	if earlier > 0 {
-		earlierRefunds = "\nEarlier refunds on this payment: " + domain.FormatMoneyMinor(earlier, inv.Currency) + "."
+		return "\nThe customer has been paid " + money(cents) + " twice, by an earlier refund and by the bank, so bill them again or write it off."
 	}
 	att := &domain.Attention{
 		Severity: domain.AttentionSeverityWarning,
@@ -1172,44 +1189,74 @@ func classifyTopupDisputeLost(inv domain.Invoice, d domain.InvoiceDispute, notes
 	switch {
 	case !d.LossTakesCredit(inv):
 		att.Message = took + ".\nHardcount took back no credit, because the dispute is in " + strings.ToUpper(d.Currency) +
-			" and the top-up in " + strings.ToUpper(inv.Currency) + "." + earlierRefunds
-		att.Detail = detail + " If the customer is not owed the credit this payment bought, refund the unused credit with commit relief, its money as out_of_band_amount_cents, since the bank already returned it."
-	case loss != nil:
-		taken := "Hardcount took back " + domain.FormatMoneyMinor(loss.CommitRetiredCents, inv.Currency) + " of the credit it paid for."
+			" and the top-up in " + strings.ToUpper(inv.Currency) + "."
+		att.Detail = detail + " " + takeBackAnotherCurrency
+	case d.CreditNoteID != "":
+		var loss *domain.CreditNote
+		for i := range atc.TopupNotes {
+			if atc.TopupNotes[i].ID == d.CreditNoteID {
+				loss = &atc.TopupNotes[i]
+			}
+		}
+		if loss == nil {
+			att.Message = took + ".\nHardcount recorded it with a credit note that takes back the credit it paid for."
+			att.Detail = detail + " " + lateDisputeWin
+			break
+		}
+		taken := "Hardcount took back " + money(loss.CommitRetiredCents) + " of the credit it paid for."
 		if loss.CommitRetiredCents == 0 {
 			taken = "Hardcount took back no credit, because none of it was left unused."
 		}
-		att.Message = took + ".\n" + taken + earlierRefunds
-		att.Detail = detail + " Credit note " + loss.CreditNoteNumber + " records " + domain.FormatMoneyMinor(loss.TotalCents, inv.Currency) +
-			" as returned by the customer's bank. If Stripe later records the dispute as won, grant the credit again."
-	case returned >= inv.TotalAmountCents:
-		att.Message = took + "." + earlierRefunds + "\nThe payment had nothing left to record."
-		att.Detail = detail + " The payment's credit notes already returned all of it, so Hardcount wrote no note for the loss."
+		att.Message = took + ".\n" + taken + twice(d.AmountCents-loss.TotalCents)
+		att.Detail = detail + " Credit note " + loss.CreditNoteNumber + " records " + money(loss.TotalCents) +
+			" as returned by the customer's bank. " + lateDisputeWin
+	case atc.LossRoomCents != nil && *atc.LossRoomCents <= 0:
+		att.Message = took + ".\nThe payment had nothing left to record." + twice(d.AmountCents)
+		att.Detail = detail + " The payment's credit notes and refunds already returned all of it, so Hardcount wrote no note for the loss."
 	default:
 		att.Severity = domain.AttentionSeverityCritical
-		att.Message = took + ", and Hardcount has not recorded it yet.\nThe customer can still spend the credit it paid for." + earlierRefunds
+		att.Message = took + ", and Hardcount has not recorded it yet.\nThe customer can still spend the credit it paid for."
+		if atc.LossRoomCents != nil {
+			att.Message += twice(d.AmountCents - *atc.LossRoomCents)
+		}
 		att.Detail = detail + " Hardcount could not read the customer's credit when the loss arrived. To record it: POST /v1/invoices/" + inv.ID +
 			"/disputes/" + d.ID + "/record-loss. It writes one credit note for the money the bank returned and takes back the unused credit it paid for."
 	}
 	return att
 }
 
+// takeBackAnotherCurrency is what the operator does about a top-up whose
+// payment the bank took back in another currency, where Hardcount takes back
+// no credit: the lost notice, the open-chargeback notice and record-loss's
+// refusal say it.
+const takeBackAnotherCurrency = "To take back the credit this payment bought, send commit relief with its money as out_of_band_amount_cents, since the bank returned it."
+
+// lateDisputeWin is what the operator does when Stripe records a lost dispute
+// as won later: the money came back to the account, and the loss's credit
+// note stands.
+const lateDisputeWin = "If Stripe later records the dispute as won, the credit note stands: sell the credit again as a top-up and record its payment as paid outside Hardcount."
+
 // classifyOpenChargeback reports a chargeback open on a top-up's own payment
 // (an appeal included): Stripe took the money, and the credit it bought can
-// still be spent, since Hardcount holds none of it. Critical: what Stripe
-// took, the date to respond by and the unused credit, with the recipe to
-// stop the spending. It clears when the dispute closes.
+// still be spent, since Hardcount holds none of it. Critical, even when no
+// credit is left unused: what Stripe took, the date and time to respond by
+// and the unused credit, with the recipe to stop the spending. It clears
+// when the dispute closes.
 func classifyOpenChargeback(inv domain.Invoice, d domain.InvoiceDispute, atc attentionContext) *domain.Attention {
-	loc := atc.Location
-	if loc == nil {
-		loc = time.UTC
-	}
 	msg := "The customer's bank is disputing this top-up's payment, and Stripe took " + domain.FormatMoneyMinor(d.AmountCents, d.Currency) + "."
 	if d.EvidenceDueBy != nil {
-		msg += "\nRespond in Stripe by " + d.EvidenceDueBy.In(loc).Format("Jan 2, 2006") + "."
+		msg += "\nRespond in Stripe by " + d.EvidenceDueBy.In(atc.Location).Format("Jan 2, 2006 15:04 MST") + "."
 	}
-	if atc.UnusedCreditCents != nil {
-		msg += "\nThe customer can still spend " + domain.FormatMoneyMinor(*atc.UnusedCreditCents, inv.Currency) + " of the credit it bought."
+	switch u := atc.UnusedCreditCents; {
+	case u != nil && *u > 0:
+		msg += "\nThe customer can still spend " + domain.FormatMoneyMinor(*u, inv.Currency) + " of the credit it bought."
+	case u != nil:
+		msg += "\nThe customer has already used all the credit it bought."
+	}
+	ifWon := "If the bank wins, Hardcount takes back the unused credit the disputed amount paid for."
+	if !d.LossTakesCredit(inv) {
+		ifWon = "If the bank wins, Hardcount takes back no credit, because the dispute is in " + strings.ToUpper(d.Currency) +
+			" and the top-up in " + strings.ToUpper(inv.Currency) + ". " + takeBackAnotherCurrency
 	}
 	opened := d.OpenedAt
 	return &domain.Attention{
@@ -1218,8 +1265,7 @@ func classifyOpenChargeback(inv domain.Invoice, d domain.InvoiceDispute, atc att
 		Code:     "payment.dispute_open",
 		Message:  msg,
 		Detail: "Stripe dispute " + d.StripeDisputeID + " on payment " + d.StripePaymentIntentID + ". Answer it in Stripe. " +
-			"While it is open, pause the customer's key at your gateway to stop the spending. " +
-			"If the bank wins, Hardcount takes back the unused credit the payment paid for.",
+			"While it is open, pause the customer's key at your gateway to stop the spending. " + ifWon,
 		DocURL: docURL("dispute-open"),
 		Since:  &opened,
 		DueBy:  d.EvidenceDueBy,
@@ -1258,7 +1304,7 @@ func classifyRefundedInStripe(inv domain.Invoice, r domain.InvoiceStripeRefund) 
 		why = "a credit note on this invoice has a card refund that failed, which this refund may replace"
 		record = "If it replaces that refund, attach it to that credit note; otherwise record it with a credit note linked to the refund, or dismiss it. Retry refund on that credit note is refused until then."
 	case domain.StripeRefundReviewExceedsCardRefundable:
-		why = "it is more than the card payment had left to refund after the invoice's credit notes"
+		why = "it is more than the card payment had left to refund after the invoice's credit notes and the refunds made in Stripe that no credit note holds"
 		record = "Check the payment in Stripe and record the difference in your own books, then dismiss it here."
 	case domain.StripeRefundReviewExceedsCreditable:
 		why = "the customer got back more than the invoice had left to credit, after a credit note that already gave part of it back another way"

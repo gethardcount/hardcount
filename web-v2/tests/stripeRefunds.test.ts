@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import {
   dismissNoteError,
   flaggedStripeRefunds,
+  recordConsequences,
   recordStripeRefundRequest,
   stripeRefundChoices,
   stripeRefundNoteReason,
@@ -109,4 +110,11 @@ test('the dismissal note is required and at most 1000 characters, as the server 
   assert.match(dismissNoteError('a'.repeat(1001)), /1000 characters/)
   // An emoji is two UTF-16 units but one character to the server.
   assert.equal(dismissNoteError('😀'.repeat(1000)), '')
+})
+
+// On a top-up the Record dialog says the note takes back the credit the
+// refund paid for; on any other invoice it says nothing of credit.
+test('the Record dialog says a top-up\'s note takes back its credit', () => {
+  assert.ok(recordConsequences('topup').some(l => l.includes('takes back the unused credit')))
+  assert.ok(!recordConsequences('manual').some(l => l.includes('credit the refund')))
 })

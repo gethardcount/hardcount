@@ -3072,12 +3072,15 @@ export const getCreateCreditNoteUrl = () => {
  * card gets at most what it paid less every refund of that payment,
  * refunds made in Stripe included. Relief is refused while the
  * customer's bank holds a chargeback on the payment (an appeal
- * included) and after the bank won it. An unpaid top-up granted no
- * credit: void it to withdraw it.
+ * included). After the bank won it, nothing more goes to the card:
+ * send the cash as `out_of_band_amount_cents`, once the loss's own
+ * credit note is written. An unpaid top-up granted no credit: void it
+ * to withdraw it.
  *
  * A note with `stripe_refund_id` records a refund already made in
- * Stripe; see that field. Nothing is emailed; send the note with
- * `POST /v1/credit-notes/{id}/send`.
+ * Stripe; see that field. On a top-up it also takes back the unused
+ * credit the refund paid for (`commit_retired_cents`). Nothing is
+ * emailed; send the note with `POST /v1/credit-notes/{id}/send`.
  * @summary Create a credit note
  */
 export const createCreditNote = async (createCreditNoteBody: CreateCreditNoteBody, options?: RequestInit): Promise<CreditNote> => {
@@ -9863,7 +9866,8 @@ export const getRecordInvoiceDisputeLossUrl = (id: string,
  * payment's credit notes still allow, recorded as returned out of band
  * (not a card refund, not emailed), and it takes back the unused credit
  * that money paid for. It is the same step Hardcount runs on a loss,
- * once per dispute. No request body.
+ * once per dispute. No request body. A dispute not on the invoice is a
+ * 404 before any other answer.
  * @summary Record a lost dispute on a top-up
  */
 export const recordInvoiceDisputeLoss = async (id: string,
@@ -9882,7 +9886,7 @@ export const recordInvoiceDisputeLoss = async (id: string,
 
 
 
-export const getRecordInvoiceDisputeLossMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getRecordInvoiceDisputeLossMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordInvoiceDisputeLoss>>, TError,{id: string;disputeId: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof recordInvoiceDisputeLoss>>, TError,{id: string;disputeId: string}, TContext> => {
 
@@ -9911,12 +9915,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RecordInvoiceDisputeLossMutationResult = NonNullable<Awaited<ReturnType<typeof recordInvoiceDisputeLoss>>>
 
-    export type RecordInvoiceDisputeLossMutationError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type RecordInvoiceDisputeLossMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Record a lost dispute on a top-up
  */
-export const useRecordInvoiceDisputeLoss = <TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useRecordInvoiceDisputeLoss = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordInvoiceDisputeLoss>>, TError,{id: string;disputeId: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof recordInvoiceDisputeLoss>>,

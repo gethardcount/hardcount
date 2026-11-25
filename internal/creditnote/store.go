@@ -171,8 +171,6 @@ type InvoiceSums struct {
 	// UnrelievedCents is the total of the notes voided before they were
 	// issued: relief the invoice was owed and never got.
 	UnrelievedCents int64
-	// RefundCents is the card refund of every note not voided.
-	RefundCents int64
 }
 
 // RefundNeedsAttention is the list's refund_status value for the notes whose

@@ -256,8 +256,8 @@ func (a *creditGrantAdapter) TopupGrantAndBalance(ctx context.Context, tenantID,
 	return creditnote.TopupGrant(g), spendable, found, err
 }
 
-func (a *creditGrantAdapter) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64) (int64, error) {
-	res, err := a.svc.RetireCommitSliceForReliefTx(ctx, tx, tenantID, invoiceID, creditNoteID, creditNoteNumber, slice, refundedGrossCents, grossPaidCents)
+func (a *creditGrantAdapter) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64, lostDispute bool) (int64, error) {
+	res, err := a.svc.RetireCommitSliceForReliefTx(ctx, tx, tenantID, invoiceID, creditNoteID, creditNoteNumber, slice, refundedGrossCents, grossPaidCents, lostDispute)
 	if err != nil {
 		return 0, err
 	}

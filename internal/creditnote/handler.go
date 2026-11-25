@@ -48,7 +48,7 @@ type HandlerDeps struct {
 // EmailSender enqueues the credit-note document email (ADR-082 rider).
 // Satisfied by *email.OutboxSender.
 type EmailSender interface {
-	SendCreditNote(ctx context.Context, tenantID, to string, cc []string, customerName, creditNoteNumber, invoiceNumber string, amountCents, creditTakenBackCents int64, currency string, pdfBytes []byte) error
+	SendCreditNote(ctx context.Context, tenantID, to string, cc []string, customerName, creditNoteNumber, invoiceNumber string, amountCents, creditTakenBackCents int64, returnedByBank bool, currency string, pdfBytes []byte) error
 }
 
 type Handler struct {
@@ -644,7 +644,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.emailSender.SendCreditNote(r.Context(), tenantID, to, cc,
-		bt.Name, cn.CreditNoteNumber, orig.Number, cn.TotalCents, cn.CommitRetiredCents, cn.Currency, pdfBytes); err != nil {
+		bt.Name, cn.CreditNoteNumber, orig.Number, cn.TotalCents, cn.CommitRetiredCents, cn.ReturnedByBank, cn.Currency, pdfBytes); err != nil {
 		respond.FromError(w, r, err, "credit_note_email")
 		return
 	}

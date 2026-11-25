@@ -57,6 +57,7 @@ type StripeRefundStore interface {
 	// holds the refund id; flipped says whether the status moved.
 	ApplyRefundWebhookStatusTx(ctx context.Context, tx *sql.Tx, stripeRefundID string, status domain.RefundStatus) (cn domain.CreditNote, flipped, found bool, err error)
 	ListStripeRefundsByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceStripeRefund, error)
+	ListStripeRefundsByInvoiceTx(ctx context.Context, tx *sql.Tx, invoiceID string) ([]domain.InvoiceStripeRefund, error)
 	// StripeRefundsNeedingReviewByInvoices returns, for a page of invoices,
 	// the newest needs_review refund on each: invoice id → row.
 	StripeRefundsNeedingReviewByInvoices(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]domain.InvoiceStripeRefund, error)
@@ -366,7 +367,17 @@ func (s *PostgresStore) ListStripeRefundsByInvoice(ctx context.Context, tenantID
 		return nil, err
 	}
 	defer postgres.Rollback(tx)
+	out, err := s.ListStripeRefundsByInvoiceTx(ctx, tx, invoiceID)
+	if err != nil {
+		return nil, err
+	}
+	return out, tx.Commit()
+}
 
+// ListStripeRefundsByInvoiceTx is ListStripeRefundsByInvoice on the caller's
+// tx, for a caller that holds the credit-note lock and must not take a
+// second connection while it does.
+func (s *PostgresStore) ListStripeRefundsByInvoiceTx(ctx context.Context, tx *sql.Tx, invoiceID string) ([]domain.InvoiceStripeRefund, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT `+stripeRefundCols+` FROM invoice_stripe_refunds WHERE invoice_id = $1 ORDER BY refund_created_at, id`, invoiceID)
 	if err != nil {
@@ -381,10 +392,7 @@ func (s *PostgresStore) ListStripeRefundsByInvoice(ctx context.Context, tenantID
 		}
 		out = append(out, r)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, tx.Commit()
+	return out, rows.Err()
 }
 
 func (s *PostgresStore) StripeRefundsNeedingReviewByInvoices(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]domain.InvoiceStripeRefund, error) {

@@ -109,7 +109,8 @@ The status tells you where the dispute is:
    **On a top-up, Hardcount records the loss itself,** in the same step that
    records the dispute as lost, once per dispute:
    - **One credit note** for what the bank returned, but no more than the
-     top-up's credit notes still leave to return. Its money is
+     top-up's credit notes and refunds made in Stripe still leave to
+     return. Its money is
      `out_of_band_amount_cents` (the bank returned it, not a card refund), its
      reason is "Payment reversed in a dispute", and Hardcount emails it to
      no one. The dispute's `credit_note_id` names it.
@@ -117,12 +118,16 @@ The status tells you where the dispute is:
      paid. A note that uses up what the credit notes allow takes all the
      unused credit. A dispute lost again after an appeal writes no second
      note.
-   - **The notice is a warning with the figures:** what the bank returned,
-     the credit taken back, and earlier refunds on the payment. It is
-     critical while the note is not written yet. That happens when
-     Hardcount could not read the customer's usage not invoiced yet as the
-     loss arrived (the log line `lost dispute on a top-up recorded without
-     its credit note`). Write it then:
+   - **The notice is a warning with the figures:** what the bank returned
+     and the credit taken back. When the bank returned more than the
+     payment had left, an earlier refund already gave the rest back, and
+     the notice says how much the customer has been paid twice: bill them
+     again or write it off. It is critical while the note is not written
+     yet. That happens when Hardcount could not read the customer's usage
+     not invoiced yet as the loss arrived (the log line `lost dispute on a
+     top-up recorded without its credit note`). Until it is written, commit
+     relief on the top-up answers `409` `dispute_loss_unrecorded`. Write it
+     then:
 
      ```bash
      curl -s -X POST "$API/v1/invoices/$INVOICE_ID/disputes/$DISPUTE_ID/record-loss" \
@@ -132,11 +137,15 @@ The status tells you where the dispute is:
      **You see:** the dispute, with `credit_note_id` set. `$DISPUTE_ID` is
      the dispute's `id` (`hc_dsp_…`) from the disputes list. A `409` says
      why it does not apply: the dispute is not lost, its loss is already
-     recorded, it is in another currency, or the credit notes already
-     return all of the payment.
+     recorded, it is in another currency, or the credit notes and refunds
+     already return all of the payment. A `503`
+     `unbilled_usage_unavailable` means the usage still could not be read
+     and nothing was written: send the same request again. The cause is in
+     the server log, on the line `request refused as unavailable; the
+     client may send it again` with `resource` `dispute`.
    - **A dispute in another currency** writes no note, and the notice says
-     so. If the customer is not owed that credit, refund the unused credit
-     with commit relief, its money as `out_of_band_amount_cents`.
+     so. To take back the credit the payment bought, send commit relief with
+     its money as `out_of_band_amount_cents`, since the bank returned it.
    - **After a partial loss,** relief can still refund what the credit notes
      leave, but nothing more can go back to the card: relief to the card
      answers `422` and says to send the money as `out_of_band_amount_cents`
@@ -155,9 +164,15 @@ The status tells you where the dispute is:
    by a full refund is recorded the same way.
 5. **If a lost dispute later turns into a win** (Stripe calls it a late
    win), Stripe returns the money to your balance, the disputes list shows
-   `won` and the notice goes away. On a top-up, the credit the loss took
-   back stays taken back: grant the customer that credit again
-   (`POST /v1/credits/grant`) if they keep it. If you already acted on the
+   `won` and the notice goes away. On a top-up, the loss's credit note
+   stands and the credit it took back stays taken back. If the customer
+   keeps that credit, sell it to them again: create a top-up for the money
+   the bank returned and the credit it bought
+   ([Sell prepaid credit](../../guides/sell-prepaid-credit.md)), then
+   record its payment as paid outside Hardcount
+   (`POST /v1/invoices/{id}/record-payment`), since that money is back in
+   your Stripe balance. A grant would give the credit with no price, so a
+   later refund could not work out its cash. If you already acted on the
    loss, undo it: a credit note you issued for the loss is final, so record
    the money again on a new invoice. Create a manual invoice for the amount
    (`POST /v1/invoices` with its line), finalize it

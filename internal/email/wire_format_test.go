@@ -103,7 +103,7 @@ func TestWireFormat_EverySendPath(t *testing.T) {
 			return s.SendPaymentSetupRequest(ctx, "t1", "ap@acme.test", cust, "INV-000123", 123456, "eur", "https://pay.example.com/u/abc", true, "")
 		}, []string{cust, "please contact us to settle it"}},
 		{"credit-note", func() error {
-			return s.SendCreditNote(ctx, "t1", "ap@acme.test", nil, cust, "CN-0001", "INV-000123", 5000, 0, "eur", pdf)
+			return s.SendCreditNote(ctx, "t1", "ap@acme.test", nil, cust, "CN-0001", "INV-000123", 5000, 0, false, "eur", pdf)
 		}, []string{cust, "CN-0001"}},
 		{"password-reset", func() error {
 			return s.SendPasswordReset(ctx, "", "ap@acme.test", "Jürgen", "https://app.example.com/reset?t=abc")

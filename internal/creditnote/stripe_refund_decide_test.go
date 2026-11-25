@@ -89,9 +89,9 @@ func TestDecideStripeRefund(t *testing.T) {
 		{name: "a top-up is recorded as any invoice is",
 			inv:  func(i *domain.Invoice) { i.BillingReason = domain.BillingReasonTopup },
 			want: stripeRefundDecision{outcome: domain.StripeRefundRecordedAsCreditNote}},
-		{name: "after a lost dispute nothing can go back to the card", lost: true,
+		{name: "after a lost dispute a refund made before it still records", lost: true,
 			snap: func(s *domain.StripeRefundSnapshot) { s.AmountCents = 100 },
-			want: stripeRefundDecision{outcome: domain.StripeRefundNeedsReview, reviewReason: domain.StripeRefundReviewExceedsCardRefundable}},
+			want: stripeRefundDecision{outcome: domain.StripeRefundRecordedAsCreditNote}},
 		{name: "first seen more than a day after it was made",
 			snap: func(s *domain.StripeRefundSnapshot) { s.EventAt = s.CreatedAt.Add(48 * time.Hour) },
 			want: stripeRefundDecision{outcome: domain.StripeRefundNeedsReview, reviewReason: domain.StripeRefundReviewSeenLate}},
@@ -141,7 +141,7 @@ func TestDecideStripeRefund(t *testing.T) {
 					notes += cn.RefundAmountCents
 				}
 			}
-			card := cardRoom{CardRefunds: CardRefunds{NotesCents: notes}, lost: tc.lost, refundable: inv.CardRefundableCents(notes, tc.lost)}
+			card := cardRoom{CardRefunds: CardRefunds{NotesCents: notes}, lost: tc.lost, refundable: inv.CardRefundableCents(notes)}
 			got, err := decideStripeRefund(inv, snap, firstSeen, tc.existing, card)
 			if err != nil {
 				t.Fatalf("decide: %v", err)

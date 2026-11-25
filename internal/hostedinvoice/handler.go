@@ -238,10 +238,12 @@ type viewCreditNote struct {
 	AmountCents   int64  `json:"amount_cents"`
 	BeforePayment bool   `json:"before_payment"`
 	// After payment: the card refund once it succeeded, the credit added to
-	// the customer's balance, and an amount settled another way.
+	// the customer's balance, and an amount settled another way, or returned
+	// by the customer's bank in a dispute (domain.CreditNote.ReturnedByBank).
 	RefundedCents       int64 `json:"refunded_cents,omitempty"`
 	CreditedCents       int64 `json:"credited_cents,omitempty"`
 	SettledOutsideCents int64 `json:"settled_outside_cents,omitempty"`
+	ReturnedByBankCents int64 `json:"returned_by_bank_cents,omitempty"`
 }
 
 func toViewCreditNotes(notes []domain.CreditNote) []viewCreditNote {
@@ -257,8 +259,12 @@ func toViewCreditNotes(notes []domain.CreditNote) []viewCreditNote {
 			v.RefundedCents = cn.RefundAmountCents
 		}
 		v.CreditedCents = cn.CreditAmountCents
-		v.SettledOutsideCents = cn.OutOfBandAmountCents
-		if v.RefundedCents+v.CreditedCents+v.SettledOutsideCents > 0 {
+		if cn.ReturnedByBank {
+			v.ReturnedByBankCents = cn.OutOfBandAmountCents
+		} else {
+			v.SettledOutsideCents = cn.OutOfBandAmountCents
+		}
+		if v.RefundedCents+v.CreditedCents+v.SettledOutsideCents+v.ReturnedByBankCents > 0 {
 			out = append(out, v)
 		}
 	}

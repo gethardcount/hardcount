@@ -33,13 +33,15 @@ func viewWithNotes(t *testing.T, lister CreditNoteLister) *httptest.ResponseReco
 
 // The hosted page lists the invoice's credit notes as the PDF prints them
 // (M-04): one before payment lowered what is owed; one after payment shows
-// what came back, once a part of it has settled.
+// what came back, once a part of it has settled, and the note of a lost
+// dispute says the customer's bank returned it.
 func TestViewInvoice_CreditNotesAsThePDFPrintsThem(t *testing.T) {
 	w := viewWithNotes(t, listedCreditNotes{notes: []domain.CreditNote{
 		{CreditNoteNumber: "CN-1", TotalCents: 1500},
 		{CreditNoteNumber: "CN-2", TotalCents: 2000, CreditAmountCents: 2000},
 		{CreditNoteNumber: "CN-3", TotalCents: 700, RefundAmountCents: 700, RefundStatus: domain.RefundPending},
 		{CreditNoteNumber: "CN-4", TotalCents: 900, RefundAmountCents: 600, RefundStatus: domain.RefundSucceeded, OutOfBandAmountCents: 300},
+		{CreditNoteNumber: "CN-5", TotalCents: 400, OutOfBandAmountCents: 400, ReturnedByBank: true},
 	}})
 	if w.Code != http.StatusOK {
 		t.Fatalf("view: %d %s", w.Code, w.Body.String())
@@ -54,8 +56,8 @@ func TestViewInvoice_CreditNotesAsThePDFPrintsThem(t *testing.T) {
 	for _, cn := range resp.CreditNotes {
 		got[cn["number"].(string)] = cn
 	}
-	if len(got) != 3 {
-		t.Fatalf("want CN-1, CN-2 and CN-4 (CN-3's refund has not settled), got %v", resp.CreditNotes)
+	if len(got) != 4 {
+		t.Fatalf("want CN-1, CN-2, CN-4 and CN-5 (CN-3's refund has not settled), got %v", resp.CreditNotes)
 	}
 	if cn := got["CN-1"]; cn["before_payment"] != true || cn["amount_cents"] != float64(1500) {
 		t.Errorf("CN-1 = %v, want before_payment with 1500", cn)
@@ -65,6 +67,9 @@ func TestViewInvoice_CreditNotesAsThePDFPrintsThem(t *testing.T) {
 	}
 	if cn := got["CN-4"]; cn["refunded_cents"] != float64(600) || cn["settled_outside_cents"] != float64(300) {
 		t.Errorf("CN-4 = %v, want 600 refunded and 300 settled outside", cn)
+	}
+	if cn := got["CN-5"]; cn["returned_by_bank_cents"] != float64(400) || cn["settled_outside_cents"] != nil {
+		t.Errorf("CN-5 = %v, want 400 returned by the bank and nothing settled outside", cn)
 	}
 	if _, ok := got["CN-2"]["refunded_cents"]; ok {
 		t.Errorf("CN-2 has no refund: refunded_cents must be absent, got %v", got["CN-2"])

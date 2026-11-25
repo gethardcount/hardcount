@@ -403,7 +403,7 @@ const EVENT_GROUPS: { label: string; events: { type: string; description: string
       { type: 'credit.balance_low', description: 'Credit balance in one currency crossed below the configured low threshold — time to top up' },
       { type: 'credit.balance_depleted', description: 'Credit balance in one currency reached zero or below' },
       { type: 'credit.balance_recovered', description: 'Credit balance in one currency went positive again after being depleted' },
-      { type: 'credit.commit_retired', description: 'A credit note took back bought credit, refunding a paid top-up' },
+      { type: 'credit.commit_retired', description: 'A credit note took back bought credit from a paid top-up: a refund, or a dispute the customer\u2019s bank won' },
     ],
   },
   {

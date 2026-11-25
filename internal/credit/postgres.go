@@ -1199,14 +1199,15 @@ func (s *PostgresStore) retireCommitSliceTx(ctx context.Context, tx *sql.Tx, ten
 }
 
 // RetireCommitSliceForReliefTx retires exactly `slice` credits from the
-// commit grant funded by invoiceID — the RELIEF leg (ADR-080). A missing
-// grant is a LOUD error (cash is about to move against a grant that must
-// exist — the top-up's payment funds it in the same tx, so absence is
-// corruption), and cn_retired_cents is bumped (the telescoping anchor K
-// advances with every relief). The ledger entry names the credit note by
-// its number. Returns the post-retire state so the caller can surface
-// remaining/K without a re-read.
-func (s *PostgresStore) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64) (commitGrantState, error) {
+// commit grant funded by invoiceID for a credit note on the top-up (ADR-080).
+// A missing grant is a LOUD error (cash is about to move against a grant
+// that must exist — the top-up's payment funds it in the same tx, so absence
+// is corruption), and cn_retired_cents is bumped (the telescoping anchor K
+// advances with every note). The ledger entry names the credit note by its
+// number, and says the credit was taken back rather than refunded when the
+// note records a lost dispute (lostDispute). Returns the post-retire state so
+// the caller can surface remaining/K without a re-read.
+func (s *PostgresStore) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64, lostDispute bool) (commitGrantState, error) {
 	g, found, err := s.LockCommitGrantTx(ctx, tx, tenantID, invoiceID, clock.Now(ctx))
 	if err != nil {
 		return commitGrantState{}, err
@@ -1217,8 +1218,11 @@ func (s *PostgresStore) RetireCommitSliceForReliefTx(ctx context.Context, tx *sq
 	if slice > g.Remaining() {
 		return commitGrantState{}, fmt.Errorf("%w: %d requested, %d remaining", ErrCommitInsufficientRemaining, slice, g.Remaining())
 	}
-	if err := s.retireCommitSliceTx(ctx, tx, tenantID, g, slice,
-		fmt.Sprintf("Refunded by credit note %s — %s of bought credit", creditNoteNumber, activity.FormatMoney(activity.Money{Cents: slice, Currency: g.Currency})),
+	description := fmt.Sprintf("Refunded by credit note %s — %s of bought credit", creditNoteNumber, activity.FormatMoney(activity.Money{Cents: slice, Currency: g.Currency}))
+	if lostDispute {
+		description = fmt.Sprintf("Taken back by credit note %s after a lost dispute — %s of bought credit", creditNoteNumber, activity.FormatMoney(activity.Money{Cents: slice, Currency: g.Currency}))
+	}
+	if err := s.retireCommitSliceTx(ctx, tx, tenantID, g, slice, description,
 		map[string]any{
 			"reason":               "commit_refund_retire",
 			"grant_id":             g.GrantID,

@@ -79,6 +79,16 @@ export function stripeRefundChoices(
   }
 }
 
+// recordConsequences is what the Record dialog says follows: the customer is
+// not refunded again, on a top-up the note takes back the credit the refund
+// paid for, and the note is final.
+export function recordConsequences(billingReason: string | undefined): string[] {
+  const lines = ['The customer is not refunded again.']
+  if (billingReason === 'topup') lines.push('On this top-up, the credit note also takes back the unused credit the refund paid for.')
+  lines.push('The credit note is issued at once and can\u2019t be undone.')
+  return lines
+}
+
 // The reason a recorded note carries, as the webhook path writes it
 // (creditnote.stripeRefundCreditNoteReason), so a note recorded from the
 // dashboard reads like one Hardcount recorded itself, and searching the

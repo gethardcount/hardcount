@@ -323,6 +323,20 @@ func TestActivityLines_InvoiceWire(t *testing.T) {
 		}
 	})
 
+	// The note of a lost dispute: the customer's bank returned the money, so
+	// its row never says it was refunded outside Hardcount.
+	t.Run("a lost dispute's credit note says the bank returned the money", func(t *testing.T) {
+		events := fetchWire(t, wireCase{
+			inv: domain.Invoice{Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded, AmountPaidCents: 9000, PaidAt: &at, StripePaymentIntentID: "pi_card"},
+			cns: []domain.CreditNote{{
+				ID: "cn_1", CreditNoteNumber: "CN-000013", Status: domain.CreditNoteIssued, IssuedAt: &at, Currency: "USD",
+				Reason: "Payment reversed in a dispute", TotalCents: 9000, OutOfBandAmountCents: 9000, ReturnedByBank: true,
+			}},
+		})
+		wantRow(t, oneRow(t, events, "credit_note.issued"), "Credit note issued", "success", "",
+			"CN-000013 · Payment reversed in a dispute · $90.00 returned by the customer's bank in a dispute")
+	})
+
 	t.Run("credit note reasons and refund states", func(t *testing.T) {
 		for _, tc := range []struct {
 			name         string

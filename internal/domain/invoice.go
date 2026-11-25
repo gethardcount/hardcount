@@ -150,13 +150,14 @@ func (i Invoice) HasCardPayment() bool {
 	return i.StripePaymentIntentID != ""
 }
 
-// CardRefundableCents is the most that can still go back to the card that
-// paid the invoice: what the card settled, less committedCents, what has gone
-// or may still go back to it (CardRefundsSQL). It is zero when no card backs
-// the payment, and once the bank won a dispute on it: Stripe refuses a refund
-// of a charged-back payment (charge_disputed).
-func (i Invoice) CardRefundableCents(committedCents int64, disputeLost bool) int64 {
-	if !i.HasCardPayment() || disputeLost {
+// CardRefundableCents is what the card that paid the invoice has left, in
+// arithmetic: what it settled, less committedCents, what has gone or may
+// still go back to it (CardRefundsSQL). It is zero when no card backs the
+// payment. It checks that a refund fits, one already made included; whether
+// Hardcount may send one more (not after a lost dispute) is the sending
+// path's own guard.
+func (i Invoice) CardRefundableCents(committedCents int64) int64 {
+	if !i.HasCardPayment() {
 		return 0
 	}
 	return max(0, i.AmountPaidCents-committedCents)

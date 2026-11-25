@@ -494,21 +494,33 @@ func (s *Service) SetCustomerSearcher(c CustomerSearcher) {
 }
 
 // TopupCreditReader reads what the dispute notices on a top-up show: its
-// issued credit notes, which the lost notice reads its figures from, and its
-// unused credit, which the open-chargeback notice states. Satisfied by
+// issued credit notes, which the lost notice reads the loss's note from;
+// what its payment's documents still leave to return (DocumentsRoom), which
+// says whether record-loss can still write a loss's note; and its unused
+// credit, which the open-chargeback notice states. Satisfied by
 // *creditnote.Service; declared consumer-side, since invoice may not import
 // creditnote (internal/arch/boundaries_test.go). `at` is the action's time,
 // so the grant's expiry is judged as the drawdown judges it.
 type TopupCreditReader interface {
 	ListIssuedForInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.CreditNote, error)
+	DocumentsRoom(ctx context.Context, tenantID string, inv domain.Invoice) (int64, error)
 	UnusedCredit(ctx context.Context, tenantID, invoiceID string, at time.Time) (int64, error)
 }
 
 // SetTopupCreditReader wires the reads behind the dispute notices on a
-// top-up. Optional: when nil the lost notice reads no note (and calls the
-// loss not recorded) and the open-chargeback notice names no figure.
+// top-up. Required: boot refuses a server without it
+// (MustHaveTopupCreditReader), and a service without it logs an error for
+// each such notice, which then names no figure.
 func (s *Service) SetTopupCreditReader(r TopupCreditReader) {
 	s.topupCredit = r
+}
+
+// MustHaveTopupCreditReader stops boot when the dispute notices on a top-up
+// have no reader for their figures.
+func (s *Service) MustHaveTopupCreditReader() {
+	if s.topupCredit == nil {
+		panic("invoice.Service: no top-up credit reader is wired (SetTopupCreditReader)")
+	}
 }
 
 // PaymentPageReader reports whether an invoice has a hosted payment page that
@@ -1422,6 +1434,45 @@ func distinct(page []domain.Invoice, key func(domain.Invoice) string) []string {
 	return out
 }
 
+// readTopupDisputeFigures reads what a dispute notice on a top-up's own
+// payment states: the loss's note, the room its documents leave while the
+// loss has none, or the unused credit while a chargeback is open. Only
+// top-ups with a dispute on their own payment pay for the reads, almost none.
+// A read error leaves the figure out (logged): the notice is display-only.
+func (s *Service) readTopupDisputeFigures(ctx context.Context, inv domain.Invoice, atc *attentionContext) {
+	lost, open := atc.LostDispute, atc.OpenChargeback
+	onTopup := func(d *domain.InvoiceDispute) bool { return d != nil && d.OnTopupPayment(inv) }
+	if !onTopup(lost) && !onTopup(open) {
+		return
+	}
+	if s.topupCredit == nil {
+		slog.ErrorContext(ctx, "invoice: the dispute notice on a top-up has no credit reader wired (SetTopupCreditReader)", "invoice_id", inv.ID)
+		return
+	}
+	switch {
+	case lost != nil && lost.CreditNoteID != "":
+		notes, err := s.topupCredit.ListIssuedForInvoice(ctx, inv.TenantID, inv.ID)
+		if err != nil {
+			slog.WarnContext(ctx, "invoice: the lost notice could not read the top-up's credit notes", "invoice_id", inv.ID, "error", err)
+		}
+		atc.TopupNotes = notes
+	case lost != nil && lost.LossTakesCredit(inv):
+		room, err := s.topupCredit.DocumentsRoom(ctx, inv.TenantID, inv)
+		if err != nil {
+			slog.WarnContext(ctx, "invoice: the lost notice could not read what the top-up's payment has left to return", "invoice_id", inv.ID, "error", err)
+		} else {
+			atc.LossRoomCents = &room
+		}
+	case open != nil:
+		unused, err := s.topupCredit.UnusedCredit(ctx, inv.TenantID, inv.ID, s.clock.Now(ctx))
+		if err != nil {
+			slog.WarnContext(ctx, "invoice: the chargeback notice could not read the top-up's unused credit", "invoice_id", inv.ID, "error", err)
+		} else {
+			atc.UnusedCreditCents = &unused
+		}
+	}
+}
+
 // decorateInvoice sets one invoice's Attention, RecoveryWarning and
 // BillingPeriodDisplay from its row and the page's facts. tenantLoc caches
 // the tenant timezone across the page.
@@ -1451,27 +1502,7 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	if r, ok := f.refundReview[inv.ID]; ok {
 		atc.StripeRefundReview = &r
 	}
-	// The dispute notices on a top-up read its notes or its unused credit.
-	// Only top-ups with a dispute on their own payment pay for the reads,
-	// almost none. A read error leaves the figures out (logged): the notice
-	// is display-only.
-	if s.topupCredit != nil && inv.BillingReason == domain.BillingReasonTopup {
-		switch {
-		case atc.LostDispute != nil && atc.LostDispute.OnTopupPayment(inv):
-			notes, err := s.topupCredit.ListIssuedForInvoice(ctx, inv.TenantID, inv.ID)
-			if err != nil {
-				slog.WarnContext(ctx, "invoice: the lost notice could not read the top-up's credit notes", "invoice_id", inv.ID, "error", err)
-			}
-			atc.TopupNotes = notes
-		case atc.OpenChargeback != nil && atc.OpenChargeback.OnTopupPayment(inv):
-			unused, err := s.topupCredit.UnusedCredit(ctx, inv.TenantID, inv.ID, s.clock.Now(ctx))
-			if err != nil {
-				slog.WarnContext(ctx, "invoice: the chargeback notice could not read the top-up's unused credit", "invoice_id", inv.ID, "error", err)
-			} else {
-				atc.UnusedCreditCents = &unused
-			}
-		}
-	}
+	s.readTopupDisputeFigures(ctx, inv, &atc)
 	atc.Location = s.invoiceDisplayLocCached(ctx, inv, tenantLoc)
 	atc.StripeConnected = f.stripeConnected
 	atc.SetupLinkEmailOff = s.setupLinkEmailOff

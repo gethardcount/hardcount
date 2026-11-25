@@ -20,6 +20,7 @@ export interface HostedCreditNote {
   refunded_cents?: number
   credited_cents?: number
   settled_outside_cents?: number
+  returned_by_bank_cents?: number
 }
 
 export type HostedTotalRow = 'subtotal' | 'discount' | 'tax' | 'total' | 'credits' | 'paid'
@@ -48,12 +49,14 @@ export function hostedTotalRows(inv: HostedTotalsInput, creditNotes: readonly Ho
 
 // creditNoteBackText says where an after-payment credit note's money went,
 // in the customer's words: "$20.00 refunded to your card · $5.00 added to
-// your account credit". Only settled parts come from the server.
+// your account credit". Only settled parts come from the server. The note of
+// a dispute the customer's bank won says the bank returned it.
 export function creditNoteBackText(cn: HostedCreditNote, money: (cents: number) => string): string {
   const parts: string[] = []
   if (cn.refunded_cents) parts.push(`${money(cn.refunded_cents)} refunded to your card`)
   if (cn.credited_cents) parts.push(`${money(cn.credited_cents)} added to your account credit`)
   if (cn.settled_outside_cents) parts.push(`${money(cn.settled_outside_cents)} settled with you directly`)
+  if (cn.returned_by_bank_cents) parts.push(`${money(cn.returned_by_bank_cents)} returned to you by your bank in a dispute`)
   return parts.join(' · ')
 }
 

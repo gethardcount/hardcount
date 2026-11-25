@@ -867,6 +867,14 @@ that never became a chargeback) or `prevented`. When the first Stripe event
 Hardcount receives is already the close, both dispute events are sent with
 the closed status, in either order.
 
+A loss on a top-up's own payment, in the top-up's currency, is recorded as
+a credit note that takes back the unused credit the bank's money paid for,
+in the same step: `dispute.credit_note_id` names it. It is absent when the
+payment's credit notes already return all of it, and when Hardcount could
+not read the customer's usage not invoiced yet; then
+`POST /v1/invoices/{id}/disputes/{dispute_id}/record-loss` writes the note,
+and no second event is sent.
+
 **Also in `data`:** `dispute`.
 
 <details>

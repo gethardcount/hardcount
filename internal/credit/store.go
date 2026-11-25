@@ -99,7 +99,7 @@ type Store interface {
 	// loud error on a missing grant. ReadTopupGrantAndBalance is the same
 	// read with no lock, for display.
 	LockCommitGrantTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (commitGrantState, bool, error)
-	RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64) (commitGrantState, error)
+	RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64, lostDispute bool) (commitGrantState, error)
 	ReadTopupGrantAndBalance(ctx context.Context, tenantID, invoiceID string, at time.Time) (commitGrantState, int64, bool, error)
 }
 

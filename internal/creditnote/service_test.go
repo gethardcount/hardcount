@@ -229,9 +229,6 @@ func (m *memStore) InvoiceSums(_ context.Context, tenantID, invoiceID string) (I
 		}
 		if cn.Status != domain.CreditNoteVoided {
 			sums.CreditedCents += cn.TotalCents
-			if cn.RefundAmountCents > 0 {
-				sums.RefundCents += cn.RefundAmountCents
-			}
 		}
 		if cn.Status == domain.CreditNoteIssued {
 			sums.IssuedCents += cn.TotalCents
@@ -559,7 +556,7 @@ func (m *memInvoiceReader) LockForCreditNoteTx(ctx context.Context, _ *sql.Tx, t
 	return m.Get(ctx, tenantID, id)
 }
 
-func (m *memInvoiceReader) DisputeStatusesTx(context.Context, *sql.Tx, string, string) ([]domain.DisputeStatus, error) {
+func (m *memInvoiceReader) DisputesTx(context.Context, *sql.Tx, string, string) ([]domain.InvoiceDispute, error) {
 	return nil, nil
 }
 

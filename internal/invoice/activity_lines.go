@@ -256,14 +256,23 @@ func creditNoteLine(cn domain.CreditNote, actor *activity.Actor, refundFailure s
 	if r := strings.TrimSpace(cn.Reason); r != "" {
 		l.Detail = append(l.Detail, activity.Text(activity.CreditNoteReason(r)))
 	}
+	// The note of a lost dispute: the customer's bank returned its money,
+	// not the operator.
+	outOfBand := cn.OutOfBandAmountCents
+	if cn.ReturnedByBank {
+		outOfBand = 0
+	}
 	refunded := cn.RefundAmountCents > 0 && (cn.RefundStatus == domain.RefundSucceeded || cn.RefundStatus == "")
 	if cn.RefundAmountCents > 0 && !refunded {
 		// The card part names the allocation; it says "refunded" only once the
 		// money moved, and the problem line says what happened instead.
 		l.Detail = append(l.Detail, activity.Segment{activity.M(cn.RefundAmountCents, cn.Currency), activity.T(" to card")})
-		l.Detail = append(l.Detail, activity.RefundParts(0, cn.CreditAmountCents, cn.OutOfBandAmountCents, cn.Currency)...)
+		l.Detail = append(l.Detail, activity.RefundParts(0, cn.CreditAmountCents, outOfBand, cn.Currency)...)
 	} else {
-		l.Detail = append(l.Detail, activity.RefundParts(cn.RefundAmountCents, cn.CreditAmountCents, cn.OutOfBandAmountCents, cn.Currency)...)
+		l.Detail = append(l.Detail, activity.RefundParts(cn.RefundAmountCents, cn.CreditAmountCents, outOfBand, cn.Currency)...)
+	}
+	if cn.ReturnedByBank && cn.OutOfBandAmountCents > 0 {
+		l.Detail = append(l.Detail, activity.Segment{activity.M(cn.OutOfBandAmountCents, cn.Currency), activity.T(" returned by the customer's bank in a dispute")})
 	}
 	if cn.RefundAmountCents > 0 && !refunded {
 		switch cn.RefundStatus {

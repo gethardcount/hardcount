@@ -111,5 +111,11 @@ also takes back the unused credit the refund paid for
 deferred "linking a refund into commit relief" is done that way. The review
 reason `prepaid_commit` is replaced by `credit_note_not_written`. The card cap
 of decision 4 is the one card-refundable figure, which also counts refunds
-made in Stripe that no note holds, and nothing once a dispute on the payment
-is lost.
+made in Stripe that no note holds. A lost dispute does not change it: a
+refund made in Stripe before the loss moved its money already and is still
+recorded; only the paths that send a refund refuse after a loss.
+
+Decision 12 changes for a top-up: its note takes back credit, so the credit
+ledger is written, in the note's transaction (an adjustment entry naming the
+note, and `credit.commit_retired`). On every other invoice decision 12
+holds: the credit ledger is never written.

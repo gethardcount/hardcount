@@ -41,7 +41,10 @@ func (s *PostgresStore) SetEncryptor(enc *crypto.Encryptor) {
 
 // cnReadCols is the canonical credit-note SELECT/RETURNING column list.
 // Every read site uses it with cnScanDest so a schema change updates one
-// place and can't drift a positional scan.
+// place and can't drift a positional scan. Its last column is
+// domain.CreditNote.ReturnedByBank: a dispute names the note
+// (invoice_disputes.credit_note_id), so every site reads credit_notes by its
+// own name.
 const cnReadCols = `id, tenant_id, invoice_id, customer_id, credit_note_number,
 	status, reason, subtotal_cents, tax_amount_cents, total_cents,
 	refund_amount_cents, credit_amount_cents, out_of_band_amount_cents,
@@ -50,7 +53,8 @@ const cnReadCols = `id, tenant_id, invoice_id, customer_id, credit_note_number,
 	COALESCE(tax_transaction_id,''), issue_pending,
 	tax_reversal_pending, commit_retired_cents, returned_another_way_at,
 	metadata, created_at, updated_at, recorded_at,
-	bill_to_snapshot, supplier_snapshot`
+	bill_to_snapshot, supplier_snapshot,
+	EXISTS (SELECT 1 FROM invoice_disputes d WHERE d.credit_note_id = credit_notes.id)`
 
 // cnScanDest returns Scan destinations in cnReadCols order. metaJSON is the
 // raw metadata bytes the caller unmarshals into cn.Metadata after Scan.
@@ -68,6 +72,7 @@ func (s *PostgresStore) cnScanDest(cn *domain.CreditNote, metaJSON *[]byte) []an
 			return b.Open(s.enc)
 		}},
 		domain.SnapshotScanner[domain.DocumentSupplier]{Dst: &cn.SupplierSnapshot},
+		&cn.ReturnedByBank,
 	}
 }
 
@@ -563,11 +568,10 @@ func (s *PostgresStore) InvoiceSums(ctx context.Context, tenantID, invoiceID str
 		SELECT
 		    COALESCE(SUM(total_cents) FILTER (WHERE status <> 'voided'), 0)::bigint,
 		    COALESCE(SUM(total_cents) FILTER (WHERE status = 'issued'), 0)::bigint,
-		    COALESCE(SUM(total_cents) FILTER (WHERE status = 'voided' AND issued_at IS NULL), 0)::bigint,
-		    COALESCE(SUM(refund_amount_cents) FILTER (WHERE status <> 'voided' AND refund_amount_cents > 0), 0)::bigint
+		    COALESCE(SUM(total_cents) FILTER (WHERE status = 'voided' AND issued_at IS NULL), 0)::bigint
 		FROM credit_notes
 		WHERE invoice_id = $1
-	`, invoiceID).Scan(&sums.CreditedCents, &sums.IssuedCents, &sums.UnrelievedCents, &sums.RefundCents); err != nil {
+	`, invoiceID).Scan(&sums.CreditedCents, &sums.IssuedCents, &sums.UnrelievedCents); err != nil {
 		return InvoiceSums{}, fmt.Errorf("sum the credit notes on invoice %s: %w", invoiceID, err)
 	}
 	return sums, nil

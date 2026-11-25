@@ -42,7 +42,7 @@ func TestCustomerEmail_NoInventedSellerName(t *testing.T) {
 					return s.SendInvoice(context.Background(), "t1", "ap@buyer.test", nil, "Buyer", "INV-1", 1000, "usd", pdf, "", false)
 				},
 				"credit note": func() error {
-					return s.SendCreditNote(context.Background(), "t1", "ap@buyer.test", nil, "Buyer", "CN-1", "INV-1", 1000, 0, "usd", pdf)
+					return s.SendCreditNote(context.Background(), "t1", "ap@buyer.test", nil, "Buyer", "CN-1", "INV-1", 1000, 0, false, "usd", pdf)
 				},
 			}
 			for kind, send := range sends {

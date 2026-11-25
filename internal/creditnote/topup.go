@@ -10,6 +10,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
@@ -94,10 +95,18 @@ func (h topupHold) takes(r, total, capLeft int64) int64 {
 // credit it takes back from the top-up's grant (CommitRetiredCents). The
 // caller owns tx and writes the audit rows.
 func (s *Service) issueNoteTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, build func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error)) (domain.CreditNote, error) {
-	cn, err := s.store.CreateUnderInvoiceLockDynamicTx(ctx, tx, tenantID, inv.ID, s.numbers, build)
+	// A lost dispute's note is told apart by the dispute naming it, which
+	// happens after the insert, so the header's mark is carried here.
+	var byBank bool
+	cn, err := s.store.CreateUnderInvoiceLockDynamicTx(ctx, tx, tenantID, inv.ID, s.numbers, func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error) {
+		header, lines, err := build(existing)
+		byBank = header.ReturnedByBank
+		return header, lines, err
+	})
 	if err != nil {
 		return domain.CreditNote{}, err
 	}
+	cn.ReturnedByBank = byBank
 	// Trivially won on a row this transaction created, but the one writer of
 	// issued, and it stamps issued_at.
 	won, err := s.store.TransitionStatusTx(ctx, tx, tenantID, cn.ID, domain.CreditNoteDraft, domain.CreditNoteIssued)
@@ -109,7 +118,7 @@ func (s *Service) issueNoteTx(ctx context.Context, tx *sql.Tx, tenantID string, 
 	}
 	cn.Status = domain.CreditNoteIssued
 	if cn.CommitRetiredCents > 0 {
-		if _, err := s.credits.RetireCommitSliceForReliefTx(ctx, tx, tenantID, inv.ID, cn.ID, cn.CreditNoteNumber, cn.CommitRetiredCents, cn.TotalCents, inv.TotalAmountCents); err != nil {
+		if _, err := s.credits.RetireCommitSliceForReliefTx(ctx, tx, tenantID, inv.ID, cn.ID, cn.CreditNoteNumber, cn.CommitRetiredCents, cn.TotalCents, inv.TotalAmountCents, cn.ReturnedByBank); err != nil {
 			return domain.CreditNote{}, fmt.Errorf("take back the credit of credit note %s: %w", cn.CreditNoteNumber, err)
 		}
 	}
@@ -133,14 +142,58 @@ func noteSums(invoiceID string, notes []domain.CreditNote) (total, tax int64, er
 	return total, tax, nil
 }
 
-// cardRoom is what can still go back to the card that paid an invoice, read
-// under its credit-note lock: the one figure every credit note's card refund
-// fits (domain.CardRefundsSQL), nothing once the bank won a dispute on the
-// payment.
+// documentsRoom is what a payment's documents still leave to return: what
+// was paid, less the totals of its notes not voided, less the refunds made in
+// Stripe of the payment that no note holds, which returned money too. It is
+// the one room relief, both notes for money returned outside Hardcount and
+// the lost notice read, from notes and card read under the credit-note lock.
+func documentsRoom(inv domain.Invoice, notes []domain.CreditNote, card cardRoom) (int64, error) {
+	returned, _, err := noteSums(inv.ID, notes)
+	if err != nil {
+		return 0, err
+	}
+	return inv.TotalAmountCents - returned - card.StripeCents, nil
+}
+
+// DocumentsRoom is documentsRoom read on a transaction of its own, for
+// display: the lost notice says whether a loss still has room to record.
+func (s *Service) DocumentsRoom(ctx context.Context, tenantID string, inv domain.Invoice) (int64, error) {
+	tx, err := s.store.BeginTx(ctx, tenantID)
+	if err != nil {
+		return 0, err
+	}
+	defer postgres.Rollback(tx)
+	notes, err := s.refunds.ListByInvoiceTx(ctx, tx, inv.ID)
+	if err != nil {
+		return 0, err
+	}
+	card, err := s.cardRoomTx(ctx, tx, inv, "")
+	if err != nil {
+		return 0, err
+	}
+	return documentsRoom(inv, notes, card)
+}
+
+// cardRoom is what the card that paid an invoice has left, read under its
+// credit-note lock: the one figure every credit note's card refund fits
+// (domain.CardRefundsSQL). It checks that a refund fits, one already made in
+// Stripe included. lost says the bank won a dispute on the payment: a path
+// that sends a refund (relief's card leg, an ordinary note's, the refund
+// route, Retry refund) sends none then; a path that records one already made
+// (the Stripe-refund recorder, the linked create) does.
 type cardRoom struct {
 	CardRefunds
 	lost       bool
 	refundable int64
+}
+
+// errNothingMoreToTheCard refuses a refund a path would send to the card
+// after the bank won a dispute on the payment: Stripe refuses it
+// (charge_disputed), and the customer already has the money. instead says
+// what the operator does with the amount.
+func errNothingMoreToTheCard(instead string) error {
+	return errs.Invalid("refund_amount_cents",
+		"The customer's bank reversed this payment in a dispute, so nothing more can go back to the card; "+instead)
 }
 
 // cardRoomTx reads the invoice's cardRoom on tx, leaving out the refund made
@@ -158,7 +211,7 @@ func (s *Service) cardRoomTx(ctx context.Context, tx *sql.Tx, inv domain.Invoice
 	if err != nil {
 		return cardRoom{}, fmt.Errorf("card refunds of invoice %s: %w", inv.ID, err)
 	}
-	return cardRoom{CardRefunds: refunds, lost: lost, refundable: inv.CardRefundableCents(committed, lost)}, nil
+	return cardRoom{CardRefunds: refunds, lost: lost, refundable: inv.CardRefundableCents(committed)}, nil
 }
 
 // cardRoom reads the invoice's cardRoom on a transaction of its own, for a
@@ -194,11 +247,14 @@ func (s *Service) TakeBackForLostDisputeTx(ctx context.Context, tx *sql.Tx, tena
 	}
 	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	cn, err := s.issueNoteTx(ctx, tx, tenantID, inv, func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error) {
-		returned, _, err := noteSums(inv.ID, existing)
+		card, err := s.cardRoomTx(ctx, tx, inv, "")
 		if err != nil {
 			return domain.CreditNote{}, nil, err
 		}
-		capLeft := inv.TotalAmountCents - returned
+		capLeft, err := documentsRoom(inv, existing, card)
+		if err != nil {
+			return domain.CreditNote{}, nil, err
+		}
 		if capLeft <= 0 {
 			return domain.CreditNote{}, nil, errNothingToRecord
 		}
@@ -218,6 +274,7 @@ func (s *Service) TakeBackForLostDisputeTx(ctx context.Context, tx *sql.Tx, tena
 			CommitRetiredCents:   hold.takes(hold.worth(total), total, capLeft),
 			Currency:             inv.Currency,
 			RefundStatus:         domain.RefundNone,
+			ReturnedByBank:       true,
 		}
 		line := domain.CreditNoteLineItem{
 			Description:     "Payment reversed by the customer's bank (dispute " + d.StripeDisputeID + ")",

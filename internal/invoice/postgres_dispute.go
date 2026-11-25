@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -190,7 +191,7 @@ type lossInput struct {
 // invoiced yet for a lost snapshot on a top-up's own payment; zero for any
 // other snapshot. The transaction decides again under its locks.
 func (s *PostgresStore) lossInputs(ctx context.Context, tenantID string, snap domain.DisputeSnapshot) lossInput {
-	if snap.Status != domain.DisputeLost || s.disputeLoss == nil {
+	if snap.Status != domain.DisputeLost {
 		return lossInput{}
 	}
 	inv, err := s.disputedInvoice(ctx, tenantID, snap)
@@ -199,6 +200,9 @@ func (s *PostgresStore) lossInputs(ctx context.Context, tenantID string, snap do
 	}
 	if !(domain.InvoiceDispute{StripePaymentIntentID: snap.StripePaymentIntentID, Currency: snap.Currency}).LossTakesCredit(inv) {
 		return lossInput{}
+	}
+	if s.disputeLoss == nil {
+		return lossInput{} // recordLossTx refuses the event
 	}
 	cents, err := s.disputeLoss.UnbilledUsageCents(ctx, tenantID, inv)
 	return lossInput{unbilledCents: cents, err: err}
@@ -229,11 +233,16 @@ func (s *PostgresStore) disputedInvoice(ctx context.Context, tenantID string, sn
 // the payment's documents already return all of it. When the usage not
 // invoiced yet could not be read, the loss is recorded without its note
 // (credit_note_id stays NULL, the lost notice is Critical) and an operator's
-// record-loss writes it: the record never waits on credit. The caller holds
+// record-loss writes it: the record never waits on credit. A store with no
+// loss recorder wired refuses the event instead, which Stripe sends again;
+// boot refuses such a server (MustHaveDisputeLossRecorder). The caller holds
 // the invoice row and the dispute row.
 func (s *PostgresStore) recordLossTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, d domain.InvoiceDispute, in lossInput) (domain.InvoiceDispute, error) {
-	if s.disputeLoss == nil || d.CreditNoteID != "" || !d.LossTakesCredit(inv) {
+	if d.CreditNoteID != "" || !d.LossTakesCredit(inv) {
 		return d, nil
+	}
+	if s.disputeLoss == nil {
+		return d, fmt.Errorf("record lost dispute %s on a top-up: no loss recorder is wired (call SetDisputeLossRecorder)", d.StripeDisputeID)
 	}
 	if in.err != nil {
 		slog.ErrorContext(ctx, "lost dispute on a top-up recorded without its credit note: the usage not invoiced yet could not be read, so the credit the payment paid for could not be worked out; record the loss on the invoice's dispute (record-loss)",
@@ -258,11 +267,13 @@ func (s *PostgresStore) recordLossTx(ctx context.Context, tx *sql.Tx, tenantID s
 // run again on the stored dispute (POST
 // /v1/invoices/{id}/disputes/{dispute_id}/record-loss). The usage not
 // invoiced yet is read first, then the invoice row FOR NO KEY UPDATE and the
-// dispute row FOR UPDATE, as the recorder takes them. It is refused, with a
-// sentence, when the dispute is not lost, already has its note, is not on the
-// top-up's own payment, is in another currency, or the payment's documents
-// already return all of it. errs.ErrNotFound when no such dispute is on the
-// invoice.
+// dispute row FOR UPDATE, as the recorder takes them. errs.ErrNotFound when
+// no such dispute is on the invoice, before any other answer. It is refused,
+// with a sentence, when the invoice is not a top-up, the dispute is not lost,
+// already has its note, is not on the top-up's own payment, is in another
+// currency, or the payment's documents already return all of it; and
+// answers 503 when the usage not invoiced yet cannot be read, having written
+// nothing.
 func (s *PostgresStore) RecordDisputeLoss(ctx context.Context, tenantID, invoiceID, disputeID string) (domain.InvoiceDispute, error) {
 	if s.disputeLoss == nil {
 		return domain.InvoiceDispute{}, fmt.Errorf("recording a lost dispute is not wired (call SetDisputeLossRecorder)")
@@ -271,12 +282,20 @@ func (s *PostgresStore) RecordDisputeLoss(ctx context.Context, tenantID, invoice
 	if err != nil {
 		return domain.InvoiceDispute{}, err
 	}
+	disputes, err := s.ListDisputesByInvoice(ctx, tenantID, invoiceID)
+	if err != nil {
+		return domain.InvoiceDispute{}, err
+	}
+	if !slices.ContainsFunc(disputes, func(d domain.InvoiceDispute) bool { return d.ID == disputeID }) {
+		return domain.InvoiceDispute{}, errs.ErrNotFound
+	}
 	if pre.BillingReason != domain.BillingReasonTopup {
 		return domain.InvoiceDispute{}, errs.InvalidState("This invoice is not a top-up, so its lost dispute takes back no credit; record the loss with an ordinary credit note.")
 	}
 	unbilled, err := s.disputeLoss.UnbilledUsageCents(ctx, tenantID, pre)
 	if err != nil {
-		return domain.InvoiceDispute{}, err
+		return domain.InvoiceDispute{}, errs.Unavailable("unbilled_usage_unavailable",
+			"Hardcount could not read the customer's usage not invoiced yet, so it wrote nothing; try again in a moment.", err)
 	}
 
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -311,8 +330,8 @@ func (s *PostgresStore) RecordDisputeLoss(ctx context.Context, tenantID, invoice
 		return domain.InvoiceDispute{}, errs.InvalidState("This dispute is not on the payment that paid this top-up, so it takes back none of its credit.")
 	case !d.LossTakesCredit(inv):
 		return domain.InvoiceDispute{}, errs.InvalidState(fmt.Sprintf(
-			"This dispute is in %s and the top-up in %s, so Hardcount takes back no credit for it; record the loss in your own books.",
-			strings.ToUpper(d.Currency), strings.ToUpper(inv.Currency)))
+			"This dispute is in %s and the top-up in %s, so Hardcount takes back no credit for it. %s",
+			strings.ToUpper(d.Currency), strings.ToUpper(inv.Currency), takeBackAnotherCurrency))
 	}
 	if d, err = s.recordLossTx(ctx, tx, tenantID, inv, d, lossInput{unbilledCents: unbilled}); err != nil {
 		return domain.InvoiceDispute{}, err
@@ -382,24 +401,25 @@ func invoiceForPaymentIntentTx(ctx context.Context, tx *sql.Tx, paymentIntentID 
 	return id, nil
 }
 
-// DisputeStatusesTx returns the status of every dispute recorded on the
-// invoice's payment paymentIntentID, on the caller's tx, with no lock. Commit
-// relief and "returned another way" read it under the credit-note lock to
-// refuse a payment the bank has taken or holds.
-func (s *PostgresStore) DisputeStatusesTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) ([]domain.DisputeStatus, error) {
+// DisputesTx returns every dispute recorded on the invoice's payment
+// paymentIntentID, on the caller's tx, with no lock: a plain read, since a
+// FOR SHARE under the credit-note lock would cycle with the dispute recorder,
+// which takes its row before that lock. Relief, the card's figure and
+// "returned another way" read it under the credit-note lock.
+func (s *PostgresStore) DisputesTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) ([]domain.InvoiceDispute, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT status FROM invoice_disputes WHERE invoice_id = $1 AND stripe_payment_intent_id = $2`, invoiceID, paymentIntentID)
+		`SELECT `+disputeCols+` FROM invoice_disputes WHERE invoice_id = $1 AND stripe_payment_intent_id = $2`, invoiceID, paymentIntentID)
 	if err != nil {
 		return nil, fmt.Errorf("read disputes of invoice %s: %w", invoiceID, err)
 	}
 	defer func() { _ = rows.Close() }()
-	var out []domain.DisputeStatus
+	var out []domain.InvoiceDispute
 	for rows.Next() {
-		var st domain.DisputeStatus
-		if err := rows.Scan((*string)(&st)); err != nil {
+		var d domain.InvoiceDispute
+		if err := rows.Scan(scanDisputeDest(&d)...); err != nil {
 			return nil, err
 		}
-		out = append(out, st)
+		out = append(out, d)
 	}
 	return out, rows.Err()
 }
