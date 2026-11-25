@@ -101,30 +101,23 @@ func TestBillFinalOnImmediateCancel_SegmentPlanLookupFailsLoud(t *testing.T) {
 // TestBillFinalOnImmediateCancel_EndedPeriodIsRefused pins the window check's
 // outcomes. A cancel at or after the period end is refused with
 // unbilled_period (the period is ended and unbilled, and nothing bills a
-// canceled subscription), naming the next step. A cancel at the period start,
-// and a never-activated trial however late, write nothing and are not errors.
+// canceled subscription), naming the next step. A cancel at the period start
+// writes nothing and is not an error.
 func TestBillFinalOnImmediateCancel_EndedPeriodIsRefused(t *testing.T) {
 	periodStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	periodEnd := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
 	for _, c := range []struct {
 		name       string
 		canceledAt time.Time
-		trial      bool
 		wantMsg    string // empty: no invoice and no error
 	}{
 		{name: "exactly at period end", canceledAt: periodEnd, wantMsg: "retry billing for this subscription, then cancel again"},
 		{name: "after period end", canceledAt: periodEnd.Add(time.Hour), wantMsg: "retry billing for this subscription, then cancel again"},
 		{name: "exactly at period start", canceledAt: periodStart},
-		{name: "never-activated trial after period end", canceledAt: periodEnd.Add(time.Hour), trial: true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			sub, pricing, usage, invoices := cancelFailLoudFixture()
 			sub.CanceledAt = &c.canceledAt
-			if c.trial {
-				sub.TrialEndAt = &periodStart
-			} else {
-				sub.ActivatedAt = &periodStart
-			}
 			subs := &mockSubs{}
 			engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 			engine.SetIntervalReader(subs)

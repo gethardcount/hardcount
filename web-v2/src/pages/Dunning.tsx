@@ -28,7 +28,8 @@ import { LoadError } from '@/components/LoadError'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { DunningPoliciesTab } from '@/components/DunningPoliciesTab'
+import { DunningPolicyTab } from '@/components/DunningPolicyTab'
+import { useDunningPolicy } from '@/hooks/useDunningPolicy'
 import {
   Table,
   TableBody,
@@ -99,20 +100,17 @@ function futureRelativeTime(dateStr: string, now: EffectiveNow): string {
 }
 
 // The page's tabs, in ?tab=: the failed payments being retried (no tab), and
-// the retry policies that set how. ?state= filters the first tab.
-type RetriesTab = 'runs' | 'policies'
+// the retry policy that sets how. ?state= filters the first tab.
+type RetriesTab = 'runs' | 'policy'
 
 export default function DunningPage() {
   usePageTitle('Payment retries')
   const [searchParams, setSearchParams] = useSearchParams()
-  const tab: RetriesTab = searchParams.get('tab') === 'policies' ? 'policies' : 'runs'
-  const setTab = (t: string) => setSearchParams(t === 'policies' ? { tab: t } : {})
-  // Same query key as the Policies tab, so the two share one fetch.
-  const { data: policiesData, isLoading: policiesLoading, error: policiesError } = useQuery({
-    queryKey: ['dunning-policies'],
-    queryFn: () => api.listDunningPolicies(),
-  })
-  const retriesOff = !policiesLoading && !policiesError ? retriesOffNotice(policiesData?.data ?? []) : null
+  const tab: RetriesTab = searchParams.get('tab') === 'policy' ? 'policy' : 'runs'
+  const setTab = (t: string) => setSearchParams(t === 'policy' ? { tab: t } : {})
+  // The same query as the Policy tab, so the two share one fetch.
+  const { data: policy, isLoading: policyLoading, error: policyError } = useDunningPolicy()
+  const retriesOff = !policyLoading && !policyError && policy !== undefined ? retriesOffNotice(policy) : null
   return (
     <>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -131,10 +129,10 @@ export default function DunningPage() {
       <Tabs value={tab} onValueChange={setTab} className="mt-6">
         <TabsList>
           <TabsTrigger value="runs">Failed payments</TabsTrigger>
-          <TabsTrigger value="policies">Policies</TabsTrigger>
+          <TabsTrigger value="policy">Policy</TabsTrigger>
         </TabsList>
         <TabsContent value="runs">
-          {/* The Policies tab says this itself, under its own list. */}
+          {/* The Policy tab says this itself, above its form. */}
           {retriesOff && (
             <Callout
               tone="amber"
@@ -147,8 +145,8 @@ export default function DunningPage() {
           )}
           <RunsTab />
         </TabsContent>
-        <TabsContent value="policies">
-          <DunningPoliciesTab />
+        <TabsContent value="policy">
+          <DunningPolicyTab />
         </TabsContent>
       </Tabs>
     </>
@@ -338,7 +336,7 @@ function RunsTab() {
                   <p className="text-sm text-muted-foreground mt-1">
                     An invoice shows up here when its payment fails and Hardcount starts retrying it.
                   </p>
-                  <Link to="/dunning?tab=policies" className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'mt-4')}>
+                  <Link to="/dunning?tab=policy" className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'mt-4')}>
                     Set up a retry policy
                   </Link>
                 </>

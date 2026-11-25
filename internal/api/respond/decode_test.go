@@ -34,7 +34,7 @@ func TestDecodeStrict_TheRule(t *testing.T) {
 		wantCode   string // the decoded code on success
 	}{
 		{name: "known keys", body: `{"code":"a","items":[{"plan_id":"p"}]}`, wantOK: true, wantCode: "a"},
-		{name: "unknown top-level key", body: `{"code":"a","trial_period_days":14}`, wantStatus: http.StatusUnprocessableEntity, wantParam: "trial_period_days", wantMsg: `unknown field "trial_period_days"`},
+		{name: "unknown top-level key", body: `{"code":"a","billing_tme":"calendar"}`, wantStatus: http.StatusUnprocessableEntity, wantParam: "billing_tme", wantMsg: `unknown field "billing_tme"`},
 		{name: "unknown nested key", body: `{"code":"a","items":[{"plan_id":"p","price":"x"}]}`, wantStatus: http.StatusUnprocessableEntity, wantParam: "price", wantMsg: `unknown field "price"`},
 		{name: "malformed JSON", body: `{"code":`, wantStatus: http.StatusBadRequest, wantMsg: "invalid JSON body"},
 		{name: "wrong type", body: `{"code":7}`, wantStatus: http.StatusBadRequest, wantMsg: "invalid JSON body"},

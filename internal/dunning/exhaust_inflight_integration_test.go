@@ -202,8 +202,8 @@ func newExhaustFixture(t *testing.T, db *postgres.DB, name string, acts finalAct
 		st = store(runs)
 	}
 	svc := dunning.NewService(st, retrier, clk)
-	policy, err := svc.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "two retries", Enabled: true, RetryDays: []int{3, 3},
+	_, err = svc.PutPolicy(ctx, tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3, 3},
 		FinalSubscriptionAction: acts.sub, FinalInvoiceAction: acts.inv,
 	})
 	if err != nil {
@@ -221,10 +221,10 @@ func newExhaustFixture(t *testing.T, db *postgres.DB, name string, acts finalAct
 		t.Fatalf("pin livemode GUC: %v", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason,
+		INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, state, reason,
 			attempt_count, last_attempt_at, next_action_at, paused, created_at, updated_at, livemode)
-		VALUES ($1, $2, $3, $4, $5, 'active', 'payment_failed', $6, $7, $8, false, $9, $9, false)`,
-		runID, tenantID, inv.ID, cust.ID, policy.ID, attemptsUsed,
+		VALUES ($1, $2, $3, $4, 'active', 'payment_failed', $5, $6, $7, false, $8, $8, false)`,
+		runID, tenantID, inv.ID, cust.ID, attemptsUsed,
 		now.Add(-2*time.Hour), now.Add(-time.Hour), now.Add(-3*time.Hour)); err != nil {
 		t.Fatalf("insert run: %v", err)
 	}

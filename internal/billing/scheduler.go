@@ -67,16 +67,6 @@ type ClawbackRetrier interface {
 	RetryPendingCreditNoteTaxReversal(ctx context.Context, batch int) (int, []error)
 }
 
-// TrialExpirer is the narrow hook the scheduler uses to flip
-// trialing subs to active at trial_end_at on the cron tick.
-// Implemented by *subscription.Service via ProcessExpiredTrials.
-// Bug #8 — without this, status stays 'trialing' until the engine
-// wakes at next_billing_at (~30 days past trial_end_at for calendar
-// billing).
-type TrialExpirer interface {
-	ProcessExpiredTrials(ctx context.Context, batch int) (int, []error)
-}
-
 // PauseResumer is the narrow hook the scheduler uses to auto-resume
 // subs whose pause_collection_resumes_at has elapsed. Implemented by
 // *subscription.Service
@@ -122,7 +112,6 @@ type Scheduler struct {
 	loginThrottle     LoginThrottleCleaner
 	taxRetrier        TaxRetrier
 	clawbackRetrier   ClawbackRetrier
-	trialExpirer      TrialExpirer
 	pauseResumer      PauseResumer
 	paymentReconciler PaymentReconciler
 	gate              leader.Gate
@@ -185,15 +174,6 @@ func (s *Scheduler) SetTaxRetrier(r TaxRetrier) {
 // until an operator reconciles manually (ADR-056 follow-up).
 func (s *Scheduler) SetClawbackRetrier(r ClawbackRetrier) {
 	s.clawbackRetrier = r
-}
-
-// SetTrialExpirer wires the trial-expiry phase (Bug #8). Each tick scans
-// trialing subs past their trial_end_at and flips status to active at the
-// trial-end instant.
-// Without this, the engine flips status only at cycle close — for
-// calendar billing that's the next month boundary, ~30 days late.
-func (s *Scheduler) SetTrialExpirer(t TrialExpirer) {
-	s.trialExpirer = t
 }
 
 // SetPauseResumer wires the pause-resume phase. Without it, subs whose
@@ -259,8 +239,8 @@ func (s *Scheduler) Start(ctx context.Context) {
 }
 
 // runBillingHalf runs the leader-gated half that generates money — recovery
-// reconcilers, auto-charge retries, invoice issuance, the trial flip the cycle
-// scan depends on, and the pause auto-resume that follows it. Splitting from
+// reconcilers, auto-charge retries, invoice issuance, and the pause
+// auto-resume that follows it. Splitting from
 // dunning lets two replicas divvy up roles instead of one replica monopolising
 // every periodic job.
 //
@@ -299,7 +279,7 @@ func (s *Scheduler) runBillingHalf(ctx context.Context) {
 
 // runBillingCycleForMode runs a single mode's half-cycle, in the step order
 // below: reconcile → auto-charge retry (which also starts no-payment dunning
-// for a card-less invoice) → threshold scan → trial expiry → bill → pause auto-resume → expire credits.
+// for a card-less invoice) → threshold scan → bill → pause auto-resume → expire credits.
 // Called twice per tick — once with ctx livemode=true, once with
 // livemode=false. Logs are tagged with the mode so operators can distinguish
 // partitions.
@@ -360,24 +340,6 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool, panic
 			}
 		}
 	}()
-
-	// 0.9 Trial expiry — flip trialing subs to active at
-	// trial_end_at BEFORE the cycle scan reads the sub list. Without
-	// this, calendar-billed trial subs sit at status='trialing' for up
-	// to ~30 days past actual trial-end (the gap from trial_end_at to
-	// next calendar-month boundary).
-	if s.trialExpirer != nil {
-		func() {
-			defer panics.Guard("step", "trial_expiry", "mode", mode)
-			flipped, tErrs := s.trialExpirer.ProcessExpiredTrials(ctx, s.batch)
-			if flipped > 0 || len(tErrs) > 0 {
-				slog.Info("trial expiry", "mode", mode, "flipped", flipped, "errors", len(tErrs))
-			}
-			for _, err := range tErrs {
-				slog.Error("trial expiry error", "mode", mode, "error", err)
-			}
-		}()
-	}
 
 	// 1. Billing cycle — bill every due sub before moving on (P27). The drain
 	// can outlast the interval (thousands of subs due on the 1st, each charged

@@ -5,8 +5,10 @@
 // if the customer joins that plan later. Plain data so the unit tests can
 // check it.
 
+import type { SubscriptionStatus } from './gen/schemas/subscriptionStatus'
+
 export function customerPlanIds(
-  subscriptions: { status: string; items?: { plan_id: string; pending_plan_id?: string }[] }[],
+  subscriptions: { status: SubscriptionStatus; items?: { plan_id: string; pending_plan_id?: string }[] }[],
 ): Set<string> {
   const ids = new Set<string>()
   for (const s of subscriptions) {

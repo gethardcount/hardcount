@@ -15,7 +15,7 @@ import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
-import { api, ApiError, amountsByCurrencyText, formatCents, formatDate, formatDateTime, getCurrencySymbol, type Customer, type BillingProfile, type Invoice, type DunningPolicyWithCount, type Subscription, type CustomerPaymentMethod } from '@/lib/api'
+import { api, ApiError, amountsByCurrencyText, formatCents, formatDate, formatDateTime, getCurrencySymbol, type Customer, type BillingProfile, type Invoice, type Subscription, type CustomerPaymentMethod } from '@/lib/api'
 import { applyApiError, showApiError } from '@/lib/formErrors'
 import { emailStepAfterFinalize, isEmailNotConfigured, newInvoiceOutcome, type NewInvoiceResult } from '@/lib/actionOutcomes'
 import { showOutcome } from '@/lib/outcomeToast'
@@ -39,7 +39,7 @@ import { paymentTermOptions } from '@/lib/paymentTerms'
 import { invoiceCurrencyPin, type CustomerCurrency } from '@/lib/customerCurrency'
 import { creditTotalsLine, invoiceCreditNote, outstandingIncludesCredit } from '@/lib/customerCredits'
 import { CustomerCreditsSection } from '@/components/customer/CustomerCreditsSection'
-import { collectionPausedFlag, genericStatus, humanizeStatus, invoiceStatus, sentEmailStatus, subscriptionStatus } from '@/lib/statusLabels'
+import { collectionPausedFlag, genericStatus, invoiceStatus, sentEmailStatus, subscriptionStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
 
 import { Button } from '@/components/ui/button'
@@ -76,8 +76,6 @@ import {
   postalPlaceholderForCountry,
 } from '@/lib/geo'
 import { TAX_ID_HINTS, taxIdTypeOptions } from '@/lib/taxIdTypes'
-import { finalActionSummary } from '@/lib/dunningActions'
-import { retryPlanText } from '@/lib/dunningSchedule'
 import { ScrollPane } from '@/components/ui/scroll-pane'
 import { stripeKeyState } from '@/lib/stripeVerify'
 
@@ -128,45 +126,35 @@ function sentEmailLabel(emailType: string): string {
   }
 }
 
-// Subscription sort + bucketing on the customer detail page. Anchored
-// to Stripe / Lago / Orb / Recurly customer-page conventions: active
-// states surface first, terminal states collapse under a toggle, and
-// each row is a single line with the next-event date as meta.
-const SUB_STATUS_RANK: Record<string, number> = {
-  trialing: 0, active: 1, past_due: 2, canceled: 3, ended: 4,
-}
-
-function subIsTerminal(status: string): boolean {
-  return status === 'canceled' || status === 'ended'
+// Subscription bucketing on the customer detail page. Anchored to Stripe /
+// Lago / Orb / Recurly customer-page conventions: live subscriptions surface
+// first, canceled ones collapse under a toggle, and each row is a single
+// line with the next-event date as meta.
+function subIsTerminal(status: Subscription['status']): boolean {
+  switch (status) {
+    case 'active': return false
+    case 'canceled': return true
+  }
 }
 
 function subMeta(sub: Subscription): string {
-  if (sub.status === 'trialing' && sub.trial_end_at) {
-    return `Trial ends ${formatDate(sub.trial_end_at)}`
-  }
   // A scheduled cancel must beat the "Renews …" arm below, and the guard
   // has to hold for the COMMON shape: cancelling at period end sets
   // cancel_at_period_end + cancel_effective_at but leaves cancel_at unset
   // (that one is only for an explicit future-dated cancel). Requiring
   // cancel_at meant this branch never fired for a period-end cancel, so a
   // subscription that stops on Sep 1 advertised "Renews Sep 1".
-  // cancel_effective_at is the backend's authoritative answer (ADR-069) and
-  // is what SubscriptionDetail's timeline already uses.
+  // cancel_effective_at is the backend's authoritative answer and is what
+  // SubscriptionDetail's timeline already uses.
   const cancelAt = sub.cancel_at_period_end || sub.cancel_at ? sub.cancel_effective_at || sub.cancel_at : null
   if (cancelAt) {
     return `Cancels ${formatDate(cancelAt)}`
-  }
-  if (sub.status === 'past_due' && sub.next_billing_at) {
-    return `Past due · retry ${formatDate(sub.next_billing_at)}`
   }
   if (sub.status === 'active' && sub.next_billing_at) {
     return `Renews ${formatDate(sub.next_billing_at)}`
   }
   if (sub.status === 'canceled' && sub.canceled_at) {
     return `Canceled ${formatDate(sub.canceled_at)}`
-  }
-  if (sub.status === 'ended' && sub.current_billing_period_end) {
-    return `Ended ${formatDate(sub.current_billing_period_end)}`
   }
   return ''
 }
@@ -179,7 +167,6 @@ export default function CustomerDetailPage() {
   const [showEditCustomer, setShowEditCustomer] = useState(false)
   const [showEditBilling, setShowEditBilling] = useState(false)
   const [showCreateSub, setShowCreateSub] = useState(false)
-  const [showDunningOverride, setShowDunningOverride] = useState(false)
   const [showNewInvoice, setShowNewInvoice] = useState(false)
   // Collapse-by-default for the "Sent emails" card — show 5 latest
   // rows inline; "Show all" expands into a scroll-constrained list.
@@ -258,17 +245,11 @@ export default function CustomerDetailPage() {
   const allSubs = subsPage?.data
   const subsTotal = subsPage?.total ?? allSubs?.length ?? 0
 
-  // Split subs into active-ish (trialing/active/past_due) and terminal
-  // (canceled/ended), sorted within each bucket by status priority then
-  // most-recent first. Lets the card render active states front-and-
-  // center and tuck terminal history under a toggle.
+  // Split subs into live and canceled, each most-recent first. Lets the card
+  // render live subscriptions front-and-center and tuck canceled ones under
+  // a toggle.
   const subBuckets = useMemo(() => {
-    const sorted = [...(allSubs ?? [])].sort((a, b) => {
-      const ra = SUB_STATUS_RANK[a.status] ?? 99
-      const rb = SUB_STATUS_RANK[b.status] ?? 99
-      if (ra !== rb) return ra - rb
-      return (b.created_at ?? '').localeCompare(a.created_at ?? '')
-    })
+    const sorted = [...(allSubs ?? [])].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
     return {
       active: sorted.filter(s => !subIsTerminal(s.status)),
       terminal: sorted.filter(s => subIsTerminal(s.status)),
@@ -334,21 +315,6 @@ export default function CustomerDetailPage() {
     enabled: !!id,
   })
   const sentEmails = sentEmailsData?.data ?? []
-
-  // Dunning policies for this tenant (ADR-036 campaigns model). The
-  // list drives the assignment dropdown on the customer detail page;
-  // the row marked is_default=true is what the customer falls back
-  // to when dunning_policy_id is empty.
-  const { data: dunningPoliciesData } = useQuery({
-    queryKey: ['dunning-policies'],
-    queryFn: () => api.listDunningPolicies().catch(() => ({ data: [], total: 0 })),
-  })
-  const dunningPolicies = dunningPoliciesData?.data ?? []
-  const defaultDunningPolicy = dunningPolicies.find(p => p.is_default)
-  const assignedDunningPolicy = customer?.dunning_policy_id
-    ? dunningPolicies.find(p => p.id === customer.dunning_policy_id)
-    : undefined
-  const effectiveDunningPolicy = assignedDunningPolicy ?? defaultDunningPolicy
 
   const isArchived = customer?.status === 'archived'
 
@@ -686,9 +652,8 @@ export default function CustomerDetailPage() {
         <div className="min-w-0 space-y-6 lg:col-span-2 lg:col-start-1 lg:row-span-2 lg:row-start-1">
           {/* Subscriptions and invoices first: what the customer pays for and owes. */}
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-            {/* Subscriptions — compact one-line rows, sorted by status
-                priority (trialing → active → past_due). Terminal subs
-                (canceled / ended) collapse under a toggle so they don't
+            {/* Subscriptions — compact one-line rows, most recent first.
+                Canceled subs collapse under a toggle so they don't
                 inflate the card on heavy-use customers. Anchored to
                 Stripe / Lago / Orb / Recurly customer-page conventions. */}
             <Card>
@@ -1064,47 +1029,6 @@ export default function CustomerDetailPage() {
             )}
           </Card>
 
-          {/* Dunning policy — Stripe / Lago / Recurly campaigns shape
-              (ADR-036). Operator either assigns a named policy or leaves
-              the customer on the tenant default. */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">Retry policy</CardTitle>
-                {!isArchived && (
-                  <Button variant="outline" size="sm" onClick={() => setShowDunningOverride(true)}>
-                    Change
-                  </Button>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              {effectiveDunningPolicy ? (
-                <div className="divide-y divide-border">
-                  <div className="flex items-center justify-between px-6 py-3">
-                    <span className="text-sm text-muted-foreground">Policy</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-foreground">{effectiveDunningPolicy.name || 'Default'}</span>
-                      {!assignedDunningPolicy && (
-                        <Badge variant="outline">Account default</Badge>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between gap-4 px-6 py-3">
-                    <span className="text-sm text-muted-foreground">Schedule</span>
-                    <span className="text-sm text-foreground text-right">{retryPlanText(effectiveDunningPolicy.retry_days)}</span>
-                  </div>
-                  <div className="flex items-center justify-between px-6 py-3">
-                    <span className="text-sm text-muted-foreground">Final action</span>
-                    <Badge variant="outline">{humanizeStatus(finalActionSummary(effectiveDunningPolicy))}</Badge>
-                  </div>
-                </div>
-              ) : (
-                <p className="px-6 py-6 text-sm text-muted-foreground text-center">No retry policies yet</p>
-              )}
-            </CardContent>
-          </Card>
-
           {/* Credits: balance per currency with granted/used/expired, every
               grant including used-up ones, the latest ledger entries, and Grant
               credits. Each amount carries its own currency; the customer's
@@ -1180,21 +1104,6 @@ export default function CustomerDetailPage() {
             setShowEditBilling(false)
             queryClient.invalidateQueries({ queryKey: ['customer-billing-profile', id] })
             toast.success('Billing profile saved')
-          }}
-        />
-      )}
-
-      {/* Assign dunning policy (ADR-036 campaigns model) */}
-      {showDunningOverride && id && customer && (
-        <AssignDunningPolicyDialog
-          customerId={id}
-          currentPolicyID={customer.dunning_policy_id ?? ''}
-          policies={dunningPolicies}
-          onClose={() => setShowDunningOverride(false)}
-          onSaved={() => {
-            setShowDunningOverride(false)
-            queryClient.invalidateQueries({ queryKey: ['customer', id] })
-            toast.success('Retry policy assignment saved')
           }}
         />
       )}
@@ -1582,89 +1491,6 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
               {isSubmitting ? <><Loader2 size={14} className="animate-spin mr-2" />Saving...</> : isDirty ? 'Save' : 'No changes'}
             </Button>
           </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-/* ─── Dunning Policy Assignment (ADR-036) ─────────────────────────
-   Replaces the partial-field-override dialog. Customers either
-   inherit the tenant default policy or are explicitly assigned to a
-   named policy (Stripe / Lago / Recurly campaigns shape). To create
-   or edit policies, operators use the Policies tab of /dunning.
-─────────────────────────────────────────────────────────────────── */
-
-function AssignDunningPolicyDialog({ customerId, currentPolicyID, policies, onClose, onSaved }: {
-  customerId: string
-  currentPolicyID: string
-  policies: DunningPolicyWithCount[]
-  onClose: () => void
-  onSaved: () => void
-}) {
-  const [selected, setSelected] = useState(currentPolicyID || '__default__')
-  const [saving, setSaving] = useState(false)
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSaving(true)
-    try {
-      // '__default__' sentinel maps to empty string on the wire,
-      // which the customer service interprets as "clear assignment,
-      // fall back to tenant default" (ADR-036).
-      const policyId = selected === '__default__' ? '' : selected
-      await api.updateCustomer(customerId, { dunning_policy_id: policyId })
-      onSaved()
-    } catch (err) {
-      showApiError(err, 'Failed to save')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const defaultPolicy = policies.find(p => p.is_default)
-  const selectedPolicy = selected === '__default__'
-    ? defaultPolicy
-    : policies.find(p => p.id === selected)
-
-  return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Retry policy</DialogTitle>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} noValidate className="space-y-4">
-          <div className="space-y-2">
-            <Label>Policy</Label>
-            {/* Searchable: policies are TENANT DATA and grow unbounded. The
-                sentinel "__default__" row stays FIRST so "inherit the tenant
-                default" is never something you have to search for. */}
-            <Combobox
-              value={selected}
-              onChange={(val) => setSelected(val ?? '__default__')}
-              options={[
-                { value: '__default__', label: defaultPolicy ? `Account default (${defaultPolicy.name || 'Default'})` : 'Account default' },
-                ...policies.filter(p => !p.is_default).map(p => ({ value: p.id, label: p.name || '(unnamed policy)' })),
-              ]}
-              emptyMessage="No policy matches that search."
-              triggerClassName="w-full"
-            />
-            <p className="text-xs text-muted-foreground">
-              Manage policies on the <Link to="/dunning?tab=policies" className="underline">Payment retries</Link> page, under Policies.
-            </p>
-          </div>
-          {selectedPolicy && (
-            <div className="rounded-md border border-border bg-muted/30 p-3 text-xs space-y-1">
-              <div className="flex justify-between gap-4"><span className="text-muted-foreground">Schedule</span><span className="text-right">{retryPlanText(selectedPolicy.retry_days)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">On exhaustion</span><span>{finalActionSummary(selectedPolicy)}</span></div>
-            </div>
-          )}
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={saving}>
-              {saving ? <><Loader2 size={14} className="animate-spin mr-2" />Saving...</> : 'Save'}
-            </Button>
-          </div>
         </form>
       </DialogContent>
     </Dialog>

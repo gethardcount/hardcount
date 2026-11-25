@@ -50,8 +50,7 @@ func (e *Engine) SetLiveBalanceReaders(credits CreditBalanceReader, subs Custome
 // clamp and tier continuation the close applies (unbilledUsageCents). It
 // lives in the engine because the figure is only right while it prices usage
 // the way the close does; the earlier estimate in the usage package had
-// drifted from the close in three ways (no watermark, trial usage counted,
-// one window for every subscription).
+// drifted from the close (no watermark, one window for every subscription).
 //
 // Left out on purpose, so the figure can read HIGH: tax, base fees billed in
 // arrears (until the period closes), amounts due on unpaid invoices, and a
@@ -130,59 +129,29 @@ func (e *Engine) LiveCreditBalance(ctx context.Context, tenantID, customerID str
 }
 
 // billableSubscriptions returns the customer's subscriptions whose stored
-// current period the close will bill: every active one, and a trialing one
-// unless its period closes without an invoice (trialPeriodBilled). It pages
-// to the end because the list is capped per call, and a customer's canceled
-// history must not push a live subscription off the page.
+// current period the close will bill: every active one. It pages to the end
+// because the list is capped per call, and a customer's canceled history
+// must not push a live subscription off the page.
 func (e *Engine) billableSubscriptions(ctx context.Context, tenantID, customerID string) ([]domain.Subscription, error) {
 	const page = 100
 	var out []domain.Subscription
-	for _, status := range []domain.SubscriptionStatus{domain.SubscriptionActive, domain.SubscriptionTrialing} {
-		for offset := 0; ; offset += page {
-			subs, _, err := e.customerSubs.List(ctx, subscription.ListFilter{
-				TenantID:   tenantID,
-				CustomerID: customerID,
-				Status:     string(status),
-				Limit:      page,
-				Offset:     offset,
-			})
-			if err != nil {
-				return nil, err
-			}
-			for _, sub := range subs {
-				if sub.Status == domain.SubscriptionTrialing && !trialPeriodBilled(sub) {
-					continue
-				}
-				out = append(out, sub)
-			}
-			if len(subs) < page {
-				break
-			}
+	for offset := 0; ; offset += page {
+		subs, _, err := e.customerSubs.List(ctx, subscription.ListFilter{
+			TenantID:   tenantID,
+			CustomerID: customerID,
+			Status:     string(domain.SubscriptionActive),
+			Limit:      page,
+			Offset:     offset,
+		})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, subs...)
+		if len(subs) < page {
+			break
 		}
 	}
 	return out, nil
-}
-
-// trialCancelsFree reports whether a trialing subscription has a cancel due
-// at trial end. The engine then cancels it without an invoice (ADR-069).
-func trialCancelsFree(sub domain.Subscription) bool {
-	return sub.CancelAtPeriodEnd || (sub.CancelAt != nil && sub.TrialEndAt != nil && !sub.CancelAt.After(*sub.TrialEndAt))
-}
-
-// trialPeriodBilled reports whether the close will bill a trialing
-// subscription's stored current period. The filter is the period, not the
-// status. The subscription service stamps the first PAID period on a trialing
-// row, starting at the beginning of the day the trial ends
-// (firstPeriodAfterTrial); conversion opens the items' billing intervals at
-// that period start, not at the flip, and the close bills usage from there.
-// So usage sent on the trial's last day is billed, and it is counted here
-// while the status still says trialing. Usage before the stored period start,
-// the trial proper, falls outside the window on its own.
-//
-// A trialing period with a cancel due at trial end closes without an
-// invoice (handleTrialState).
-func trialPeriodBilled(sub domain.Subscription) bool {
-	return !trialCancelsFree(sub)
 }
 
 // unbilledUsageCents is the usage amount the period close would bill for
@@ -239,8 +208,8 @@ const (
 //     its own plan's prices at the plan's pin of the period (pinsOf). After
 //     a mid-period swap the outgoing plan's window counts up to the swap at
 //     its prices and the incoming plan's from it at its own. A window starts
-//     no earlier than the trial end or another subscription's coverage end
-//     of the meter that day (usageFloors).
+//     no earlier than another subscription's coverage end of the meter that
+//     day (usageFloors).
 //   - No threshold invoice this period: every bucket over those windows.
 //   - A threshold invoice exists (read only for afterThresholdInvoice): it
 //     billed usage up to its billing_period_end, and credit already paid
@@ -271,19 +240,12 @@ func (e *Engine) rateCurrentPeriod(ctx context.Context, sub domain.Subscription,
 	if err != nil {
 		return currentPeriod{}, err
 	}
-	// A trialing subscription has no billing intervals yet: conversion opens
-	// one per item at the stored period start. With no segments,
-	// meterUsageIntervals gives each current item the whole period, which is
-	// what those intervals will say.
-	var segsByItem map[string][]baseSegment
-	if sub.Status != domain.SubscriptionTrialing {
-		segsByItem, err = e.windowSegments(ctx, sub, periodStart, periodEnd)
-		if err != nil {
-			return currentPeriod{}, fmt.Errorf("resolve segments: %w", err)
-		}
-		if err := e.hydrateSegmentPlans(ctx, sub, segsByItem, plans); err != nil {
-			return currentPeriod{}, err
-		}
+	segsByItem, err := e.windowSegments(ctx, sub, periodStart, periodEnd)
+	if err != nil {
+		return currentPeriod{}, fmt.Errorf("resolve segments: %w", err)
+	}
+	if err := e.hydrateSegmentPlans(ctx, sub, segsByItem, plans); err != nil {
+		return currentPeriod{}, err
 	}
 	src := e.prices()
 	stretches := planStretches(sub, segsByItem, periodStart, periodEnd)

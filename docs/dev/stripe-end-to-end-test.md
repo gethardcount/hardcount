@@ -321,19 +321,19 @@ Hardcount sends to your configured endpoints.
      -b /tmp/hardcount-cookies.txt | jq
    ```
 
-   **You see:** a [dunning run](../glossary.md), on the "Default retries"
-   policy that bootstrap creates in each mode (ADR-123). Its first retry is
-   due three days after the failure.
+   **You see:** a [dunning run](../glossary.md), on the account's policy,
+   which bootstrap creates in each mode (ADR-123). Its first retry is due
+   three days after the failure.
 
-Retries follow the default policy's `retry_days`, `[3, 4, 7]` for "Default
-retries": day 3, 7 and 14. Each retry is a fresh PaymentIntent: on the
+Retries follow the policy's `retry_days`, `[3, 4, 7]` on a new account: day
+3, 7 and 14. Each retry is a fresh PaymentIntent: on the
 Stripe dashboard's Payments page, the PI (PaymentIntent) ID changes per
 attempt.
 
 An account created before ADR-123 has no policy. The failed payment is then
 skipped with a "dunning not configured" WARN, and the runs list stays empty.
-Create a policy first (dashboard → Payment retries → Policies, or
-`POST /v1/dunning/policies`).
+Save a policy first (dashboard → Payment retries → Policy, or
+`PUT /v1/dunning/policy`).
 
 To recover the customer, swap the card via step 2b with `4242`, then wait for
 the next scheduled dunning retry. Once the payment succeeds, the run resolves

@@ -30,7 +30,7 @@ func TestE2E_ALiveSubscriptionCreateReadsOneInstant(t *testing.T) {
 	}).want(t, 201, "live customer").body, "id")
 	sub := call("POST", "/v1/subscriptions", map[string]any{
 		"code": "live-one-instant", "display_name": "Live one instant", "customer_id": cust,
-		"items": []map[string]any{{"plan_id": plan, "quantity": 1}}, "billing_time": "anniversary", "trial_days": 14,
+		"items": []map[string]any{{"plan_id": plan, "quantity": 1}}, "billing_time": "anniversary",
 	}).want(t, 201, "live create").body
 	created, err1 := time.Parse(time.RFC3339Nano, flowStr(sub, "created_at"))
 	started, err2 := time.Parse(time.RFC3339Nano, flowStr(sub, "started_at"))

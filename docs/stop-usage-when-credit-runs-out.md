@@ -66,8 +66,7 @@ answers:
 ```
 
 `balances` has one entry per currency: each currency the customer holds
-credit in, and each currency an active or trialing subscription will
-invoice usage in.
+credit in, and each currency an active subscription will invoice usage in.
 No entry in the customer's currency means no credit in it.
 
 | Field | Meaning |
@@ -283,19 +282,13 @@ rather than at zero.
 <details>
 <summary><strong>Edge cases</strong></summary>
 
-Three cases are handled so that nothing is counted twice or wrongly:
+Two cases are handled so that nothing is counted twice or wrongly:
 
 - **A spend threshold invoiced part of the period early.** A spend
   threshold is a limit that makes Hardcount invoice usage before the period
   ends. That usage has
   been paid for from credit already, so only the usage since that invoice is
   counted.
-- **A subscription is in a trial.** Usage sent before the first paid period
-  starts is not billed, so it is not counted. The first paid period starts at
-  the beginning of the day the trial ends. Usage sent on that last day is
-  billed, so it is counted, even while the subscription still says
-  `trialing`. A trial that is set to cancel when it ends is not billed at
-  all, and none of its usage is counted.
 - **The plan changed in the middle of the period.** Each meter is counted for
   the time a plan that carries it was on the subscription, as the invoice
   bills it. Usage on the old plan's meter before the change still counts.

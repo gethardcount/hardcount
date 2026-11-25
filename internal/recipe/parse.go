@@ -103,7 +103,7 @@ var removedSections = []struct {
 }{
 	{"rating_rules", "put each rate on a price under its plan's prices", func(r rawRecipe) bool { return r.RatingRules != nil }},
 	{"pricing_rules", "put each price under its plan's prices", func(r rawRecipe) bool { return r.PricingRules != nil }},
-	{"dunning", "a recipe no longer creates a dunning policy; set retries on the Payment retries page, under Policies", func(r rawRecipe) bool { return r.Dunning != nil }},
+	{"dunning", "a recipe no longer creates a dunning policy; set retries on the Payment retries page, under Policy", func(r rawRecipe) bool { return r.Dunning != nil }},
 	{"webhook", "a recipe no longer creates a webhook endpoint; add one on the Webhooks page", func(r rawRecipe) bool { return r.Webhook != nil }},
 }
 

@@ -15,20 +15,13 @@ import type { DunningPolicyInputFinalInvoiceAction } from './dunningPolicyInputF
 import type { DunningPolicyInputFinalSubscriptionAction } from './dunningPolicyInputFinalSubscriptionAction';
 
 /**
- * The body of `POST /v1/dunning/policies` and
- * `PATCH /v1/dunning/policies/{id}`. A PATCH replaces every setting,
- * so send the full policy. `id`, `tenant_id`, `is_default`, `seeded`,
- * `created_at` and `updated_at` are set by the server; sending one is
- * refused with 422.
+ * The body of `PUT /v1/dunning/policy`. It replaces every setting, so
+ * all four are required. `tenant_id`, `created_at` and `updated_at`
+ * are set by the server; sending one is refused with 422.
  */
 export interface DunningPolicyInput {
-  /**
-     * A name for the policy, up to 255 bytes (a character outside ASCII counts as more than one). Defaults to empty.
-     * @maxLength 255
-     */
-  name?: string;
-  /** A disabled policy starts no dunning. */
-  enabled?: boolean;
+  /** A disabled policy starts no dunning for a payment that fails from then on. Runs already started keep retrying. */
+  enabled: boolean;
   /**
      * Days to wait before each retry. The first counts from the failed
      * payment or the collection that found no card. Each later one
@@ -55,11 +48,11 @@ export interface DunningPolicyInput {
      * event says `canceled_by: schedule`. `none` leaves it alone. An
      * invoice with no subscription is not affected.
      */
-  final_subscription_action?: DunningPolicyInputFinalSubscriptionAction;
+  final_subscription_action: DunningPolicyInputFinalSubscriptionAction;
   /**
      * What happens to the invoice when retries run out.
      * `mark_uncollectible` writes it off as bad debt; `none` leaves it
      * open and due.
      */
-  final_invoice_action?: DunningPolicyInputFinalInvoiceAction;
+  final_invoice_action: DunningPolicyInputFinalInvoiceAction;
 }

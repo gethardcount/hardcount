@@ -21,7 +21,7 @@ import (
 // event's customer → results[1] answers outside_subscription.
 func TestBillingStatus_BatchClassifiesEachEventByItsCustomer(t *testing.T) {
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
-	r.newSub("sub", r.planA, lagP0, nil)
+	r.newSub("sub", r.planA, lagP0)
 	r.must(http.MethodPost, "/v1/customers", lagP0, map[string]any{
 		"external_id": "no_sub_cust", "display_name": "No subscription", "email": "nosub@example.test",
 	}, http.StatusCreated)
@@ -70,7 +70,7 @@ func TestBillingStatus_LiteLLMPreSplitCallIsClassifiedByItsOwnRows(t *testing.T)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	tokens := r.newMeter("tokens", "sum")
 	plan := r.planPricing("plan_output", map[string]any{"meter_id": tokens, "dimension_match": map[string]any{"token_type": "output"}})
-	r.newSub("llm", plan, lagP0, nil)
+	r.newSub("llm", plan, lagP0)
 	end := lagP0.AddDate(0, 0, 9)
 	r.postEvent("/v1/usage-events", "tokens", "ps-open:input", end, end.Add(time.Minute), 101000, http.StatusCreated)
 

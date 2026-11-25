@@ -380,9 +380,9 @@ func TestCustomerUsage_NoSubscriptionRequiresExplicitWindow(t *testing.T) {
 
 // TestCustomerUsage_ExplicitWindowLeavesOutACanceledSubscription pins what
 // the API reference says of `period.source: explicit` and what the
-// dashboard's estimate note says: only active and trialing subscriptions are
-// rated, so a canceled subscription's usage in a chosen window is not
-// counted, though its invoices billed it.
+// dashboard's estimate note says: only active subscriptions are rated, so a
+// canceled subscription's usage in a chosen window is not counted, though
+// its invoices billed it.
 //
 // Mutation: rate canceled subscriptions too (filterActiveSubs), and the
 // canceled subscription's 500 cents stay in the window's totals.

@@ -33,7 +33,7 @@ tags:
   - name: Pricing
     description: Meters, plans, prices and price overrides.
   - name: Subscriptions
-    description: Subscriptions, their items, trials, pauses and cancellations.
+    description: Subscriptions, their items, pauses and cancellations.
   - name: Usage
     description: Sending usage events and reading usage totals.
   - name: Invoices
@@ -45,7 +45,7 @@ tags:
   - name: Billing
     description: Billing runs, previews and analytics.
   - name: Dunning
-    description: Retrying failed payments. Policies and runs.
+    description: Retrying failed payments. The policy and the runs.
   - name: Webhooks
     description: Webhook endpoints that Hardcount sends events to, the events, and their deliveries.
   - name: Auth
@@ -510,9 +510,8 @@ components:
 
         Not every route fills every optional field. Get and update return
         the whole record. The list and create answers leave out
-        `email_status`, the bounce fields, `dunning_policy_id` and
-        `stripe_customer_id`, and the list also leaves out
-        `additional_emails`.
+        `email_status`, the bounce fields and `stripe_customer_id`, and the
+        list also leaves out `additional_emails`.
       required: [id, external_id, display_name, status, created_at, updated_at]
       properties:
         id:
@@ -583,12 +582,6 @@ components:
             The reason the email provider gave with the last bounce or spam
             report. Absent until one is recorded, when the report gave no
             reason, and again after `email` changes.
-        dunning_policy_id:
-          type: string
-          description: |
-            The dunning policy (the plan for retrying failed payments) this
-            customer uses. Absent when the customer uses the account's
-            default policy.
         stripe_customer_id:
           type: string
           description: |
@@ -615,7 +608,6 @@ components:
         additional_emails: [finance@acme.example]
         status: active
         email_status: unknown
-        dunning_policy_id: hc_dpol_dajqj1aq3gpgqfoq5c6g
         stripe_customer_id: cus_RkT9qW2xYz3AbC
         created_at: "2026-09-30T16:20:00Z"
         updated_at: "2026-10-15T09:12:44Z"
@@ -992,9 +984,8 @@ components:
         `next_period`: each subscriber pays the new content from their next
         billing period; the current period keeps the prices it started with.
         A subscriber who first joins the plan in a period after the write
-        gets it from the join: a subscription that starts after it (after a
-        trial, from the trial's end), an immediate plan change onto the
-        plan, or an item added on it. Each is priced from that moment by the
+        gets it from the join: a subscription that starts after it, an
+        immediate plan change onto the plan, or an item added on it. Each is priced from that moment by the
         plan's prices then, so a subscription that starts later on the day
         of the write bills a price added that day and not one removed that
         day. A subscription that was on the plan earlier in the period and
@@ -1116,8 +1107,8 @@ components:
         Usage, and a base fee billed in arrears, are invoiced when a period
         ends. A base fee billed in advance is invoiced when its period
         starts: the first one in the same transaction that creates the
-        subscription or ends its trial, each later one on the invoice that
-        closes the period before.
+        subscription, each later one on the invoice that closes the period
+        before.
       required: [id, code, display_name, customer_id, status, billing_time, cancel_at_period_end, created_at, updated_at]
       properties:
         id:
@@ -1144,16 +1135,12 @@ components:
             $ref: "#/components/schemas/SubscriptionItem"
         status:
           type: string
-          enum: [trialing, active, canceled]
+          enum: [active, canceled]
           description: |
             Where the subscription is in its life.
 
-            - `trialing`: in a free trial until `trial_end_at`. Usage in
-              the trial is not billed. When the trial ends, Hardcount makes
-              the subscription `active` and its first paid period starts.
-              If a cancel is scheduled for the trial end, it becomes
-              `canceled` instead, with no charge.
-            - `active`: billing. Usage and base fees billed in arrears are
+            - `active`: billing, from the start of the day it is created
+              (in the account's time zone). Usage and base fees billed in arrears are
               invoiced when each period ends; a base fee billed in advance
               when its period starts.
             - `canceled`: ended at `canceled_at`. It bills nothing more,
@@ -1167,8 +1154,7 @@ components:
           enum: [calendar, anniversary]
           description: |
             How monthly periods line up. The first period starts on the day
-            the subscription starts to bill: the day it is created, or,
-            with a trial, the day the trial ends.
+            the subscription is created.
             `calendar`: every period ends on the 1st of a month, in your
             account's billing time zone, so the first period runs from that
             day to the next 1st. `anniversary`: each period starts on the
@@ -1177,33 +1163,14 @@ components:
             that first day, whatever this says. An immediate change to a
             plan with another billing interval starts a new first period at
             the change.
-        trial_start_at:
-          type: string
-          format: date-time
-          description: When the trial started. Absent when the subscription had no trial.
-        trial_end_at:
-          type: string
-          format: date-time
-          description: |
-            When the trial ends, or ended. The first paid period starts at
-            the beginning of that day in your account's billing time zone.
-            Ending the trial early (`POST /v1/subscriptions/{id}/end-trial`)
-            sets it to that moment. Absent when the subscription had no
-            trial.
         started_at:
           type: string
           format: date-time
           description: |
-            The moment the subscription was created. Its trial begins
-            then, or, without a trial, its billing. A subscription that an
-            earlier release activated from a draft has the moment of that
-            activation instead.
-        activated_at:
-          type: string
-          format: date-time
-          description: |
-            When the subscription became `active`: at creation without a
-            trial, or when its trial ended. Absent while it trials.
+            The moment the subscription was created. Its first period, and
+            the usage it bills, start at the beginning of that day in the
+            account's time zone. A subscription that an earlier release activated from a
+            draft has the moment of that activation instead.
         canceled_at:
           type: string
           format: date-time
@@ -1219,16 +1186,15 @@ components:
           type: boolean
           description: |
             True when the subscription cancels at the end of the current
-            period, or, while it trials, at the end of the trial. False
-            after the subscription is canceled.
+            period. False after the subscription is canceled.
         cancel_effective_at:
           type: string
           format: date-time
           description: |
             When a scheduled cancel takes effect: `cancel_at` when set;
-            otherwise, with `cancel_at_period_end`, `trial_end_at` while
-            the subscription trials and `current_billing_period_end`
-            after. Absent when no cancel is scheduled.
+            otherwise, with `cancel_at_period_end`,
+            `current_billing_period_end`. Absent when no cancel is
+            scheduled.
         pause_collection:
           $ref: "#/components/schemas/SubscriptionPauseCollection"
         billing_thresholds:
@@ -1238,10 +1204,8 @@ components:
           format: date-time
           description: |
             Start of the current billing period, normally the beginning of
-            a day in your account's billing time zone. While the
-            subscription trials, it is the start of the first paid period:
-            the beginning of the day the trial ends, not `trial_end_at`
-            itself. After an immediate change to a plan with another billing
+            a day in your account's billing time zone. After an immediate
+            change to a plan with another billing
             interval, a period can start or end at the instant of the
             change. On a canceled subscription it keeps its last value.
         current_billing_period_end:
@@ -1249,8 +1213,7 @@ components:
           format: date-time
           description: |
             End of the current period (exclusive): the start of the next
-            one. While the subscription trials, the end of the first paid
-            period. On a canceled subscription it keeps its last value.
+            one. On a canceled subscription it keeps its last value.
         current_billing_period_display:
           type: string
           description: |
@@ -1301,7 +1264,6 @@ components:
         status: active
         billing_time: calendar
         started_at: "2026-10-01T09:12:44Z"
-        activated_at: "2026-10-01T09:12:44Z"
         cancel_at_period_end: false
         current_billing_period_start: "2026-10-01T00:00:00Z"
         current_billing_period_end: "2026-11-01T00:00:00Z"
@@ -1473,10 +1435,9 @@ components:
           event with a one-off invoice if it should be charged.
         - `not_on_plan`: a billing period not invoiced yet holds the event's
           time, but its plan has no price for this meter.
-        - `outside_subscription`: no active or trialing subscription of the
-          customer bills the event's time. For example, it has none, or the
-          time is before one starts, in a free trial, or after one ends or
-          its scheduled cancel.
+        - `outside_subscription`: no active subscription of the customer
+          bills the event's time. For example, it has none, or the time is
+          before one starts, or after one ends or its scheduled cancel.
         - `no_price`: the plan that bills the event's time prices this
           meter, but no price of that plan takes the event's `dimensions`.
           A price takes an event whose dimensions include all of the
@@ -1487,11 +1448,10 @@ components:
         No `billing_status` means Hardcount found no reason then. It is not a
         promise that the event will be billed. Hardcount checks only the
         customer's current billing periods: time after a period end whose
-        invoice is not built yet is not checked, nor is time after a trial's
-        end before Hardcount ends the trial. A later change can change the
-        outcome either way: a subscription created or changed, a
-        trial extended, a scheduled cancel undone, or a price added. The
-        invoice is the final answer.
+        invoice is not built yet is not checked. A later change can change
+        the outcome either way: a subscription created or changed, a
+        scheduled cancel undone, or a price added. The invoice is the final
+        answer.
 
         Two cases can make a present status wrong: a price change whose
         save began before a billing period started and finished after the
@@ -2045,7 +2005,7 @@ components:
         - `subscription_cycle`: the invoice for a subscription period that
           ended (a renewal).
         - `subscription_create`: the first invoice when a subscription
-          starts or its trial ends, for the fees its plans bill in advance.
+          starts, for the fees its plans bill in advance.
           A subscription billed only in arrears has none.
         - `subscription_cancel`: the final invoice when a subscription is
           canceled at once in the middle of a period.
@@ -2854,8 +2814,8 @@ components:
           description: |
             Total rated usage revenue in the window, in the minor unit of
             `revenue_currency` (cents for USD). It is an estimate at each
-            subscription's current prices. Only active and trialing
-            subscriptions are counted.
+            subscription's current prices. Only active subscriptions are
+            counted.
         revenue_currency:
           type: string
           description: |
@@ -3135,7 +3095,7 @@ components:
       description: >
         A customer's credit position right now, one entry per currency: every
         currency the customer holds credit in, and every currency an active
-        or trialing subscription will invoice usage in. Amounts in two currencies are
+        subscription will invoice usage in. Amounts in two currencies are
         never added together. Returned by
         `GET /v1/credits/balance/{customer_id}/live`; nothing is stored.
       required: [customer_id, balances, computed_at]
@@ -3194,9 +3154,7 @@ components:
             in the currency's minor unit. Usage that a mid-period threshold
             invoice already billed is not counted again. After a mid-period
             plan change each meter is counted for the time a plan carrying it
-            was on the subscription. For a trialing subscription only usage
-            from the trial end on counts, inside its first paid period; trial
-            usage is free.
+            was on the subscription.
         estimated_remaining_cents:
           type: integer
           format: int64
@@ -4251,8 +4209,8 @@ components:
       type: object
       description: |
         A customer's usage and its cost over a window, priced the way the
-        invoice prices it: `GET /v1/customers/{id}/usage`. Only active and
-        trialing subscriptions are counted. Quantities are decimal strings.
+        invoice prices it: `GET /v1/customers/{id}/usage`. Only active
+        subscriptions are counted. Quantities are decimal strings.
       required: [customer_id, period, subscriptions, meters, totals, warnings, buckets]
       properties:
         customer_id:
@@ -4285,14 +4243,14 @@ components:
                 the amounts are what the period's invoices bill.
                 `explicit`: the window you sent. Its amounts are an
                 estimate, so a past window can differ from its invoices.
-                Only active and trialing subscriptions are counted: the
-                usage of a canceled subscription is left out. Each
+                Only active subscriptions are counted: the usage of a
+                canceled subscription is left out. Each
                 subscription's usage in the window is priced at the
                 prices of its current billing period.
         subscriptions:
           type: array
           description: |
-            One entry per item of each active or trialing subscription. A
+            One entry per item of each active subscription. A
             subscription with several plans appears once per plan, with the
             same `id`.
           items:
@@ -4517,7 +4475,7 @@ components:
           type: array
           description: |
             The customer's subscriptions with status `active`, up to 50,
-            with their items. Trialing subscriptions are not listed.
+            with their items.
           items:
             $ref: "#/components/schemas/Subscription"
         recent_invoices:
@@ -4577,7 +4535,6 @@ components:
             status: active
             billing_time: calendar
             started_at: "2026-10-01T00:00:00Z"
-            activated_at: "2026-10-01T00:00:00Z"
             cancel_at_period_end: false
             current_billing_period_start: "2026-11-01T00:00:00Z"
             current_billing_period_end: "2026-12-01T00:00:00Z"
@@ -5163,7 +5120,7 @@ components:
         detail_timestamp:
           type: string
           format: date-time
-          description: The date the end of `detail` refers to, for the client to format, as in "Trial now ends" followed by this date.
+          description: The date the end of `detail` refers to, for the client to format, as in "Resumes" followed by this date.
         error:
           type: string
           description: The line's problem.
@@ -5507,7 +5464,7 @@ components:
             Uppercase or lowercase ISO 4217 code; it is stored uppercase. It
             must be the customer's currency (see the 409). Defaults to the
             billing profile's currency, then the plan currency of the
-            customer's trialing and active subscriptions, then the
+            customer's active subscriptions, then the
             account's default
             currency. Currencies with no minor unit (such as JPY) are
             refused.
@@ -6652,9 +6609,10 @@ components:
       description: |
         A dunning run: the payment retries for one unpaid invoice. Dunning
         is retrying a failed or missing payment on a schedule (the
-        invoice's dunning policy), and running the policy's final action
-        when the retries run out. Each invoice has at most one run.
-      required: [id, invoice_id, policy_id, state, attempt_count, paused, created_at, updated_at]
+        account's dunning policy for the run's mode), and running the
+        policy's final action when the retries run out. Each invoice has at
+        most one run.
+      required: [id, invoice_id, state, attempt_count, paused, created_at, updated_at]
       properties:
         id:
           type: string
@@ -6668,9 +6626,6 @@ components:
         customer_id:
           type: string
           description: The invoice's customer. Absent when not recorded.
-        policy_id:
-          type: string
-          description: The dunning policy whose schedule and final action the run follows.
         state:
           type: string
           enum: [active, escalated, resolved]
@@ -6754,7 +6709,6 @@ components:
         tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
         invoice_id: hc_inv_dbj84b2q3gpgqfoq5c40
         customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
-        policy_id: hc_dpol_dajqj1aq3gpgqfoq5c6g
         state: active
         reason: payment_failed
         attempt_count: 1
@@ -6894,7 +6848,6 @@ components:
           tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
           invoice_id: hc_inv_dbj84b2q3gpgqfoq5c40
           customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
-          policy_id: hc_dpol_dajqj1aq3gpgqfoq5c6g
           state: active
           reason: payment_failed
           attempt_count: 1
@@ -7093,21 +7046,14 @@ components:
     DunningPolicyInput:
       type: object
       description: |
-        The body of `POST /v1/dunning/policies` and
-        `PATCH /v1/dunning/policies/{id}`. A PATCH replaces every setting,
-        so send the full policy. `id`, `tenant_id`, `is_default`, `seeded`,
-        `created_at` and `updated_at` are set by the server; sending one is
-        refused with 422.
-      required: [retry_days]
+        The body of `PUT /v1/dunning/policy`. It replaces every setting, so
+        all four are required. `tenant_id`, `created_at` and `updated_at`
+        are set by the server; sending one is refused with 422.
+      required: [enabled, retry_days, final_subscription_action, final_invoice_action]
       properties:
-        name:
-          type: string
-          maxLength: 255
-          description: A name for the policy, up to 255 bytes (a character outside ASCII counts as more than one). Defaults to empty.
         enabled:
           type: boolean
-          default: false
-          description: A disabled policy starts no dunning.
+          description: A disabled policy starts no dunning for a payment that fails from then on. Runs already started keep retrying.
         retry_days:
           type: array
           minItems: 1
@@ -7128,7 +7074,6 @@ components:
         final_subscription_action:
           type: string
           enum: [none, pause, cancel]
-          default: pause
           description: |
             What happens to the subscription when retries run out. `pause`
             pauses collection and sends `subscription.collection_paused`
@@ -7143,13 +7088,11 @@ components:
         final_invoice_action:
           type: string
           enum: [none, mark_uncollectible]
-          default: none
           description: |
             What happens to the invoice when retries run out.
             `mark_uncollectible` writes it off as bad debt; `none` leaves it
             open and due.
       example:
-        name: Strict retries
         enabled: true
         retry_days: [2, 3, 5]
         final_subscription_action: cancel
@@ -7158,37 +7101,19 @@ components:
     DunningPolicy:
       type: object
       description: |
-        A dunning policy: how failed or missing payments are retried, and
-        what happens when the retries run out. Every account starts with one
-        policy per mode, "Default retries" (retries on day 3, 7 and 14, then
-        no final action), as the default. Customers without an assigned
-        policy use the default.
-      required: [id, name, enabled, is_default, seeded, retry_days, final_subscription_action, final_invoice_action, created_at, updated_at]
+        The account's dunning policy for one mode: how failed or missing
+        payments are retried, and what happens when the retries run out.
+        An account has at most one per mode, and it governs every payment
+        retry in that mode. Every account starts with one per mode
+        (retries on day 3, 7 and 14, then no final action).
+      required: [enabled, retry_days, final_subscription_action, final_invoice_action, created_at, updated_at]
       properties:
-        id:
-          type: string
-          description: Unique identifier of the policy, starting `hc_dpol_`.
-          example: hc_dpol_dajqj1aq3gpgqfoq5c6g
         tenant_id:
           type: string
           description: The account the policy belongs to. Absent when empty.
-        name:
-          type: string
-          description: The policy's name. Can be empty.
         enabled:
           type: boolean
           description: Whether the policy starts dunning. A disabled policy starts no runs.
-        is_default:
-          type: boolean
-          description: Customers without an assigned policy use the default.
-        seeded:
-          type: boolean
-          description: |
-            True for the "Default retries" policy the account was created
-            with, until you edit it or make it the default. While it is
-            true, the next enabled policy you create becomes the default
-            instead. Set by the server: a request body that sends it is
-            refused with 422.
         retry_days:
           type: array
           items:
@@ -7212,41 +7137,13 @@ components:
           format: date-time
           description: When the policy last changed.
       example:
-        id: hc_dpol_dajqj1aq3gpgqfoq5c6g
         tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-        name: Default retries
         enabled: true
-        is_default: true
-        seeded: true
         retry_days: [3, 4, 7]
         final_subscription_action: none
         final_invoice_action: none
         created_at: "2026-09-15T12:00:00Z"
         updated_at: "2026-09-15T12:00:00Z"
-
-    DunningPolicyListItem:
-      description: A dunning policy as `GET /v1/dunning/policies` lists it, with how many customers are assigned to it.
-      allOf:
-        - $ref: "#/components/schemas/DunningPolicy"
-        - type: object
-          required: [assigned_customers]
-          properties:
-            assigned_customers:
-              type: integer
-              description: Customers explicitly assigned to this policy. Customers using it only as the default are not counted.
-      example:
-        id: hc_dpol_dajqj1aq3gpgqfoq5c6g
-        tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-        name: Default retries
-        enabled: true
-        is_default: true
-        seeded: true
-        retry_days: [3, 4, 7]
-        final_subscription_action: none
-        final_invoice_action: none
-        created_at: "2026-09-15T12:00:00Z"
-        updated_at: "2026-09-15T12:00:00Z"
-        assigned_customers: 0
 
     UsageAggregate:
       type: object
@@ -7628,8 +7525,7 @@ components:
             Released rows in a billing period not invoiced yet that a price
             of its plan takes. Rows Hardcount does not check count here too:
             rows after the current period's end, while the subscription
-            continues, and rows after a trial's end while the subscription
-            still trials. Rows of a sum or count meter stamped before the end
+            continues. Rows of a sum or count meter stamped before the end
             of this period's spend-threshold invoice are not counted here:
             see `pending_threshold_invoice` and `outside_open_period`.
         no_price:
@@ -7655,8 +7551,7 @@ components:
           type: integer
           description: |
             Released rows outside every subscription's time (before it
-            started, in a free trial, after it ended or after its scheduled
-            cancel, or in another, ended subscription's time), and rows in a
+            started, after it ended or after its scheduled cancel, or in another, ended subscription's time), and rows in a
             period already invoiced. Also rows of a sum or count meter
             stamped before the end of this period's paid spend-threshold
             invoice. Bill them with a one-off invoice if they should be
@@ -9718,9 +9613,6 @@ paths:
         Creates a customer in the mode of your API key. `external_id` must be
         unique in the account and mode. The create is written to the audit
         log.
-
-        `dunning_policy_id` is not a create field: assign a policy with
-        `PATCH /v1/customers/{id}`.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -9768,8 +9660,8 @@ paths:
       responses:
         "201":
           description: |
-            The new customer. The create answer leaves out `email_status`,
-            `dunning_policy_id` and `stripe_customer_id`.
+            The new customer. The create answer leaves out `email_status`
+            and `stripe_customer_id`.
           content:
             application/json:
               schema:
@@ -9815,8 +9707,6 @@ paths:
             `email` or `additional_emails` entry, an `additional_emails` entry
             equal to `email`, or more than 10 `additional_emails`. An unknown
             field is refused the same way.
-            `dunning_policy_id` is not a create field: assign a policy with
-            `PATCH /v1/customers/{id}`.
           content:
             application/json:
               schema:
@@ -9837,8 +9727,8 @@ paths:
       description: |
         Customers in the mode of your API key, newest first unless you choose
         a sort. The list answer leaves out `additional_emails`,
-        `email_status`, the bounce fields, `dunning_policy_id` and
-        `stripe_customer_id`: get one customer for those.
+        `email_status`, the bounce fields and `stripe_customer_id`: get one
+        customer for those.
       parameters:
         - name: status
           in: query
@@ -10057,7 +9947,6 @@ paths:
                   - finance@acme.example
                 status: active
                 email_status: unknown
-                dunning_policy_id: hc_dpol_dajqj1aq3gpgqfoq5c6g
                 stripe_customer_id: cus_RkT9qW2xYz3AbC
                 created_at: "2026-09-30T16:20:00Z"
                 updated_at: "2026-10-15T09:12:44Z"
@@ -10087,13 +9976,9 @@ paths:
         is ignored, so you cannot clear the email here.
 
         - `status: archived` is refused with 409 `invalid_state` while the
-          customer has an active or trialing subscription, which still bills.
+          customer has an active subscription, which still bills.
           Cancel those subscriptions first. Archiving does not stop dunning
           (the retries of failed payments) on unpaid invoices.
-        - `dunning_policy_id` set to `""` removes the assignment, so the
-          account's default policy applies. A set ID must be a policy in this
-          account and mode, or the call returns 404. The change applies to the
-          next dunning run, not to runs already started.
         - `additional_emails` replaces the whole CC list; `[]` clears it.
           Entries are lowercased and deduplicated, and may not equal the
           primary email. More than 10 after deduplication is refused with
@@ -10141,9 +10026,6 @@ paths:
                   description: |
                     `archived` blocks new subscriptions for the customer.
                     `active` lifts that.
-                dunning_policy_id:
-                  type: string
-                  description: Policy ID, or `""` to use the account's default policy.
                 additional_emails:
                   type: array
                   maxItems: 10
@@ -10154,7 +10036,6 @@ paths:
                     clears it. Left out keeps the current list. More than 10
                     after deduplication is refused with 422.
             example:
-              dunning_policy_id: hc_dpol_dajqj1aq3gpgqfoq5c6g
               additional_emails:
                 - finance@acme.example
       responses:
@@ -10174,7 +10055,6 @@ paths:
                   - finance@acme.example
                 status: active
                 email_status: unknown
-                dunning_policy_id: hc_dpol_dajqj1aq3gpgqfoq5c6g
                 stripe_customer_id: cus_RkT9qW2xYz3AbC
                 created_at: "2026-09-30T16:20:00Z"
                 updated_at: "2026-10-15T09:12:44Z"
@@ -10197,8 +10077,7 @@ paths:
         "404":
           description: |
             No customer with this ID in this account and mode
-            (`customer not found`), or no dunning policy with the
-            `dunning_policy_id` you sent (`dunning policy not found`).
+            (`customer not found`).
           content:
             application/json:
               schema:
@@ -10207,12 +10086,12 @@ paths:
                 error:
                   type: invalid_request_error
                   code: not_found
-                  message: dunning policy not found
+                  message: customer not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "409":
           description: |
-            Archive refused because an active or trialing subscription still
-            bills (`invalid_state`). The message names the subscriptions. Code
+            Archive refused because an active subscription still bills
+            (`invalid_state`). The message names the subscriptions. Code
             `concurrent_change`: Postgres stopped the update because of another
             change to the same records (it broke a deadlock, or ended a wait for
             a lock), so the customer is unchanged; send the same request again,
@@ -10273,8 +10152,8 @@ paths:
 
         Country, currency and tax ID are stored in upper case.
 
-        A currency that differs from the plan currency of a trialing or
-        active subscription is refused with 409 `invalid_state`, because
+        A currency that differs from the plan currency of an active
+        subscription is refused with 409 `invalid_state`, because
         invoices would show plan prices in the new currency without
         conversion.
 
@@ -10360,8 +10239,7 @@ paths:
         "409":
           description: |
             The currency differs from the plan currency of one of the
-            customer's trialing or active subscriptions
-            (`invalid_state`). Code `concurrent_change`: Postgres stopped the
+            customer's active subscriptions (`invalid_state`). Code `concurrent_change`: Postgres stopped the
             write because of another change to the same records (it broke a
             deadlock, or ended a wait for a lock), so the profile is unchanged;
             send the same request again, with the same `Idempotency-Key`.
@@ -10535,14 +10413,13 @@ paths:
       tags: [Customers]
       summary: Get the customer's usage and cost for a period
       description: |
-        Usage per meter on the customer's active and trialing subscriptions,
-        priced the same way the invoice prices it. Send both `from` and `to`,
+        Usage per meter on the customer's active subscriptions, priced the
+        same way the invoice prices it. Send both `from` and `to`,
         or neither.
 
         With neither, each subscription is rated over its own current billing
         period, and `period` runs from the earliest start to the latest end of
-        those periods. A trialing subscription's current period is its first
-        paid period, which starts when the trial ends.
+        those periods.
 
         With both, the window is `[from, to)`, at most one year long, and the
         amounts are an estimate at each subscription's current prices.
@@ -10638,8 +10515,8 @@ paths:
             before `from`; with `param` `period` when only one of `from` and
             `to` is sent, when `from` is not before `to`, or when the window
             is longer than one year. `customer_has_no_subscription` (`param`
-            `period`) when no period is sent and the customer has no active or
-            trialing subscription with a current billing period.
+            `period`) when no period is sent and the customer has no active
+            subscription with a current billing period.
           content:
             application/json:
               schema:
@@ -10695,7 +10572,6 @@ paths:
                     status: active
                     billing_time: calendar
                     started_at: "2026-10-01T00:00:00Z"
-                    activated_at: "2026-10-01T00:00:00Z"
                     cancel_at_period_end: false
                     current_billing_period_start: "2026-11-01T00:00:00Z"
                     current_billing_period_end: "2026-12-01T00:00:00Z"
@@ -11292,7 +11168,7 @@ paths:
         that no price takes.
 
         A token with the wrong prefix or no customer gets 401, the same answer
-        for both. A customer with no active or trialing subscription gets 200
+        for both. A customer with no active subscription gets 200
         with `billing_period.source` `no_subscription`: `subscriptions`,
         `usage` and `totals` are empty, and `credits` still lists the credit
         balance.
@@ -11350,15 +11226,15 @@ paths:
                           Check this before you show the period.
                           `subscription`: the period runs from the earliest
                           start to the latest end of the current billing
-                          periods of the customer's active and trialing
-                          subscriptions. `no_subscription`: the customer has
-                          no active or trialing subscription; `subscriptions`,
+                          periods of the customer's active subscriptions.
+                          `no_subscription`: the customer has no active
+                          subscription; `subscriptions`,
                           `usage` and `totals` are empty (`credits` is not),
                           and `start` and `end` hold the zero time, not a real
                           range.
                   subscriptions:
                     type: array
-                    description: One entry per plan of each active or trialing subscription.
+                    description: One entry per plan of each active subscription.
                     items:
                       type: object
                       required: [id, plan_name, currency, current_period_start, current_period_end]
@@ -15242,23 +15118,21 @@ paths:
       operationId: createSubscription
       description: |
         Creates a subscription that bills a customer for one or more plans.
-        It starts now: `active` from today, or `trialing` when `trial_days`
-        is above 0.
+        It starts now, `active` from today: its first period starts today in
+        the account's billing time zone.
 
         All the plans must share one billing interval, one base-fee timing
         (in advance or in arrears) and one currency. The currency must also
         match the customer's billing profile and the customer's other
-        `trialing` and `active` subscriptions; canceled ones do not
-        count. No two of the plans may bill the same meter, and none may
-        bill a meter that another `trialing` or `active`
-        subscription of the customer bills. The customer and the plans must
+        `active` subscriptions; canceled ones do not count. No two of the
+        plans may bill the same meter, and none may bill a meter that
+        another `active` subscription of the customer bills. The customer and the plans must
         not be archived.
 
-        An `active` subscription whose plans bill a non-zero base fee in
-        advance is saved together with its first invoice, in one database
-        transaction: both are saved, or neither is. The invoice is then
-        collected like any other invoice. A `trialing` subscription gets
-        that invoice when its trial ends.
+        A subscription whose plans bill a non-zero base fee in advance is
+        saved together with its first invoice, in one database transaction:
+        both are saved, or neither is. The invoice is then collected like
+        any other invoice.
 
         Sends the `subscription.created` webhook event.
       parameters:
@@ -15303,17 +15177,6 @@ paths:
                   enum: [calendar, anniversary]
                   default: calendar
                   description: How monthly periods line up. See the subscription's `billing_time`.
-                trial_days:
-                  type: integer
-                  minimum: 0
-                  maximum: 730
-                  description: |
-                    Days of free trial; 0 means no trial. At 0, the
-                    subscription is `active`, its first period starts today
-                    in the account's billing time zone, and a non-zero base fee
-                    billed in advance is invoiced now. Above 0, the
-                    subscription is `trialing` from now and its first paid
-                    period starts on the day the trial ends.
             example:
               code: acme-pro
               display_name: Acme Pro
@@ -15346,7 +15209,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 cancel_at_period_end: false
                 current_billing_period_start: "2026-10-01T00:00:00Z"
                 current_billing_period_end: "2026-11-01T00:00:00Z"
@@ -15377,11 +15239,11 @@ paths:
             Code `already_exists` (`param: code`): another subscription in
             this account and mode has this `code`. Code `invalid_state`: the
             customer or a plan is archived; a plan bills a meter that another
-            `trialing` or `active` subscription of the customer
-            already bills; or the plans' currency differs from each other,
-            from the customer's billing profile or from the customer's other
-            `trialing` or `active` subscriptions. Code
-            `concurrent_change`: Postgres stopped the create because of another
+            `active` subscription of the customer already bills; or the
+            plans' currency differs from each other, from the customer's
+            billing profile or from the customer's other `active`
+            subscriptions. Code `concurrent_change`: Postgres stopped the
+            create because of another
             change to the same records (it broke a deadlock, or ended a wait for
             a lock), so nothing was created; send the same request again, with
             the same `Idempotency-Key`.
@@ -15400,16 +15262,14 @@ paths:
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
-            A field failed validation (`param` names it), for example
-            `trial_days` outside 0 to 730. Also: `code`, `display_name`,
-            `customer_id` or `items` missing; a `code` with other
-            characters; a repeated or unknown plan, plans with different
-            billing intervals or base-fee timings, or two plans that bill
-            the same meter (`param: items`); a `quantity` below 1. Or the
-            body has an unknown field (`param` names it; the body must use
-            only the fields listed here). `status` and `start_now` are such
-            fields: a subscription always starts, or starts its trial, when
-            it is created.
+            A field failed validation (`param` names it): `code`,
+            `display_name`, `customer_id` or `items` missing; a `code` with
+            other characters; a repeated or unknown plan, plans with
+            different billing intervals or base-fee timings, or two plans
+            that bill the same meter (`param: items`); a `quantity` below 1.
+            Or the body has an unknown field (`param` names it; the body must
+            use only the fields listed here). `status` and `start_now` are
+            such fields: a subscription always starts when it is created.
           content:
             application/json:
               schema:
@@ -15418,9 +15278,9 @@ paths:
                 error:
                   type: invalid_request_error
                   code: validation_error
-                  message: must be between 0 and 730
+                  message: must contain only alphanumeric characters, hyphens, and underscores
                   request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: trial_days
+                  param: code
         "429":
           $ref: "#/components/responses/RateLimited"
     get:
@@ -15449,7 +15309,7 @@ paths:
             a status: use `collection=paused`.
           schema:
             type: string
-            enum: [trialing, active, canceled]
+            enum: [active, canceled]
         - name: billing
           in: query
           description: |
@@ -15464,7 +15324,7 @@ paths:
         - name: collection
           in: query
           description: |
-            `paused` returns only active and trialing subscriptions whose
+            `paused` returns only active subscriptions whose
             `pause_collection` is in force, whether a dashboard user or an
             API key set it, or dunning (Hardcount's automatic payment
             retries) did. A timed pause ends at `resumes_at`, even while the
@@ -15482,12 +15342,12 @@ paths:
           in: query
           description: |
             The order of the list. `created_at` (the default),
-            `next_billing_at`, `status`, `display_name` (or `name`) or
-            `trial_end_at`. Any other value is a 422 with `param: sort`. Ties
+            `next_billing_at`, `status` or `display_name` (or `name`). Any
+            other value is a 422 with `param: sort`. Ties
             are broken by `id` in the same direction.
           schema:
             type: string
-            enum: [created_at, next_billing_at, status, display_name, name, trial_end_at]
+            enum: [created_at, next_billing_at, status, display_name, name]
             default: created_at
         - name: dir
           in: query
@@ -15533,7 +15393,6 @@ paths:
                     status: active
                     billing_time: calendar
                     started_at: "2026-10-01T09:12:44Z"
-                    activated_at: "2026-10-01T09:12:44Z"
                     cancel_at_period_end: false
                     current_billing_period_start: "2026-10-01T00:00:00Z"
                     current_billing_period_end: "2026-11-01T00:00:00Z"
@@ -15562,7 +15421,7 @@ paths:
                 error:
                   type: invalid_request_error
                   code: validation_error
-                  message: "status must be one of trialing, active, canceled; paused collection is not a status, use collection=paused"
+                  message: "status must be one of active, canceled; paused collection is not a status, use collection=paused"
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: status
         "429":
@@ -15630,9 +15489,8 @@ paths:
                     type: integer
                     description: |
                       Period-close invoices this call created. The final
-                      invoice of a scheduled cancel and the first invoice
-                      at a trial end are not counted, so 0 does not mean
-                      the retry failed. Read success from
+                      invoice of a scheduled cancel is not counted, so 0
+                      does not mean the retry failed. Read success from
                       `subscription.billing_failure` and `still_due`.
                   still_due:
                     type: boolean
@@ -15659,7 +15517,6 @@ paths:
                   status: active
                   billing_time: calendar
                   started_at: "2026-10-01T09:12:44Z"
-                  activated_at: "2026-10-01T09:12:44Z"
                   cancel_at_period_end: false
                   current_billing_period_start: "2026-11-01T00:00:00Z"
                   current_billing_period_end: "2026-12-01T00:00:00Z"
@@ -15759,7 +15616,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 cancel_at_period_end: false
                 current_billing_period_start: "2026-10-01T00:00:00Z"
                 current_billing_period_end: "2026-11-01T00:00:00Z"
@@ -15792,8 +15648,8 @@ paths:
       summary: Cancel a subscription now
       operationId: cancelSubscription
       description: |
-        Cancels the subscription immediately. Works on `trialing` and
-        `active` subscriptions. Takes no body.
+        Cancels the subscription immediately. Works on an `active`
+        subscription. Takes no body.
 
         In the transaction that cancels it, Hardcount writes the final
         invoice for the part of the current period that has been used
@@ -15803,8 +15659,7 @@ paths:
         invoice of which nothing was used. After the transaction commits,
         the credit notes are issued, which is when the balance credit and
         the tax reversal happen (a failed issue is retried), and then the
-        final invoice is collected, so that credit reduces it. A trial that
-        never became active is canceled with no invoice.
+        final invoice is collected, so that credit reduces it.
 
         If a billing period has already ended, it is billed first. If a
         scheduled cancel was already due, that cancel takes effect at its
@@ -15845,7 +15700,6 @@ paths:
                 status: canceled
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 canceled_at: "2026-10-20T16:45:00Z"
                 cancel_at_period_end: false
                 current_billing_period_start: "2026-10-01T00:00:00Z"
@@ -15927,14 +15781,10 @@ paths:
         schedule. If a billing period has ended and is not invoiced yet,
         it is billed first, so "the current period" is the one running.
 
-        - **Active subscription.** `at_period_end` cancels at the end of
-          the current period. `cancel_at` must be on or after the end of
-          the current period. A date inside a later period is allowed, and
-          that period is billed up to the date.
-        - **Trialing subscription.** `at_period_end` cancels at the end of
-          the trial, with no charge. `cancel_at` must be exactly
-          `trial_end_at` (free cancel) or on or after
-          `current_billing_period_end`.
+        `at_period_end` cancels at the end of the current period.
+        `cancel_at` must be on or after the end of the current period. A
+        date inside a later period is allowed, and that period is billed up
+        to the date.
 
         The response's `cancel_effective_at` says when the cancel takes
         effect. Sends the `subscription.cancel_scheduled` webhook event.
@@ -15955,7 +15805,7 @@ paths:
               properties:
                 at_period_end:
                   type: boolean
-                  description: Cancel at the end of the current period (or of the trial, while trialing).
+                  description: Cancel at the end of the current period.
                 cancel_at:
                   type: string
                   format: date-time
@@ -15986,7 +15836,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 cancel_at_period_end: true
                 cancel_effective_at: "2026-11-01T00:00:00Z"
                 current_billing_period_start: "2026-10-01T00:00:00Z"
@@ -16105,7 +15954,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 cancel_at_period_end: false
                 current_billing_period_start: "2026-10-01T00:00:00Z"
                 current_billing_period_end: "2026-11-01T00:00:00Z"
@@ -16246,7 +16094,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 cancel_at_period_end: false
                 pause_collection:
                   behavior: keep_as_draft
@@ -16366,7 +16213,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 cancel_at_period_end: false
                 current_billing_period_start: "2026-10-01T00:00:00Z"
                 current_billing_period_end: "2026-11-01T00:00:00Z"
@@ -16423,246 +16269,6 @@ paths:
                   message: unknown field "behavior"
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: behavior
-        "429":
-          $ref: "#/components/responses/RateLimited"
-
-  /v1/subscriptions/{id}/end-trial:
-    post:
-      tags: [Subscriptions]
-      summary: End a trial now
-      operationId: endSubscriptionTrial
-      description: |
-        Ends the trial now and makes the subscription `active`. The first
-        paid period starts today, and `trial_end_at` becomes now. Items
-        whose base fee is billed in advance get their first invoice in the
-        same transaction. A subscription with a scheduled cancel is
-        refused: clear the schedule first. Takes no body.
-
-        Sends the `subscription.trial_ended` webhook event.
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - name: id
-          in: path
-          required: true
-          description: The subscription's ID (`hc_sub_…`).
-          schema:
-            type: string
-      responses:
-        "200":
-          description: The active subscription.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Subscription"
-              example:
-                id: hc_sub_dauq502q3gpgqfoq5c2g
-                tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                code: acme-pro
-                display_name: Acme Pro
-                customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
-                items:
-                  - id: hc_si_3f9c0e2a1b4d5c6e7f8a9b0c
-                    tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                    subscription_id: hc_sub_dauq502q3gpgqfoq5c2g
-                    plan_id: hc_pln_dajr5o2q3gpgqfoq5c1g
-                    quantity: 1
-                    created_at: "2026-10-01T09:12:44Z"
-                    updated_at: "2026-10-01T09:12:44Z"
-                status: active
-                billing_time: calendar
-                trial_start_at: "2026-10-01T09:12:44Z"
-                trial_end_at: "2026-10-08T10:00:00Z"
-                started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-08T10:00:00Z"
-                cancel_at_period_end: false
-                current_billing_period_start: "2026-10-08T00:00:00Z"
-                current_billing_period_end: "2026-11-01T00:00:00Z"
-                current_billing_period_display: "Oct 8, 2026 – Oct 31, 2026"
-                next_billing_at: "2026-11-01T00:00:00Z"
-                created_at: "2026-10-01T09:12:44Z"
-                updated_at: "2026-10-08T10:00:00Z"
-        "400":
-          $ref: "#/components/responses/InvalidBody"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          description: No subscription with this ID in this account and mode.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: not_found
-                  message: subscription not found
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "409":
-          description: |
-            Code `invalid_state`: the subscription is not `trialing`, or it
-            has a scheduled cancel. Clear the scheduled cancel first.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: invalid_state
-                  message: This subscription is scheduled to cancel. Undo the scheduled cancellation first, then end the trial.
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          description: |
-            The request has a body with a field (`param` names it). This
-            route takes no body: send none, `{}` or `null`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: validation_error
-                  message: unknown field "trial_end"
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: trial_end
-        "429":
-          $ref: "#/components/responses/RateLimited"
-
-  /v1/subscriptions/{id}/extend-trial:
-    post:
-      tags: [Subscriptions]
-      summary: Extend a trial
-      operationId: extendSubscriptionTrial
-      description: |
-        Moves the end of the trial later. The first paid period is moved
-        to start at the beginning of the new trial end's day, in your
-        account's billing time zone. A cancel scheduled with
-        `at_period_end` moves with the trial. To shorten a trial, use
-        `POST /v1/subscriptions/{id}/end-trial`.
-
-        Sends the `subscription.trial_extended` webhook event.
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - name: id
-          in: path
-          required: true
-          description: The subscription's ID (`hc_sub_…`).
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [trial_end]
-              properties:
-                trial_end:
-                  type: string
-                  format: date-time
-                  description: The new trial end. Must be in the future, after the current `trial_end_at`, and at most 730 days after `trial_start_at`.
-            example:
-              trial_end: "2026-10-29T00:00:00Z"
-      responses:
-        "200":
-          description: The subscription with the new `trial_end_at`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Subscription"
-              example:
-                id: hc_sub_dauq502q3gpgqfoq5c2g
-                tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                code: acme-pro
-                display_name: Acme Pro
-                customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
-                items:
-                  - id: hc_si_3f9c0e2a1b4d5c6e7f8a9b0c
-                    tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                    subscription_id: hc_sub_dauq502q3gpgqfoq5c2g
-                    plan_id: hc_pln_dajr5o2q3gpgqfoq5c1g
-                    quantity: 1
-                    created_at: "2026-10-01T09:12:44Z"
-                    updated_at: "2026-10-01T09:12:44Z"
-                status: trialing
-                billing_time: calendar
-                trial_start_at: "2026-10-01T09:12:44Z"
-                trial_end_at: "2026-10-29T00:00:00Z"
-                started_at: "2026-10-01T09:12:44Z"
-                cancel_at_period_end: false
-                current_billing_period_start: "2026-10-29T00:00:00Z"
-                current_billing_period_end: "2026-11-01T00:00:00Z"
-                current_billing_period_display: "Oct 29, 2026 – Oct 31, 2026"
-                next_billing_at: "2026-11-01T00:00:00Z"
-                created_at: "2026-10-01T09:12:44Z"
-                updated_at: "2026-10-10T12:00:00Z"
-        "400":
-          description: The body is not valid JSON, a field has a value of the wrong JSON type, or `trial_end` is not an RFC 3339 date-time.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: invalid_request
-                  message: invalid JSON body
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          description: No subscription with this ID in this account and mode.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: not_found
-                  message: subscription not found
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "409":
-          description: |
-            Code `invalid_state`: the subscription is not `trialing`, or it
-            has a scheduled cancel with an explicit `cancel_at`. Clear the
-            scheduled cancel first.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: invalid_state
-                  message: Only a trialing subscription's trial can be extended. This one is active.
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          description: |
-            `trial_end` is missing, in the past, not after the current
-            `trial_end_at`, or more than 730 days after `trial_start_at`
-            (`param: trial_end`). Also: the body has an unknown field
-            (`param` names it).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: validation_error
-                  message: Pick a date after the current trial end. To end the trial sooner, use End trial now.
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: trial_end
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -16761,7 +16367,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 cancel_at_period_end: false
                 billing_thresholds:
                   amount_gte: 50000
@@ -16875,7 +16480,6 @@ paths:
                 status: active
                 billing_time: calendar
                 started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
                 cancel_at_period_end: false
                 current_billing_period_start: "2026-10-01T00:00:00Z"
                 current_billing_period_end: "2026-11-01T00:00:00Z"
@@ -16930,8 +16534,8 @@ paths:
         Adds a plan to the subscription as a new item. The plan must use
         the same billing interval, base-fee timing and currency as the
         other items. It must not bill a meter that another item of this
-        subscription, or another `trialing` or `active`
-        subscription of the customer, bills. A period that ended and is
+        subscription, or another `active` subscription of the customer,
+        bills. A period that ended and is
         not invoiced yet is billed first. The subscription must not be
         `canceled`.
 
@@ -17021,10 +16625,9 @@ paths:
             this plan. Code `invalid_state`: the subscription is `canceled`;
             the plan is archived; the plan's meters (the meters it has a
             price for) overlap another item of this subscription or another
-            `trialing` or `active` subscription of the customer; or
-            the plan's currency differs from the subscription's, the
-            customer's billing profile or the customer's other
-            `trialing` or `active` subscriptions.
+            `active` subscription of the customer; or the plan's currency
+            differs from the subscription's, the customer's billing profile
+            or the customer's other `active` subscriptions.
             Code
             `unpaid_invoice_blocks_change`: the invoice for the current
             period is unpaid (a written-off invoice is unpaid); settle or
@@ -17229,11 +16832,10 @@ paths:
           description: |
             Code `invalid_state`: the subscription is not `active`, the new
             plan is archived, its meters (the meters it has a price for)
-            overlap another item of this subscription or another
-            `trialing` or `active` subscription of the customer, or its
-            currency differs from the item's current plan, the other items,
-            the customer's billing profile or the customer's other
-            subscriptions (`trialing` or `active`). Code
+            overlap another item of this subscription or another `active`
+            subscription of the customer, or its currency differs from the
+            item's current plan, the other items, the customer's billing
+            profile or the customer's other `active` subscriptions. Code
             `unpaid_invoice_blocks_change`: an increase would charge against
             an unpaid invoice for the current period (a written-off invoice
             is unpaid); settle or void it first. Code `subscription_period_moved`: the billing period
@@ -17261,7 +16863,7 @@ paths:
                 error:
                   type: invalid_request_error
                   code: invalid_state
-                  message: Items can only be changed on an active subscription. This one is trialing.
+                  message: Items can only be changed on an active subscription. This one is canceled.
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
@@ -17315,7 +16917,7 @@ paths:
       summary: Remove a subscription item
       operationId: removeSubscriptionItem
       description: |
-        Removes an item from a trialing or active subscription. A
+        Removes an item from an active subscription. A
         subscription's last item cannot be removed; cancel the subscription
         instead. A
         period that ended and is not invoiced yet is billed first. Takes
@@ -18118,8 +17720,7 @@ paths:
         bill it; bill it with a one-off invoice if needed. Its 201 carries
         the `billing_status` Hardcount found (see the `billing_status`
         field): `after_close` while the subscription that invoiced the
-        period is active or trialing, and `outside_subscription` once it has
-        ended. If another subscription has a billing period that holds the
+        period is active, and `outside_subscription` once it has ended. If another subscription has a billing period that holds the
         event's time and is not invoiced yet, that period decides the status
         instead.
 
@@ -18811,14 +18412,14 @@ paths:
 
         A manual invoice uses the customer's currency. A `currency` that
         differs from the customer's billing-profile currency, or from the
-        plan currency of any of the customer's trialing or active
-        subscriptions, is refused with 409. A customer with neither
+        plan currency of any of the customer's active subscriptions, is
+        refused with 409. A customer with neither
         may be invoiced in any supported currency.
 
         Defaults when a field is left out:
         - `currency`: the customer's billing-profile currency, then the plan
-          currency of the customer's trialing or active
-          subscriptions, then the account's default currency.
+          currency of the customer's active subscriptions, then the
+          account's default currency.
         - `net_payment_term_days`: the account's net payment terms. A
           negative value is stored as 0 (due on receipt).
         - `billing_period_start` / `billing_period_end`: now.
@@ -18986,15 +18587,12 @@ paths:
         current period will close with: base fees prorate for a short first
         period and per segment after a mid-period item add, quantity change,
         plan swap or removal, and each meter's usage counts only while a
-        plan carrying it was on the subscription. For a trialing
-        subscription it is the first invoice after the trial: the trial-end
-        invoice when a plan bills in advance, otherwise the close of the
-        first paid period, prorated the same way. With an explicit `period`,
+        plan carrying it was on the subscription. With an explicit `period`,
         it is a flat estimate over that window, at today's prices, and warns
         when a mid-period change makes the invoice differ.
 
-        Without `subscription_id`, Hardcount uses the customer's active or
-        trialing subscription whose current period started last.
+        Without `subscription_id`, Hardcount uses the customer's active
+        subscription whose current period started last.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -19012,8 +18610,8 @@ paths:
                   type: string
                   description: |
                     Optional. The subscription to preview; it must belong to
-                    `customer_id`. Defaults to the customer's active or
-                    trialing subscription whose current period started last.
+                    `customer_id`. Defaults to the customer's active
+                    subscription whose current period started last.
                 period:
                   type: object
                   description: |
@@ -19095,8 +18693,8 @@ paths:
             bound, `from` not before `to`, or a bound that is not RFC 3339
             (`param` `period`, `period.from` or `period.to`); or an unknown
             field. Code `customer_has_no_subscription`: no `subscription_id`
-            was given and the customer has no active or trialing
-            subscription. Code `subscription_has_no_cycle`: the subscription
+            was given and the customer has no active subscription. Code
+            `subscription_has_no_cycle`: the subscription
             has no current period, so pass `period`.
           content:
             application/json:
@@ -19106,7 +18704,7 @@ paths:
                 error:
                   type: invalid_request_error
                   code: customer_has_no_subscription
-                  message: customer has no active or trialing subscription; pass subscription_id explicitly to preview a non-active sub
+                  message: customer has no active subscription; pass subscription_id explicitly to preview a non-active sub
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: customer_id
         "429":
@@ -20233,7 +19831,7 @@ paths:
         dunning run stays open until the payment settles. A declined card
         answers 502;
         the invoice's `payment_status` becomes `failed`, and dunning starts
-        when the customer's policy is enabled. Check
+        when the account's dunning policy is enabled. Check
         `payment_status` on the returned invoice.
 
         A top-up (`billing_reason` `topup`) is charged here while it is a
@@ -22029,7 +21627,7 @@ paths:
            and `payment.succeeded`, and queues a receipt email to the
            customer when they have an email address. A declined charge sets
            `payment_status` to `failed`, sends `payment.failed`, and starts
-           dunning when the customer's policy is enabled.
+           dunning when the account's dunning policy is enabled.
         3. With no card on file, an email with a link to add one is queued
            for the customer, once, when they have an email address and the
            server's `PAYMENT_UPDATE_URL` is set; `no_pm_notified_at` records
@@ -23612,7 +23210,7 @@ paths:
       description: |
         Runs the billing run now for this account and mode, the same run
         the scheduler makes. It invoices every subscription that is due:
-        an `active` or `trialing` subscription whose period ended, or whose
+        an `active` subscription whose period ended, or whose
         scheduled mid-period cancel came, more than the invoice grace ago
         (`INVOICE_GRACE_PERIOD`, 1 hour by default), so usage that arrives
         late still makes its invoice. A subscription overdue for several
@@ -25052,8 +24650,7 @@ paths:
 
         Streams every subscription in the caller's mode, newest first,
         from one consistent snapshot. Columns: id, code, display_name, customer_id, status,
-        billing_time, trial_start_at, trial_end_at, started_at,
-        activated_at, canceled_at, current_billing_period_start,
+        billing_time, started_at, canceled_at, current_billing_period_start,
         current_billing_period_end, next_billing_at, plan_ids (plan IDs
         joined with `|`), created_at.
 
@@ -25535,7 +25132,6 @@ paths:
                     tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
                     invoice_id: hc_inv_dbj84b2q3gpgqfoq5c40
                     customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
-                    policy_id: hc_dpol_dajqj1aq3gpgqfoq5c6g
                     state: active
                     reason: payment_failed
                     attempt_count: 1
@@ -25603,7 +25199,6 @@ paths:
                   tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
                   invoice_id: hc_inv_dbj84b2q3gpgqfoq5c40
                   customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
-                  policy_id: hc_dpol_dajqj1aq3gpgqfoq5c6g
                   state: active
                   reason: payment_failed
                   attempt_count: 1
@@ -25711,76 +25306,64 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
-  /v1/dunning/policies:
+  /v1/dunning/policy:
     get:
       tags: [Dunning]
-      summary: List dunning policies
+      summary: Get the dunning policy
       description: |
-        Every dunning policy in this account and mode, the default first,
-        then oldest first. Each one carries how many customers are assigned
-        to it.
-      operationId: listDunningPolicies
-      parameters:
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
+        The account's dunning policy for this mode: how failed payments
+        are retried and what happens when the retries run out. It governs
+        every payment retry in the mode. A new account starts with one in
+        each mode (retries on day 3, 7 and 14, then no final action).
+      operationId: getDunningPolicy
       responses:
         "200":
-          description: Policies
+          description: The policy
           content:
             application/json:
               schema:
-                type: object
-                required: [data, total]
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/DunningPolicyListItem"
-                  total:
-                    $ref: "#/components/schemas/ListTotal"
+                $ref: "#/components/schemas/DunningPolicy"
               example:
-                data:
-                  - id: hc_dpol_dajqj1aq3gpgqfoq5c6g
-                    tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                    name: Default retries
-                    enabled: true
-                    is_default: true
-                    seeded: true
-                    retry_days: [3, 4, 7]
-                    final_subscription_action: none
-                    final_invoice_action: none
-                    created_at: "2026-09-15T12:00:00Z"
-                    updated_at: "2026-09-15T12:00:00Z"
-                    assigned_customers: 0
-                total: 1
+                tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
+                enabled: true
+                retry_days: [3, 4, 7]
+                final_subscription_action: none
+                final_invoice_action: none
+                created_at: "2026-09-15T12:00:00Z"
+                updated_at: "2026-09-15T12:00:00Z"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "422":
-          $ref: "#/components/responses/InvalidPage"
+        "404":
+          description: "`not_found`: this account has no dunning policy in this mode, so failed payments are not retried."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  type: invalid_request_error
+                  code: not_found
+                  message: dunning_policy not found
+                  request_id: req_dbjg652q3gpgqfoq5cd0
         "429":
           $ref: "#/components/responses/RateLimited"
-    post:
+    put:
       tags: [Dunning]
-      summary: Create a dunning policy
+      summary: Set the dunning policy
       description: |
-        A dunning policy decides how failed payments are retried and what
-        happens when the retries run out. Every account starts with one
-        policy per mode, "Default retries", as the default. The first
-        enabled policy you create in a mode takes the default from it,
-        unless you have edited it or made it the default yourself; later
-        ones do not (use set-default). Customers without an assigned policy
-        use the default, so check `is_default` in the response. Assign a
-        policy to a customer with `dunning_policy_id` on
-        `PATCH /v1/customers/{id}`.
+        Creates the account's dunning policy for this mode, or replaces
+        every setting of the one it has with the body. This is not a
+        partial update: all four settings are required, and a body that
+        leaves one out is refused with 422, `param` naming it.
 
-        `enabled` defaults to false. A disabled policy starts no dunning, so
-        send `enabled: true` for the policy to take effect. A policy created
-        disabled never takes the default from "Default retries". A run that
-        has started keeps following its policy as it is when each retry
-        runs.
-      operationId: createDunningPolicy
+        A disabled policy starts no dunning for a payment that fails from
+        then on; runs already started keep retrying. Runs already started
+        follow a new schedule and new final actions from their next step,
+        so a schedule shorter than the retries a run has made ends that run
+        with the final actions.
+      operationId: putDunningPolicy
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -25790,29 +25373,24 @@ paths:
             schema:
               $ref: "#/components/schemas/DunningPolicyInput"
             example:
-              name: Strict retries
               enabled: true
               retry_days: [2, 3, 5]
               final_subscription_action: cancel
               final_invoice_action: mark_uncollectible
       responses:
-        "201":
-          description: The new policy
+        "200":
+          description: The policy as saved
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/DunningPolicy"
               example:
-                id: hc_dpol_dajqj1aq3gpgqfoq5c6h
                 tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                name: Strict retries
                 enabled: true
-                is_default: true
-                seeded: false
                 retry_days: [2, 3, 5]
                 final_subscription_action: cancel
                 final_invoice_action: mark_uncollectible
-                created_at: "2026-11-02T10:00:00Z"
+                created_at: "2026-09-15T12:00:00Z"
                 updated_at: "2026-11-02T10:00:00Z"
         "400":
           $ref: "#/components/responses/InvalidBody"
@@ -25828,8 +25406,8 @@ paths:
             field was sent (`final_action`, `retry_schedule`,
             `max_retry_attempts`, `grace_period_days`), `retry_days` is
             missing, out of bounds or not whole days, an unknown final
-            action, a `name` over 255 bytes, a field the server sets
-            (`id`, `is_default`, `seeded` and the like), or an unknown field.
+            action, a field the server sets (`id`, `tenant_id`,
+            `created_at`, `updated_at`), or an unknown field.
           content:
             application/json:
               schema:
@@ -25841,293 +25419,6 @@ paths:
                   message: entry 1 is 45; each wait is a whole number of days from 1 to 30
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: retry_days
-        "429":
-          $ref: "#/components/responses/RateLimited"
-
-  /v1/dunning/policies/{id}:
-    get:
-      tags: [Dunning]
-      summary: Get a dunning policy
-      operationId: getDunningPolicy
-      parameters:
-        - name: id
-          in: path
-          required: true
-          description: The dunning policy id (`hc_dpol_…`).
-          schema:
-            type: string
-      responses:
-        "200":
-          description: The policy
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DunningPolicy"
-              example:
-                id: hc_dpol_dajqj1aq3gpgqfoq5c6g
-                tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                name: Default retries
-                enabled: true
-                is_default: true
-                seeded: true
-                retry_days: [3, 4, 7]
-                final_subscription_action: none
-                final_invoice_action: none
-                created_at: "2026-09-15T12:00:00Z"
-                updated_at: "2026-09-15T12:00:00Z"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          description: "`not_found`: no policy with this id in this account and mode."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: not_found
-                  message: dunning_policy not found
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "429":
-          $ref: "#/components/responses/RateLimited"
-    patch:
-      tags: [Dunning]
-      summary: Replace a dunning policy's settings
-      description: |
-        Replaces every setting of the policy with the body. This is not a
-        partial update: an omitted field takes its default (`enabled`
-        false, `name` empty, pause the subscription, leave the invoice
-        open), and `retry_days` is required. Send the full policy.
-        `is_default` cannot be changed here; use set-default. Editing the
-        "Default retries" policy the account started with sets its
-        `seeded` to false. Runs already started follow the new settings
-        from their next step.
-      operationId: updateDunningPolicy
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - name: id
-          in: path
-          required: true
-          description: The dunning policy id (`hc_dpol_…`).
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DunningPolicyInput"
-            example:
-              name: Default retries
-              enabled: true
-              retry_days: [3, 4, 7]
-              final_subscription_action: pause
-              final_invoice_action: none
-      responses:
-        "200":
-          description: The updated policy
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DunningPolicy"
-              example:
-                id: hc_dpol_dajqj1aq3gpgqfoq5c6g
-                tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                name: Default retries
-                enabled: true
-                is_default: true
-                seeded: false
-                retry_days: [3, 4, 7]
-                final_subscription_action: pause
-                final_invoice_action: none
-                created_at: "2026-09-15T12:00:00Z"
-                updated_at: "2026-11-02T10:00:00Z"
-        "400":
-          $ref: "#/components/responses/InvalidBody"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          description: "`not_found`: no policy with this id in this account and mode."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: not_found
-                  message: dunning_policy not found
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          description: Same validation as create.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: validation_error
-                  message: "retry_days is required: the days to wait before each retry, for example [3, 4, 7]"
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: retry_days
-        "429":
-          $ref: "#/components/responses/RateLimited"
-    delete:
-      tags: [Dunning]
-      summary: Delete a dunning policy
-      description: |
-        Deletes the policy. Refused for the default policy, for a policy
-        that customers are still assigned to, and for a policy that has run
-        payment retries (their history refers to it). The route takes no
-        body.
-      operationId: deleteDunningPolicy
-      parameters:
-        - name: id
-          in: path
-          required: true
-          description: The dunning policy id (`hc_dpol_…`).
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Deleted
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [status]
-                properties:
-                  status:
-                    type: string
-                    enum: [deleted]
-                    description: Always `deleted`.
-              example:
-                status: deleted
-        "400":
-          $ref: "#/components/responses/InvalidBody"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          description: "`not_found`: no policy with this id in this account and mode."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: not_found
-                  message: dunning_policy not found
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "409":
-          description: |
-            `invalid_state`: the policy is the default (make another policy
-            the default first), customers are assigned to it (reassign
-            them first), or it has run payment retries on invoices.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: invalid_state
-                  message: cannot delete policy — 2 customer(s) still assigned; reassign them first
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          description: The request has a body with a field. This route takes no body (`param` names the field).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: validation_error
-                  message: unknown field "force"
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: force
-        "429":
-          $ref: "#/components/responses/RateLimited"
-
-  /v1/dunning/policies/{id}/set-default:
-    post:
-      tags: [Dunning]
-      summary: Make a dunning policy the default
-      description: |
-        Makes this policy the default and the previous default a normal
-        policy, in one step. Customers without an assigned policy use the
-        new default for dunning started from now on. A policy made default
-        this way is no longer `seeded`. The route takes no body.
-      operationId: setDefaultDunningPolicy
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - name: id
-          in: path
-          required: true
-          description: The dunning policy id (`hc_dpol_…`).
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Default changed
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [status]
-                properties:
-                  status:
-                    type: string
-                    enum: [default_updated]
-                    description: Always `default_updated`.
-              example:
-                status: default_updated
-        "400":
-          $ref: "#/components/responses/InvalidBody"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          description: "`not_found`: no policy with this id in this account and mode."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: not_found
-                  message: dunning_policy not found
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          description: The request has a body with a field. This route takes no body (`param` names the field).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: validation_error
-                  message: unknown field "is_default"
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: is_default
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -26147,8 +25438,7 @@ paths:
         period; the current period keeps the rate it started with. It applies from the
         join when a subscription of the customer first joins the plan in a
         period after it is created: an override created before a subscription
-        starts (after a trial, before the trial ends), even on the same day,
-        applies from its first period. The create is written to the audit
+        starts, even on the same day, applies from its first period. The create is written to the audit
         log.
       operationId: createPriceOverride
       parameters:
@@ -27599,7 +26889,7 @@ paths:
         query string.
 
         In one transaction it creates the first account with its default
-        settings and default dunning policies, its owner user, a test secret
+        settings, a dunning policy in each mode, its owner user, a test secret
         key and a live secret key. The response is the only place the keys
         appear, and the password too when Hardcount generated it. The
         response has `Cache-Control: no-store`.

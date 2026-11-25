@@ -564,28 +564,6 @@ func TestBillingFailure_MultiPeriodCatchupRecordsTheFailingPeriod(t *testing.T) 
 	}
 }
 
-// TestBillingFailure_TrialFlipCommitsThenCloseFails_RecordedSameRun: the trial
-// flip commits in its own transaction and the same call then fails the cycle
-// close. The row was read as trialing and is now active; the due instant did
-// not move, so the failure is recorded on that same run.
-func TestBillingFailure_TrialFlipCommitsThenCloseFails_RecordedSameRun(t *testing.T) {
-	env := newBillFailureEnv(t, "Billing Failure Trial Flip")
-	trialStart, trialEnd := env.periodStart, env.periodStart.AddDate(0, 0, 14)
-	a := env.subWith(t, domain.Subscription{
-		Code: "sub-trial", Status: domain.SubscriptionTrialing, TrialStartAt: &trialStart, TrialEndAt: &trialEnd,
-	}, env.planOK, env.periodStart, env.periodEnd, env.periodEnd)
-
-	env.invs.onCreateTx = func(domain.Invoice) error { return errors.New("injected: cycle close failed after the trial flip") }
-	env.mustFail(t, a.ID)
-	sub := env.get(t, a.ID)
-	if sub.Status != domain.SubscriptionActive {
-		t.Fatalf("status = %s, want active: the trial flip commits before the close", sub.Status)
-	}
-	if sub.BillingFailure == nil || sub.BillingFailure.Attempts != 1 {
-		t.Fatalf("failure = %+v, want it recorded with attempts 1 in the run that flipped the trial", sub.BillingFailure)
-	}
-}
-
 // TestBillingFailure_MidPeriodCancelFails_ClearingTheCancelVoids: the failing
 // work is a mid-period cancel at cancel_at, not the close at next_billing_at.
 // Un-scheduling the cancel removes that work, so the record is void and the

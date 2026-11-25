@@ -34,8 +34,8 @@ func TestRunListReads_CarryThePolicyLimit(t *testing.T) {
 		t.Fatalf("create customer: %v", err)
 	}
 	store := dunning.NewPostgresStore(db)
-	policy, err := store.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetryDays: []int{3, 3, 4},
+	policy, err := store.PutPolicy(ctx, tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3, 3, 4},
 		FinalSubscriptionAction: domain.SubActionPause, FinalInvoiceAction: domain.InvActionNone,
 	})
 	if err != nil {
@@ -55,7 +55,7 @@ func TestRunListReads_CarryThePolicyLimit(t *testing.T) {
 		}
 		next := now.Add(time.Hour).Truncate(time.Microsecond)
 		run, err := store.CreateRun(ctx, tenantID, domain.InvoiceDunningRun{
-			InvoiceID: inv.ID, CustomerID: cust.ID, PolicyID: policy.ID,
+			InvoiceID: inv.ID, CustomerID: cust.ID,
 			State: domain.DunningActive, Reason: "payment_failed", AttemptCount: attempts, NextActionAt: &next,
 		})
 		if err != nil {
@@ -100,7 +100,7 @@ func TestRunListReads_CarryThePolicyLimit(t *testing.T) {
 	// An edit lowering the limit reaches the in-flight runs: the run with
 	// one attempt used now has none left either.
 	policy.RetryDays = policy.RetryDays[:1]
-	if _, err := store.UpsertPolicy(ctx, tenantID, policy); err != nil {
+	if _, err := store.PutPolicy(ctx, tenantID, policy); err != nil {
 		t.Fatalf("lower the limit: %v", err)
 	}
 	read(1)

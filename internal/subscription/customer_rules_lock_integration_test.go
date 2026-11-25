@@ -155,7 +155,7 @@ func liveItemsOnMeter(t *testing.T, r *lockOrderRig, meterID string) int {
 		SELECT count(DISTINCT i.id) FROM subscription_items i
 		JOIN subscriptions s ON s.id = i.subscription_id
 		JOIN plan_prices pp ON pp.plan_id = i.plan_id OR pp.plan_id = i.pending_plan_id
-		WHERE s.customer_id = $1 AND s.status IN ('trialing', 'active')
+		WHERE s.customer_id = $1 AND s.status = 'active'
 		  AND i.deleted_at IS NULL AND pp.meter_id = $2`, r.custID, meterID).Scan(&n); err != nil {
 		t.Fatalf("count items on meter %s: %v", meterID, err)
 	}

@@ -135,8 +135,8 @@ type ChargeHoldClaimer interface {
 // It exists because ADR-112 made exhaustion fire TWO actions that can fail
 // independently, and a failed exhaustion is re-attempted 24h later. Both
 // subscription movers refuse when the sub is already terminal — the
-// cancel's compare-and-set (CancelAtomicWithBill) matches only a trialing
-// or active row, and SetPauseCollection rejects canceled outright — so
+// cancel's compare-and-set (CancelAtomicWithBill) matches only an active
+// row, and SetPauseCollection rejects canceled outright — so
 // without a skip-if-done read, a
 // re-attempt after a partial failure would fail forever on the half that
 // already succeeded and never reach the half that did not. Same reason the
@@ -190,14 +190,6 @@ type EmailNotifier interface {
 	SendDunningEscalationTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
 }
 
-// CustomerPolicyReader returns a customer's assigned dunning_policy_id
-// (empty string = no explicit assignment, fall back to tenant default).
-// Implemented by *customer.Service so the dunning service can resolve
-// the effective policy without importing the customer package.
-type CustomerPolicyReader interface {
-	GetDunningPolicyID(ctx context.Context, tenantID, customerID string) (string, error)
-}
-
 type Service struct {
 	store            Store
 	retrier          PaymentRetrier
@@ -209,7 +201,6 @@ type Service struct {
 	chargeHolds      ChargeHoldClaimer
 	emailNotifier    EmailNotifier
 	customerEmail    CustomerEmailFetcher
-	custPolicy       CustomerPolicyReader
 	// clock is the server's clock: the router's clk, the one the engine
 	// bills by. Every dunning action runs on a time that was bound before it
 	// reaches the service. Who binds it:
@@ -239,47 +230,6 @@ func NewService(store Store, retrier PaymentRetrier, clk clock.Clock) *Service {
 
 func (s *Service) SetRetrier(retrier PaymentRetrier) {
 	s.retrier = retrier
-}
-
-// SetCustomerPolicyReader wires the customer→policy_id lookup used by
-// GetEffectivePolicyForCustomer. Without it, every dunning operation
-// falls back to the tenant default policy (per-customer assignment
-// silently ignored). Production must wire this; narrow unit tests
-// can leave it nil.
-func (s *Service) SetCustomerPolicyReader(r CustomerPolicyReader) {
-	s.custPolicy = r
-}
-
-// GetEffectivePolicyForCustomer returns the policy that governs this
-// customer's next dunning run. Resolution order (ADR-036):
-//  1. If the customer has an explicit dunning_policy_id, load that
-//     policy by id.
-//  2. Otherwise, the tenant's is_default=true policy.
-//
-// Only a policy that is genuinely not set falls through to the default: no
-// dunning_policy_id, or an assigned policy that no longer exists (the FK's
-// ON DELETE SET NULL should prevent that). A read ERROR fails instead — the
-// run stores its policy for life, so defaulting on a blip would bind the
-// customer's run to the wrong retry schedule, attempt cap and terminal
-// actions for good.
-func (s *Service) GetEffectivePolicyForCustomer(ctx context.Context, tenantID, customerID string) (domain.DunningPolicy, error) {
-	if s.custPolicy != nil && customerID != "" {
-		pid, err := s.custPolicy.GetDunningPolicyID(ctx, tenantID, customerID)
-		if err != nil && !errors.Is(err, errs.ErrNotFound) {
-			return domain.DunningPolicy{}, fmt.Errorf("read the customer's dunning policy: %w", err)
-		}
-		if pid != "" {
-			p, err := s.store.GetPolicyByID(ctx, tenantID, pid)
-			if err == nil {
-				return p, nil
-			}
-			if !errors.Is(err, errs.ErrNotFound) {
-				return domain.DunningPolicy{}, fmt.Errorf("load dunning policy %s: %w", pid, err)
-			}
-			// Assigned policy no longer exists — fall through to default.
-		}
-	}
-	return s.store.GetDefaultPolicy(ctx, tenantID)
 }
 
 // SetSubscriptionPauser configures the pause-collection terminal action
@@ -367,36 +317,30 @@ func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, 
 		return existing, nil // Idempotent — return existing run regardless of state.
 	}
 
-	policy, err := s.GetEffectivePolicyForCustomer(ctx, tenantID, customerID)
+	// A read error fails the start; only a mode with no policy is skipped.
+	policy, err := s.store.GetPolicy(ctx, tenantID)
 	if err != nil {
-		// No effective policy (tenant has no default configured) is a DELIBERATE
-		// SKIP, the same class as a disabled policy — an unconfigured optional
-		// feature must never poison the money-path enrollment sweep (the
-		// SMTP-unset precedent). Map ONLY ErrNotFound to InvalidState so all three
-		// callers (no-payment sweep, inline decline, post-commit settle) treat it
-		// as a no-op via their shared ErrInvalidState swallow. A real infra error
-		// (DB down, etc.) still propagates and fails loud — no silent fallback.
+		// No policy is a deliberate skip, the same class as a disabled
+		// policy: an unconfigured optional feature must never poison the
+		// money-path enrollment sweep (the SMTP-unset precedent). Only
+		// ErrNotFound maps to InvalidState, so all three callers (no-payment
+		// sweep, inline decline, post-commit settle) treat it as a no-op
+		// through their shared ErrInvalidState swallow. A real infra error
+		// (DB down, etc.) still propagates and fails loud.
 		if errors.Is(err, errs.ErrNotFound) {
-			slog.WarnContext(ctx, "dunning not configured — no effective policy; skipping enrollment",
+			slog.WarnContext(ctx, "dunning not configured — no policy; skipping enrollment",
 				"tenant_id", tenantID, "invoice_id", invoiceID, "customer_id", customerID)
 			return domain.InvoiceDunningRun{}, errs.InvalidState("dunning not configured — no policy for tenant")
 		}
-		return domain.InvoiceDunningRun{}, fmt.Errorf("get effective dunning policy: %w", err)
+		return domain.InvoiceDunningRun{}, fmt.Errorf("get dunning policy: %w", err)
 	}
 	if !policy.Enabled {
 		// Logged at the same volume as the no-policy skip above: both end
 		// with "this invoice will never dun", and an operator debugging that
-		// needs the same evidence either way. Silence here was a real trap
-		// (found walking FLOW TC5, 2026-08-04): POST /v1/dunning/policies
-		// omitting `enabled` creates a DISABLED policy — and the first policy
-		// a tenant creates is auto-promoted to default — so an API caller
-		// ends up with a policy that is simultaneously the tenant default and
-		// inert, with no error at create, no run, and (before this) no log.
-		// The dashboard is unaffected: its form sends enabled:true.
+		// needs the same evidence either way.
 		slog.WarnContext(ctx, "dunning policy is disabled — skipping enrollment; the invoice will not dun",
-			"tenant_id", tenantID, "invoice_id", invoiceID, "customer_id", customerID,
-			"policy_id", policy.ID, "policy_name", policy.Name, "is_default", policy.IsDefault)
-		return domain.InvoiceDunningRun{}, errs.InvalidState("dunning is disabled (assigned policy or tenant default is not enabled)")
+			"tenant_id", tenantID, "invoice_id", invoiceID, "customer_id", customerID)
+		return domain.InvoiceDunningRun{}, errs.InvalidState("dunning is disabled (the account's policy is not enabled)")
 	}
 
 	// The first entry of retry_days is the wait before the first retry.
@@ -405,7 +349,7 @@ func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, 
 		// Unreachable while every writer validates and the column's CHECK
 		// holds (at least one entry). Loud: a run with no retry to schedule
 		// would never be due.
-		return domain.InvoiceDunningRun{}, fmt.Errorf("dunning policy %s has no retries", policy.ID)
+		return domain.InvoiceDunningRun{}, errors.New("the dunning policy has no retries")
 	}
 
 	failureAt := s.clock.Now(ctx)
@@ -418,7 +362,6 @@ func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, 
 	run, err := s.store.StartRun(ctx, tenantID, domain.InvoiceDunningRun{
 		InvoiceID:    invoiceID,
 		CustomerID:   customerID,
-		PolicyID:     policy.ID,
 		State:        domain.DunningActive,
 		Reason:       string(cause),
 		AttemptCount: 0,
@@ -569,14 +512,10 @@ func (s *Service) processRunsBatch(ctx context.Context, tenantID string, dueRuns
 }
 
 func (s *Service) processRun(ctx context.Context, tenantID string, run domain.InvoiceDunningRun) error {
-	// Resolve the policy bound to this run at StartDunning time.
-	// Runs stay bound to the policy ID they started on: reassigning the
-	// customer to a different policy mid-flight does not move in-flight
-	// runs, and only the NEXT run picks up the new assignment (Stripe-Lago
-	// shape, ADR-036 research). EDITS to the bound policy do reach
-	// in-flight runs — the row is updated in place and read here every
-	// tick — so shortening retry_days below the attempts made exhausts a
-	// run on its next tick through the exhaust-on-entry branch below.
+	// The run follows its account's policy for the run's mode, read on
+	// every tick, so an edit reaches runs already under way: shortening
+	// retry_days below the attempts made exhausts a run on its next tick
+	// through the exhaust-on-entry branch below.
 	// Paid-pre-check — the durable backstop for an invoice settled OUT-OF-BAND
 	// (a credit-cover sweep MarkPaids the invoice without resolving its run, or
 	// any settle path the prompt-resolve doesn't instrument). Resolve the run in
@@ -625,14 +564,15 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// when a one-line resolve is all that remains. Honest provenance: the
 	// original ordering was surfaced by a 2026-08-02 walk fixture that was
 	// itself malformed (a cross-mode run RLS makes unconstructible through real
-	// flows), and no REAL path to an unloadable policy is known today — the FK
-	// is RESTRICT and runs bind same-mode policies. The reorder stays because
+	// flows), and no REAL path to an unloadable policy is known today: no route
+	// deletes a policy, and a mode with runs had one when they started. The
+	// reorder stays because
 	// it is correct on principle (robustness against a class, not an instance)
 	// and costs nothing; TestProcessDueRuns_TerminalInvoiceResolvesWithoutPolicy
 	// pins it via a bypass-constructed fixture.
-	policy, err := s.store.GetPolicyByID(ctx, tenantID, run.PolicyID)
+	policy, err := s.store.GetPolicy(ctx, tenantID)
 	if err != nil {
-		return fmt.Errorf("get bound policy %s for run %s: %w", run.PolicyID, run.ID, err)
+		return fmt.Errorf("get the dunning policy for run %s: %w", run.ID, err)
 	}
 
 	if run.Paused {
@@ -815,7 +755,7 @@ func nextActionAfterRetry(policy domain.DunningPolicy, attempt int, now time.Tim
 	if attempt < policy.Retries() {
 		wait, ok := policy.WaitBeforeRetry(attempt + 1)
 		if !ok { // unreachable: attempt+1 <= retries
-			return time.Time{}, fmt.Errorf("dunning policy %s has no retry %d", policy.ID, attempt+1)
+			return time.Time{}, fmt.Errorf("the dunning policy has no retry %d", attempt+1)
 		}
 		return now.Add(wait), nil
 	}
@@ -1963,58 +1903,24 @@ func (s *Service) retryPaymentFailedTx(ctx context.Context, tx *sql.Tx, tenantID
 	return nil
 }
 
-// GetDefaultPolicy returns the tenant's default dunning policy.
-// Operators / handlers needing "the current policy" use this; runtime
-// dunning state machine instead resolves per-customer via
-// GetEffectivePolicyForCustomer or per-run via GetPolicyByID(run.PolicyID).
-func (s *Service) GetDefaultPolicy(ctx context.Context, tenantID string) (domain.DunningPolicy, error) {
-	return s.store.GetDefaultPolicy(ctx, tenantID)
+// GetPolicy returns the account's policy for the mode on ctx, or
+// errs.ErrNotFound when the mode has none.
+func (s *Service) GetPolicy(ctx context.Context, tenantID string) (domain.DunningPolicy, error) {
+	return s.store.GetPolicy(ctx, tenantID)
 }
 
-// GetPolicyByID looks up a policy by id.
-func (s *Service) GetPolicyByID(ctx context.Context, tenantID, id string) (domain.DunningPolicy, error) {
-	return s.store.GetPolicyByID(ctx, tenantID, id)
-}
-
-// ListPolicies returns all policies for the tenant (default first, then
-// created_at). Drives the campaigns admin page.
-func (s *Service) ListPolicies(ctx context.Context, tenantID string) ([]domain.DunningPolicy, error) {
-	return s.store.ListPolicies(ctx, tenantID)
-}
-
-// DeletePolicy removes a policy by id. Refuses to delete the default
-// policy or any policy with customers explicitly assigned to it (the
-// store-level checks are authoritative; service-level pre-check just
-// produces a clearer error before hitting the DB).
-func (s *Service) DeletePolicy(ctx context.Context, tenantID, id string) error {
-	return s.store.DeletePolicy(ctx, tenantID, id)
-}
-
-// SetDefaultPolicy promotes a policy to is_default and demotes the
-// previous default atomically.
-func (s *Service) SetDefaultPolicy(ctx context.Context, tenantID, id string) error {
-	return s.store.SetDefaultPolicy(ctx, tenantID, id)
-}
-
-// CountCustomersOnPolicy returns the explicit-assignment count for a
-// policy, used by the admin UI ("N customers assigned" badge) and by
-// the delete guard.
-func (s *Service) CountCustomersOnPolicy(ctx context.Context, tenantID, policyID string) (int, error) {
-	return s.store.CountCustomersOnPolicy(ctx, tenantID, policyID)
-}
-
-// UpsertPolicy creates a new policy (when input.ID is empty) or updates
-// an existing one (when input.ID is set), through the save-time validation
-// every writer shares (normalizeAndValidatePolicy).
-func (s *Service) UpsertPolicy(ctx context.Context, tenantID string, policy domain.DunningPolicy) (domain.DunningPolicy, error) {
+// PutPolicy creates the account's policy for the mode on ctx, or replaces
+// the one it has, through the save-time validation every writer shares
+// (normalizeAndValidatePolicy).
+func (s *Service) PutPolicy(ctx context.Context, tenantID string, policy domain.DunningPolicy) (domain.DunningPolicy, error) {
 	policy, err := normalizeAndValidatePolicy(policy)
 	if err != nil {
 		return domain.DunningPolicy{}, err
 	}
-	return s.store.UpsertPolicy(ctx, tenantID, policy)
+	return s.store.PutPolicy(ctx, tenantID, policy)
 }
 
-// DefaultSeedPolicy is the policy every new account starts with, once per
+// NewAccountPolicy is the policy every new account starts with, once per
 // mode (ADR-123, #1152). Three retries on day 3, 7 and 14 after the failed
 // payment (or the collection that found no card): Stripe's recommended two-week window, and its limit of three
 // retries on a custom schedule. When retries run out it changes nothing:
@@ -2023,9 +1929,8 @@ func (s *Service) UpsertPolicy(ctx context.Context, tenantID string, policy doma
 // cancel or write off on an account's behalf before the operator has chosen
 // to. Both final actions are written explicitly, because an empty value
 // normalizes to pause.
-func DefaultSeedPolicy() domain.DunningPolicy {
+func NewAccountPolicy() domain.DunningPolicy {
 	return domain.DunningPolicy{
-		Name:                    "Default retries",
 		Enabled:                 true,
 		RetryDays:               []int{3, 4, 7},
 		FinalSubscriptionAction: domain.SubActionNone,
@@ -2033,25 +1938,25 @@ func DefaultSeedPolicy() domain.DunningPolicy {
 	}
 }
 
-// SeedDefaultPoliciesTx creates DefaultSeedPolicy in test and live mode on
-// the caller's account-creation tx, as each mode's default (ADR-123). It is
-// the one writer of seeded policies; account creation (tenant.RunBootstrap)
+// SeedPoliciesTx creates NewAccountPolicy in test and live mode on
+// the caller's account-creation tx (ADR-123). It is the one writer of the
+// policy an account starts with; account creation (tenant.RunBootstrap)
 // calls it, so an account that exists has retries on from its first failed
 // payment. The policy goes
 // through the same normalize+validate as every other writer. onSeeded runs
 // after each insert in that insert's mode (the callers write an audit row
 // there); an error from it, or from either insert, fails account creation.
-func (s *Service) SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, tenantID string, onSeeded func(p domain.DunningPolicy, livemode bool) error) error {
-	policy, err := normalizeAndValidatePolicy(DefaultSeedPolicy())
+func (s *Service) SeedPoliciesTx(ctx context.Context, tx *sql.Tx, tenantID string, onSeeded func(p domain.DunningPolicy, livemode bool) error) error {
+	policy, err := normalizeAndValidatePolicy(NewAccountPolicy())
 	if err != nil {
-		return fmt.Errorf("default dunning policy: %w", err)
+		return fmt.Errorf("the dunning policy a new account starts with: %w", err)
 	}
-	return s.store.SeedDefaultPoliciesTx(ctx, tx, tenantID, policy, onSeeded)
+	return s.store.SeedPoliciesTx(ctx, tx, tenantID, policy, onSeeded)
 }
 
 // normalizeAndValidatePolicy applies the save-time defaults and enforces the
-// policy invariants. The single chokepoint shared by UpsertPolicy and
-// SeedDefaultPoliciesTx so no writer can persist a policy another path would
+// policy invariants. The single chokepoint shared by PutPolicy and
+// SeedPoliciesTx so no writer can persist a policy another path would
 // reject.
 func normalizeAndValidatePolicy(policy domain.DunningPolicy) (domain.DunningPolicy, error) {
 	if err := validateRetryDays(policy.RetryDays); err != nil {
@@ -2078,9 +1983,6 @@ func normalizeAndValidatePolicy(policy domain.DunningPolicy) (domain.DunningPoli
 	if !policy.FinalInvoiceAction.Valid() {
 		return domain.DunningPolicy{}, errs.Invalid("final_invoice_action",
 			"must be one of: none, mark_uncollectible")
-	}
-	if err := domain.MaxLen("name", policy.Name, 255); err != nil {
-		return domain.DunningPolicy{}, err
 	}
 	return policy, nil
 }

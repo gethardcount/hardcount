@@ -11,53 +11,28 @@ import (
 
 var errBlip = errors.New("connection reset")
 
-type stubPolicyReader struct {
-	pid string
-	err error
-}
-
-func (s stubPolicyReader) GetDunningPolicyID(context.Context, string, string) (string, error) {
-	return s.pid, s.err
-}
-
-// policyErrStore fails GetPolicyByID with a read error.
+// policyErrStore fails GetPolicy with a read error.
 type policyErrStore struct{ *memStore }
 
-func (p policyErrStore) GetPolicyByID(context.Context, string, string) (domain.DunningPolicy, error) {
+func (p policyErrStore) GetPolicy(context.Context, string) (domain.DunningPolicy, error) {
 	return domain.DunningPolicy{}, errBlip
 }
 
-// A run stores its policy for life, so a read error resolving the customer's
-// policy must fail — not silently bind the run to the tenant default. Only a
-// policy that is genuinely not set (no id, or an assigned id that no longer
-// exists) uses the default.
-func TestGetEffectivePolicy_ReadErrorFailsNotSetDefaults(t *testing.T) {
-	ctx := context.Background()
+// A read error on the account's policy fails the start. It is never read as
+// "no policy", which skips the invoice for good, so the caller's retry can
+// start the run once the database answers.
+func TestStartDunning_PolicyReadFailureFailsTheStart(t *testing.T) {
 	store := newMemStore()
-	svc := NewService(store, &noopRetrier{}, nil)
-
-	svc.SetCustomerPolicyReader(stubPolicyReader{err: errBlip})
-	if _, err := svc.GetEffectivePolicyForCustomer(ctx, "t1", "cus_1"); !errors.Is(err, errBlip) {
-		t.Errorf("customer read fails: err = %v, want the read error", err)
+	svc := NewService(policyErrStore{store}, &noopRetrier{}, nil)
+	_, err := svc.StartDunning(context.Background(), "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
+	if !errors.Is(err, errBlip) {
+		t.Fatalf("err = %v, want the read error", err)
 	}
-
-	svc = NewService(policyErrStore{store}, &noopRetrier{}, nil)
-	svc.SetCustomerPolicyReader(stubPolicyReader{pid: "dpol_custom"})
-	if _, err := svc.GetEffectivePolicyForCustomer(ctx, "t1", "cus_1"); !errors.Is(err, errBlip) {
-		t.Errorf("policy read fails: err = %v, want the read error", err)
+	if errors.Is(err, errs.ErrInvalidState) {
+		t.Errorf("err = %v is the deliberate skip; a read error must not be", err)
 	}
-
-	svc = NewService(store, &noopRetrier{}, nil)
-	for name, r := range map[string]stubPolicyReader{
-		"no assignment":        {},
-		"customer not found":   {err: errs.ErrNotFound},
-		"assigned policy gone": {pid: "dpol_deleted"},
-	} {
-		svc.SetCustomerPolicyReader(r)
-		p, err := svc.GetEffectivePolicyForCustomer(ctx, "t1", "cus_1")
-		if err != nil || p.ID != "dpol_1" {
-			t.Errorf("%s: got %q, %v; want the default policy", name, p.ID, err)
-		}
+	if len(store.runs) != 0 {
+		t.Errorf("runs = %d, want none", len(store.runs))
 	}
 }
 

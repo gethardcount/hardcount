@@ -44,8 +44,7 @@ export interface HeldUsageReleaseResult {
      * Released rows in a billing period not invoiced yet that a price
      * of its plan takes. Rows Hardcount does not check count here too:
      * rows after the current period's end, while the subscription
-     * continues, and rows after a trial's end while the subscription
-     * still trials. Rows of a sum or count meter stamped before the end
+     * continues. Rows of a sum or count meter stamped before the end
      * of this period's spend-threshold invoice are not counted here:
      * see `pending_threshold_invoice` and `outside_open_period`.
      */
@@ -71,8 +70,7 @@ export interface HeldUsageReleaseResult {
   pending_threshold_invoice: number;
   /**
      * Released rows outside every subscription's time (before it
-     * started, in a free trial, after it ended or after its scheduled
-     * cancel, or in another, ended subscription's time), and rows in a
+     * started, after it ended or after its scheduled cancel, or in another, ended subscription's time), and rows in a
      * period already invoiced. Also rows of a sum or count meter
      * stamped before the end of this period's paid spend-threshold
      * invoice. Bill them with a one-off invoice if they should be

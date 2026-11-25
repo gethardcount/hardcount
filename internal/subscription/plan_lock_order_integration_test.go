@@ -136,19 +136,15 @@ func (r *lockOrderRig) sub(t *testing.T, code string, status domain.Subscription
 		NextBillingAt:             &lockOrderPE,
 		Items:                     []domain.SubscriptionItem{{PlanID: plans[0].ID, Quantity: 1}},
 	}
-	switch status {
-	case domain.SubscriptionActive:
+	if status == domain.SubscriptionActive {
 		in.StartedAt = &lockOrderPS
-	case domain.SubscriptionTrialing:
-		in.TrialStartAt = &lockOrderPS
-		in.TrialEndAt = &lockOrderPE
 	}
 	created, err := r.store.Create(clock.WithEffectiveNow(r.ctx, lockOrderPS), r.tenantID, in)
 	if err != nil {
 		t.Fatalf("create subscription %s: %v", code, err)
 	}
-	// Later items are added one hour apart, so the items' created_at order
-	// (the order the activation writers open intervals in) is plans' order.
+	// Later items are added one hour apart, so the items' created_at order is
+	// plans' order.
 	for i, p := range plans[1:] {
 		at := lockOrderPS.Add(time.Duration(i+1) * time.Hour)
 		item, err := r.store.AddItem(clock.WithEffectiveNow(r.ctx, at), r.tenantID, domain.SubscriptionItem{
@@ -289,22 +285,6 @@ var twoMeterWriters = []lockOrderWriter{
 			return err
 		}
 	}},
-	{"trial conversion", func(t *testing.T, r *lockOrderRig, lo, hi domain.Plan) func(context.Context) error {
-		sub := r.sub(t, "trial", domain.SubscriptionTrialing, hi, lo)
-		return func(ctx context.Context) error {
-			// The trial ends at lockOrderPE; the flip acts for that end.
-			_, err := r.store.ActivateAfterTrial(ctx, r.tenantID, sub.ID, lockOrderPE)
-			return err
-		}
-	}},
-	{"early trial end", func(t *testing.T, r *lockOrderRig, lo, hi domain.Plan) func(context.Context) error {
-		sub := r.sub(t, "trial-early", domain.SubscriptionTrialing, hi, lo)
-		return func(ctx context.Context) error {
-			at := lockOrderPS.Add(2 * time.Hour)
-			_, err := r.store.EndTrialEarly(ctx, r.tenantID, sub.ID, at, at, lockOrderPE, lockOrderPE, 1)
-			return err
-		}
-	}},
 }
 
 // TestPlanLockOrder_NoDeadlockWithAPlanWriter is C10: each subscription
@@ -416,8 +396,7 @@ func (r *lockOrderRig) twoMeterPlans(t *testing.T, key string) (m1, m2 string, p
 
 // TestPlanLockOrder_NoDeadlockAcrossTwoPlanWriters is C10 for the writers
 // whose two plans the API lets onto one subscription only when they bill
-// different meters: create, trial conversion and early
-// trial end. Plans p < mid < q; p bills m1, mid bills m1 and m2, q bills m2.
+// different meters, such as a create with two items. Plans p < mid < q; p bills m1, mid bills m1 and m2, q bills m2.
 // The writer references p and q, and reaches q first when nothing orders its
 // plan locks. Three transactions can then wait on each other:
 //

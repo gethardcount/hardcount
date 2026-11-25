@@ -142,22 +142,18 @@ func TestMeterAggregation_FixedOnceTheMeterHasEvents(t *testing.T) {
 }
 
 // Before any event the aggregation is the operator's to change, even while
-// subscriptions use the meter: no usage has been counted under the old one.
+// a subscription uses the meter: no usage has been counted under the old one.
 func TestMeterAggregation_ChangesBeforeAnyEvent(t *testing.T) {
 	f := newMeterEditFixture(t)
-	for _, status := range []string{"trialing", "active"} {
-		t.Run("a "+status+" subscription uses the meter", func(t *testing.T) {
-			m := f.meter(t, "agg_before_"+status)
-			p := f.plan(t, "agg_before_plan_"+status, m.ID)
-			f.sub(t, p.ID, status)
-			got, err := f.svc.UpdateMeter(f.ctx, f.tenantID, m.ID, pricing.UpdateMeterInput{Aggregation: ptr("max")})
-			if err != nil {
-				t.Fatalf("aggregation change before any event: %v", err)
-			}
-			if got.Aggregation != "max" {
-				t.Errorf("aggregation = %q, want max", got.Aggregation)
-			}
-		})
+	m := f.meter(t, "agg_before")
+	p := f.plan(t, "agg_before_plan", m.ID)
+	f.sub(t, p.ID, "active")
+	got, err := f.svc.UpdateMeter(f.ctx, f.tenantID, m.ID, pricing.UpdateMeterInput{Aggregation: ptr("max")})
+	if err != nil {
+		t.Fatalf("aggregation change before any event: %v", err)
+	}
+	if got.Aggregation != "max" {
+		t.Errorf("aggregation = %q, want max", got.Aggregation)
 	}
 }
 

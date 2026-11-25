@@ -56,15 +56,12 @@ func TestInvoiceVoid_ClosesTheRunOnce_ARefusedVoidLeavesItOpen(t *testing.T) {
 			t.Fatalf("create customer: %v", err)
 		}
 		dsvc := dunning.NewService(dstore, nil, clock.Real())
-		policy, err := dsvc.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-			Name: "void-closes-" + tag, Enabled: true, RetryDays: []int{3, 3, 3},
+		_, err = dsvc.PutPolicy(ctx, tenantID, domain.DunningPolicy{
+			Enabled: true, RetryDays: []int{3, 3, 3},
 			FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 		})
 		if err != nil {
 			t.Fatalf("upsert policy: %v", err)
-		}
-		if err := dsvc.SetDefaultPolicy(ctx, tenantID, policy.ID); err != nil {
-			t.Fatalf("set default policy: %v", err)
 		}
 		stopper := &countingStopper{}
 		invSvc := invoice.NewService(invStore, clock.Real(), tenant.NewSettingsStore(db))

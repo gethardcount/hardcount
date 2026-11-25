@@ -176,8 +176,8 @@ it again. Hardcount refuses to charge an invoice whose payment is `unknown`
    action (cancel or pause the subscription). Check whether that action was
    due:
    - Find the run with `GET /v1/dunning/runs?invoice_id=<invoice id>`, then
-     the policy it runs on with `GET /v1/dunning/policies/<policy_id>`. A run
-     keeps the policy it started on, even if the customer moved to another.
+     the account's policy with `GET /v1/dunning/policy`, using a key of the
+     run's mode. Every run follows that policy as it is now.
    - If the run's `attempt_count` has reached its `max_retry_attempts` (the
      number of entries in the policy's `retry_days`) and the policy's
      `final_subscription_action` is `cancel` or `pause`, apply that action by

@@ -121,8 +121,8 @@ func TestExhaust_FinalActionsDatedWhenTheyRun(t *testing.T) {
 			retrier := &declinedRetry{invoices: invoices}
 			runs := dunning.NewPostgresStore(db)
 			svc := dunning.NewService(runs, retrier, wall)
-			policy, err := svc.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-				Name: "two retries", Enabled: true, RetryDays: []int{3, 3},
+			_, err = svc.PutPolicy(ctx, tenantID, domain.DunningPolicy{
+				Enabled: true, RetryDays: []int{3, 3},
 				FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 			})
 			if err != nil {
@@ -139,10 +139,10 @@ func TestExhaust_FinalActionsDatedWhenTheyRun(t *testing.T) {
 				t.Fatalf("pin livemode GUC: %v", err)
 			}
 			if _, err := tx.ExecContext(ctx, `
-				INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason,
+				INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, state, reason,
 					attempt_count, last_attempt_at, next_action_at, paused, created_at, updated_at, livemode)
-				VALUES ($1, $2, $3, $4, $5, 'active', 'payment_failed', $6, $7, $8, false, $9, $9, false)`,
-				runID, tenantID, inv.ID, cust.ID, policy.ID, tc.attemptsUsed, tc.lastAttempt, tc.nextAction, invStart); err != nil {
+				VALUES ($1, $2, $3, $4, 'active', 'payment_failed', $5, $6, $7, false, $8, $8, false)`,
+				runID, tenantID, inv.ID, cust.ID, tc.attemptsUsed, tc.lastAttempt, tc.nextAction, invStart); err != nil {
 				postgres.Rollback(tx)
 				t.Fatalf("insert run: %v", err)
 			}

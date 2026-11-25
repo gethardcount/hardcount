@@ -26,7 +26,7 @@ export type GetPublicCostDashboard200 = {
   livemode: boolean;
   /** The period the usage covers. */
   billing_period: GetPublicCostDashboard200BillingPeriod;
-  /** One entry per plan of each active or trialing subscription. */
+  /** One entry per plan of each active subscription. */
   subscriptions: GetPublicCostDashboard200SubscriptionsItem[];
   /** One entry per meter the customer's plans price. */
   usage: GetPublicCostDashboard200UsageItem[];

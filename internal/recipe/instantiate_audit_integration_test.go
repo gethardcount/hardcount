@@ -109,7 +109,7 @@ func TestRecipeInstantiate_AuditSharedFate(t *testing.T) {
 		assertIDList(t, got.Metadata, "meter_ids", inst.CreatedObjects.MeterIDs)
 		assertIDList(t, got.Metadata, "price_ids", inst.CreatedObjects.PriceIDs)
 		// A recipe touches only the catalog (ADR-130 §15).
-		for _, k := range []string{"dunning_policy_id", "webhook_endpoint_id"} {
+		for _, k := range []string{"webhook_endpoint_id"} {
 			if v, ok := got.Metadata[k]; ok {
 				t.Errorf("metadata %s = %v, want none", k, v)
 			}

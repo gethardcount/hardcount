@@ -44,7 +44,7 @@ var updateKeepAnchorGolden = flag.Bool("update-keep-anchor-golden", false, "rewr
 // the subscription's period is June.
 func TestThresholdInAdvanceBase_FireThenCloseBillsEveryMonth(t *testing.T) {
 	r := newLagRigBare(t, "in_advance", 0)
-	r.newSub("adv", r.planA, lagP0, nil)
+	r.newSub("adv", r.planA, lagP0)
 
 	setAt := lagP0.AddDate(0, 0, 4)
 	path := "/v1/subscriptions/" + r.subID + "/billing-thresholds"
@@ -101,7 +101,7 @@ func TestThresholdInArrearsBase_FireThenCancelBillsTheUsedDays(t *testing.T) {
 
 	control := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	peak := control.newMeter("peak", "max")
-	control.newSub("ctl", control.planWith("plan_p", 3000, control.meterID, peak), lagP0, nil)
+	control.newSub("ctl", control.planWith("plan_p", 3000, control.meterID, peak), lagP0)
 	control.cancelNow(cancelAt)
 	var want int64
 	for _, i := range control.invoices() {
@@ -244,7 +244,7 @@ func TestThresholdKeepAnchor_InvoicesUnchanged(t *testing.T) {
 		}},
 		{"in_advance base, then the April close", func(t *testing.T) *lagRig {
 			r := newLagRigBare(t, "in_advance", 0)
-			r.newSub("adv", r.planA, lagP0, nil)
+			r.newSub("adv", r.planA, lagP0)
 			r.must(http.MethodPut, "/v1/subscriptions/"+r.subID+"/billing-thresholds", lagP0.AddDate(0, 0, 4),
 				map[string]any{"amount_gte": 100}, http.StatusOK)
 			r.ingest(time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC), 100)
@@ -257,7 +257,7 @@ func TestThresholdKeepAnchor_InvoicesUnchanged(t *testing.T) {
 		}},
 		{"item threshold only, then the April close", func(t *testing.T) *lagRig {
 			r := newLagRigBare(t, "in_arrears", 0)
-			r.newSub("item", r.planA, lagP0, nil)
+			r.newSub("item", r.planA, lagP0)
 			item := r.sub().Items[0].ID
 			r.must(http.MethodPut, "/v1/subscriptions/"+r.subID+"/billing-thresholds", lagP0.AddDate(0, 0, 4),
 				map[string]any{"item_thresholds": []map[string]any{{"subscription_item_id": item, "usage_gte": "50"}}}, http.StatusOK)
@@ -306,7 +306,7 @@ func keepAnchorFired(t *testing.T) (*lagRig, time.Time, string) {
 	t.Helper()
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	peak := r.newMeter("peak", "max")
-	r.newSub("thr", r.planWith("plan_p", 3000, r.meterID, peak), lagP0, nil)
+	r.newSub("thr", r.planWith("plan_p", 3000, r.meterID, peak), lagP0)
 	r.postEvent("/v1/usage-events", "calls", "calls-apr10", lagP0.AddDate(0, 0, 9), lagP0.AddDate(0, 0, 9), 100, http.StatusCreated)
 	r.postEvent("/v1/usage-events", "peak", "peak-apr10", lagP0.AddDate(0, 0, 9), lagP0.AddDate(0, 0, 9), 5, http.StatusCreated)
 	r.postEvent("/v1/usage-events", "calls", "calls-apr22", lagP0.AddDate(0, 0, 21), lagP0.AddDate(0, 0, 21), 30, http.StatusCreated)

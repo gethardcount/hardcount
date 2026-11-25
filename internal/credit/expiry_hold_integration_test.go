@@ -128,9 +128,9 @@ func seedPeriodInvoice(t *testing.T, ctx context.Context, store *invoice.Postgre
 // hours ago, the close failed and waits on the retry ladder, and the
 // customer's grant expired two hours after the period ended. The sweep must
 // not retire it: the close, when it succeeds, draws on credit that was live
-// at the period end. A trialing subscription owes its close the same way; a
-// canceled one owes nothing. Once the close has run (the due instant moves
-// past the expiry) and no invoice is owed, the grant is retired.
+// at the period end. A canceled subscription owes nothing. Once the close has
+// run (the due instant moves past the expiry) and no invoice is owed, the
+// grant is retired.
 //
 // Fails before the fix: the sweep retired the grant at expires_at plus the
 // invoice grace. Mutation: drop clause (i) of domain.CreditDrawOwedSQL.
@@ -144,11 +144,6 @@ func TestExpireCredits_HoldsAGrantWhileAFailedCloseIsOwed(t *testing.T) {
 	recordFailure(t, db, ctx, tenantID, active, due, now)
 	activeGrant := seedExpiredGrant(t, db, ctx, svc, tenantID, cust.ID, 5000, expires)
 
-	trialCust := holdCustomer(t, ctx, db, tenantID, "hold_trial")
-	trial := seedSub(t, db, ctx, tenantID, trialCust, "trialing", due)
-	recordFailure(t, db, ctx, tenantID, trial, due, now)
-	trialGrant := seedExpiredGrant(t, db, ctx, svc, tenantID, trialCust, 3000, expires)
-
 	canceledCust := holdCustomer(t, ctx, db, tenantID, "hold_canceled")
 	seedSub(t, db, ctx, tenantID, canceledCust, "canceled", due)
 	canceledGrant := seedExpiredGrant(t, db, ctx, svc, tenantID, canceledCust, 2000, expires)
@@ -157,23 +152,16 @@ func TestExpireCredits_HoldsAGrantWhileAFailedCloseIsOwed(t *testing.T) {
 	if got := grantConsumed(t, db, ctx, activeGrant); got != 0 {
 		t.Fatalf("active sub's grant consumed=%d after the sweep, want 0: its failed close is still owed", got)
 	}
-	if got := grantConsumed(t, db, ctx, trialGrant); got != 0 {
-		t.Fatalf("trialing sub's grant consumed=%d after the sweep, want 0: its close is still owed", got)
-	}
 	if got := grantConsumed(t, db, ctx, canceledGrant); got != 2000 {
 		t.Fatalf("canceled sub's grant consumed=%d, want 2000 retired: a canceled subscription owes no close", got)
 	}
 
-	// The retries succeed: each close moves the due instant past the expiry,
+	// The retry succeeds: the close moves the due instant past the expiry,
 	// and no invoice is left owed.
 	setNextBilling(t, db, ctx, active, now.Add(30*24*time.Hour))
-	setNextBilling(t, db, ctx, trial, now.Add(30*24*time.Hour))
 	expireAll(t, ctx, svc)
 	if sum, entries, total := customerLedgerFacts(t, db, ctx, cust.ID); sum != 0 || entries != 1 || total != 5000 {
 		t.Fatalf("active customer after the close: sum=%d expiry entries=%d total=%d, want 0/1/5000", sum, entries, total)
-	}
-	if sum, entries, total := customerLedgerFacts(t, db, ctx, trialCust); sum != 0 || entries != 1 || total != 3000 {
-		t.Fatalf("trialing customer after the close: sum=%d expiry entries=%d total=%d, want 0/1/3000", sum, entries, total)
 	}
 }
 

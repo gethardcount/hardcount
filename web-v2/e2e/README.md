@@ -24,18 +24,15 @@ the screen, and that the main things an operator does work end to end.
   passwords in a row make the sign-in page say how long to wait. Each journey checks that the screen
   shows what the API returned. The arithmetic behind the numbers is tested in
   Go, not here.
-- `subscriptions.spec.ts` changes subscriptions on screen: a plan change now
-  (with its proration invoice) and at renewal, a change now to a yearly plan
-  (the dialog's words and the invoice the toast names), a seat decrease whose
-  credit goes partly to the balance and partly off an open invoice, a seat
-  decrease over a draft renewal (its credit waits for the draft), cancel at
-  period end, undo and cancel now, quantity and item changes against the
-  upcoming invoice, and the trial and collection controls. Each journey checks
-  the page, the toast and any invoice the change made against the API.
-- `dunning.spec.ts` opens the Resolve dialog of a payment-retry run (nothing
-  is chosen, and Resolve waits for a choice), and deletes a dunning policy
-  that has run (the page shows why it is refused). Each run is made the real
-  way: a customer with no card on file is billed.
+- `subscriptions.spec.ts` changes subscriptions on screen. A plan change at
+  renewal makes no invoice and shows as pending until it is canceled. A
+  cancel at period end shows its date until Undo clears it, and a cancel now
+  needs CANCEL typed, then reads "Ended" on the page and in the list. Each
+  journey checks the page and the toast against the API.
+- `dunning.spec.ts` opens a payment-retry run's invoice from its row and
+  closes the run by recording an offline payment there. The run is made the
+  real way: a customer with no card on file is billed, under the account's
+  retry policy.
 - `account-setup.spec.ts` sets up what an operator sells and how they
   collect. It creates a meter and a plan, then adds the plan's price for the
   meter, which applies at once while no one has subscribed. It saves a
@@ -45,9 +42,10 @@ the screen, and that the main things an operator does work end to end.
   nothing. It previews and installs a
   recipe, which creates only a meter, a plan and its prices, then installs it
   again. It adds and ends a customer's price override and checks the
-  upcoming invoice each time: each change applies from the next period. It creates and edits a dunning policy, assigns it to a customer,
-  tries to delete it and makes it the default, then puts the old default
-  back.
+  upcoming invoice each time: each change applies from the next period. It fills in the account's retry
+  policy on the Payment retries page's Policy tab, first with no policy and
+  then over the saved one. The policy is shared by every spec running at
+  once, so the browser answers its route itself.
 - `invoices.spec.ts` takes invoices through their life on screen: a one-off
   invoice from draft to finalized, through the Finalize confirmation (and
   Save & send), the Finalize confirmation's email line with Stripe connected

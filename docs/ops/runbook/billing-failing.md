@@ -62,8 +62,6 @@ After such an outage, retry the affected subscriptions
   instead of the one that is running.
 - The one exception is a subscription with no items: adding an item is how
   that failure is fixed, so it is allowed.
-- A cancel scheduled for the end of a trial still fires on a trialing
-  subscription that is failing or parked.
 - A change the 409 rule allows, such as adding an item to a subscription
   with none, clears the failure only if it changes when the subscription
   is due. If `billing_failure` is still set afterwards, run retry-billing
@@ -202,8 +200,7 @@ Read two fields of the retry response:
 `invoices_generated` is not the success test. It counts only the invoices
 built when a period closes, at the end of a billing period. It is 0 when
 the retry fired a scheduled cancel (the subscription comes back `canceled`,
-with its final invoice), ended a trial, or closed a period with nothing to
-bill.
+with its final invoice), or closed a period with nothing to bill.
 
 `hardcount_billing_failing_subscriptions` falls on the next scrape.
 

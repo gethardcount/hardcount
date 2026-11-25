@@ -181,8 +181,6 @@ const (
 	EventSubscriptionCancelCleared          = "subscription.cancel_cleared"
 	EventSubscriptionCollectionPaused       = "subscription.collection_paused"
 	EventSubscriptionCollectionResumed      = "subscription.collection_resumed"
-	EventSubscriptionTrialEnded             = "subscription.trial_ended"
-	EventSubscriptionTrialExtended          = "subscription.trial_extended"
 	EventSubscriptionThresholdCrossed       = "subscription.threshold_crossed"
 	EventCustomerEmailBounced               = "customer.email_bounced"
 	// EventCustomerEmailComplained fires when the email provider's
@@ -272,8 +270,6 @@ var KnownWebhookEventTypes = map[string]bool{
 	EventSubscriptionCancelCleared:          true,
 	EventSubscriptionCollectionPaused:       true,
 	EventSubscriptionCollectionResumed:      true,
-	EventSubscriptionTrialEnded:             true,
-	EventSubscriptionTrialExtended:          true,
 	EventSubscriptionThresholdCrossed:       true,
 	EventCustomerEmailBounced:               true,
 	EventCustomerEmailComplained:            true,

@@ -270,7 +270,7 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 
 	activeCount := 0
 	for _, s := range subs {
-		if s.Status == domain.SubscriptionActive || s.Status == domain.SubscriptionTrialing {
+		if s.Status == domain.SubscriptionActive {
 			activeCount++
 		}
 	}

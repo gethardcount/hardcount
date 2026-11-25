@@ -23,9 +23,8 @@ import type { CustomerStatus } from './customerStatus';
  *
  * Not every route fills every optional field. Get and update return
  * the whole record. The list and create answers leave out
- * `email_status`, the bounce fields, `dunning_policy_id` and
- * `stripe_customer_id`, and the list also leaves out
- * `additional_emails`.
+ * `email_status`, the bounce fields and `stripe_customer_id`, and the
+ * list also leaves out `additional_emails`.
  */
 export interface Customer {
   /** The customer's ID, `hc_cus_` and 20 characters. */
@@ -86,12 +85,6 @@ export interface Customer {
      * reason, and again after `email` changes.
      */
   email_bounce_reason?: string;
-  /**
-     * The dunning policy (the plan for retrying failed payments) this
-     * customer uses. Absent when the customer uses the account's
-     * default policy.
-     */
-  dunning_policy_id?: string;
   /**
      * The Stripe customer linked to this customer. Absent until
      * Hardcount first creates it: when you create a payment-method

@@ -47,17 +47,12 @@ const (
 	SubAuditCancelCleared             = "cancel_cleared"
 	SubAuditCollectionPaused          = "collection_paused"
 	SubAuditCollectionResumed         = "collection_resumed"
-	SubAuditTrialEnded                = "trial_ended"
-	SubAuditTrialExtended             = "trial_extended"
 	SubAuditBillingRetried            = "billing_retried"
 	SubAuditThresholdsSet             = "billing_thresholds_set"
 	SubAuditThresholdsCleared         = "billing_thresholds_cleared"
 	SubAuditItemAdded                 = "item_added"
 	SubAuditItemRemoved               = "item_removed"
 	SubAuditPendingPlanChangeCanceled = "cancel_pending_item_plan_change"
-	// SubAuditTrialEndCancel rides an AuditActionCancel row: the trial ended
-	// with a cancellation due, so the subscription was canceled free.
-	SubAuditTrialEndCancel = "trial_end_cancel"
 	// SubAuditItemPlanChanged and SubAuditItemQuantityChanged ride an
 	// AuditActionSubscriptionItemUpdated row.
 	SubAuditItemPlanChanged     = "item_plan_changed"

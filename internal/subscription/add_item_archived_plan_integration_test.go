@@ -26,8 +26,8 @@ import (
 // The handler has two add paths, and both are driven here:
 //   - an active subscription mid-period takes the atomic path
 //     (atomicAddItemWithProration → Service.AddItemTx on the handler's tx);
-//   - a trialing subscription owes no proration, so it takes the plain path
-//     (Service.AddItem, own tx).
+//   - an active subscription in the last hours of its period owes no
+//     proration, so it takes the plain path (Service.AddItem, own tx).
 //
 // Each refusal is checked against the database (items, billing intervals and
 // the item-change history are unchanged) and against the proration fakes (no
@@ -86,7 +86,10 @@ func TestAddItem_ArchivedPlan_RefusedOnBothPaths(t *testing.T) {
 	h := NewHandler(svc)
 	h.SetProrationDeps(ps, invoices)
 
-	trialPeriodEnd := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	// Six hours of this period are left at proNow: under half a day, so no
+	// day is left to prorate.
+	lastHoursStart := time.Date(2026, 5, 16, 6, 0, 0, 0, time.UTC)
+	lastHoursEnd := proNow.Add(6 * time.Hour)
 	activeSub, err := store.Create(ctx, tenantID, domain.Subscription{
 		Code: "sub-arch-active", DisplayName: "Active", CustomerID: cust.ID,
 		Status: domain.SubscriptionActive, BillingTime: domain.BillingTimeCalendar,
@@ -99,19 +102,17 @@ func TestAddItem_ArchivedPlan_RefusedOnBothPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create active sub: %v", err)
 	}
-	trialSub, err := store.Create(ctx, tenantID, domain.Subscription{
-		Code: "sub-arch-trial", DisplayName: "Trial", CustomerID: cust.ID,
-		Status: domain.SubscriptionTrialing, BillingTime: domain.BillingTimeCalendar,
-		StartedAt:                 &proPeriodStart,
-		TrialStartAt:              &proPeriodStart,
-		TrialEndAt:                &proPeriodEnd,
-		CurrentBillingPeriodStart: &proPeriodEnd,
-		CurrentBillingPeriodEnd:   &trialPeriodEnd,
-		NextBillingAt:             &trialPeriodEnd,
+	lastHoursSub, err := store.Create(ctx, tenantID, domain.Subscription{
+		Code: "sub-arch-last-hours", DisplayName: "Last hours", CustomerID: cust.ID,
+		Status: domain.SubscriptionActive, BillingTime: domain.BillingTimeAnniversary,
+		StartedAt:                 &lastHoursStart,
+		CurrentBillingPeriodStart: &lastHoursStart,
+		CurrentBillingPeriodEnd:   &lastHoursEnd,
+		NextBillingAt:             &lastHoursEnd,
 		Items:                     []domain.SubscriptionItem{{PlanID: basePlan.ID, Quantity: 1}},
 	})
 	if err != nil {
-		t.Fatalf("create trialing sub: %v", err)
+		t.Fatalf("create last-hours sub: %v", err)
 	}
 
 	countRows := func(t *testing.T, table, subID string) int {
@@ -151,7 +152,7 @@ func TestAddItem_ArchivedPlan_RefusedOnBothPaths(t *testing.T) {
 		wantInvoices int // proration invoices cut by the active-plan control
 	}{
 		{name: "active mid-period (atomic path, AddItemTx)", sub: activeSub, wantInvoices: 1},
-		{name: "trialing (plain path, AddItem)", sub: trialSub, wantInvoices: 0},
+		{name: "active, last hours of the period (plain path, AddItem)", sub: lastHoursSub, wantInvoices: 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

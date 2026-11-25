@@ -35,9 +35,8 @@ type IntervalSnapshotter interface {
 	// ListCustomerMeterCoverageEnds returns, per meter, the instants in the
 	// open window (from, to) at which the customer's OTHER subscriptions
 	// (every one but excludeSubID) stopped covering it: a billing interval
-	// of non-zero width on a plan carrying the meter ended, or a
-	// never-activated trial whose live items carry it was canceled. The
-	// usage window's floor (usageFloors) is built from them.
+	// of non-zero width on a plan carrying the meter ended. The usage
+	// window's floor (usageFloors) is built from them.
 	ListCustomerMeterCoverageEnds(ctx context.Context, tenantID, customerID, excludeSubID string, from, to time.Time) ([]domain.MeterCoverageEnd, error)
 }
 

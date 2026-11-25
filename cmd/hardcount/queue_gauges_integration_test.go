@@ -151,7 +151,6 @@ func TestBillingGauges_DueAndFailingPartition(t *testing.T) {
 			postgres.NullableTime(cancelAt))
 	}
 	later, stale, notDue := now.Add(time.Hour), due.Add(-30*24*time.Hour), now.Add(72*time.Hour)
-	earlier := due.Add(-24 * time.Hour)
 	seed("sub_g_healthy", "active", due, nil, nil, nil)
 	// Failing on every run with an error that is never saved (a lost
 	// connection, an interrupted run): it has no record, so it is "due".
@@ -162,10 +161,6 @@ func TestBillingGauges_DueAndFailingPartition(t *testing.T) {
 	// cancel: its due instant is cancel_at, not next_billing_at. A copy of
 	// the predicate that keyed on next_billing_at alone would call it due.
 	seed("sub_g_cancel_parked", "active", notDue, &due, &due, nil)
-	// A trialing row ignores cancel_at: its due instant is next_billing_at
-	// although an earlier cancel_at is set. A copy that dropped the
-	// status = 'active' test would key it on cancel_at and lose it.
-	seed("sub_g_trial_retrying", "trialing", due, &earlier, &due, &later)
 	// Decoys.
 	seed("sub_g_stale", "active", due, nil, &stale, nil)    // record for another due instant: due, not failing
 	seed("sub_g_canceled", "canceled", due, nil, &due, nil) // evidence on a canceled row: neither
@@ -192,8 +187,8 @@ func TestBillingGauges_DueAndFailingPartition(t *testing.T) {
 	}
 	retrying := gaugeValue(t, "hardcount_billing_failing_subscriptions", test("state", "retrying"))
 	parked := gaugeValue(t, "hardcount_billing_failing_subscriptions", test("state", "parked"))
-	if retrying != 2 || parked != 2 {
-		t.Errorf("failing: retrying=%v parked=%v, want 2 and 2 (one of each keyed to next_billing_at, a parked mid-period cancel, a retrying trial)", retrying, parked)
+	if retrying != 1 || parked != 2 {
+		t.Errorf("failing: retrying=%v parked=%v, want 1 and 2 (one of each keyed to next_billing_at, and a parked mid-period cancel)", retrying, parked)
 	}
 	if got := gaugeValue(t, "hardcount_billing_failing_subscriptions", map[string]string{"mode": "live", "state": "parked"}); got != 0 {
 		t.Errorf("live-mode parked = %v, want 0: the test-mode rows leaked across the livemode partition", got)

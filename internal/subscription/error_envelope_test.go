@@ -30,40 +30,8 @@ func decodeEnvelope(t *testing.T, rr *httptest.ResponseRecorder) errorEnvelope {
 	return env
 }
 
-// These handlers used to pass respond.Error its arguments shifted by one:
-// the message text landed in `code`, the field name in `message`, and a
-// made-up word ("invalid_body", "validation_error") in `type`. A client
-// switching on type or code could not recognise the error.
-func TestExtendTrial_ErrorEnvelope(t *testing.T) {
-	store := newMemStore()
-	subID, _ := seedSubWithItem(t, store, "t1", "cus_1", "plan_pro")
-	h := NewHandler(NewService(store, nil))
-
-	cases := []struct {
-		name                     string
-		body                     string
-		status                   int
-		wantType, wantCode, want string // want = param
-	}{
-		{"malformed JSON", `{not json`, http.StatusBadRequest, "invalid_request_error", "invalid_request", ""},
-		{"missing trial_end", `{}`, http.StatusUnprocessableEntity, "invalid_request_error", "validation_error", "trial_end"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			req := withTenantRoute(httptest.NewRequest(http.MethodPost, "/subscriptions/"+subID+"/extend-trial", bytes.NewBufferString(tc.body)), "t1", map[string]string{"id": subID})
-			rr := httptest.NewRecorder()
-			h.extendTrial(rr, req)
-			if rr.Code != tc.status {
-				t.Fatalf("status = %d, want %d; body=%s", rr.Code, tc.status, rr.Body.String())
-			}
-			env := decodeEnvelope(t, rr)
-			if env.Error.Type != tc.wantType || env.Error.Code != tc.wantCode || env.Error.Param != tc.want || env.Error.Message == "" {
-				t.Errorf("error = %+v, want type=%s code=%s param=%q and a message", env.Error, tc.wantType, tc.wantCode, tc.want)
-			}
-		})
-	}
-}
-
+// The multi-currency refusal puts each part of the error in its own envelope
+// field, so a client switching on type or code recognises it.
 func TestSetBillingThresholds_MultiCurrencyErrorEnvelope(t *testing.T) {
 	store := newMemStore()
 	now := time.Now().UTC()

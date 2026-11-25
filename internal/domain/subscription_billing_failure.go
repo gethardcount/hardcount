@@ -56,10 +56,10 @@ func DueInstant(sub Subscription) *time.Time {
 }
 
 // BillingDueAt reports whether sub owes work to the billing run at now: it can
-// still bill (active or trialing) and its due instant has been reached. It is
-// the Go form of what the due scans admit, before the billing-failure gate.
+// still bill (it is active) and its due instant has been reached. It is the Go
+// form of what the due scans admit, before the billing-failure gate.
 func BillingDueAt(sub Subscription, now time.Time) bool {
-	if sub.Status != SubscriptionActive && sub.Status != SubscriptionTrialing {
+	if sub.Status != SubscriptionActive {
 		return false
 	}
 	due := DueInstant(sub)
@@ -84,7 +84,7 @@ func SubscriptionDueInstantSQL(alias string) string {
 // Every term is two-valued (never NULL), so the predicate is safe under NOT.
 func SubscriptionBillingFailingSQL(alias string) string {
 	return strings.ReplaceAll(
-		`a.status IN ('active','trialing') AND a.billing_failed_for IS NOT NULL AND a.billing_failed_for IS NOT DISTINCT FROM `,
+		`a.status = 'active' AND a.billing_failed_for IS NOT NULL AND a.billing_failed_for IS NOT DISTINCT FROM `,
 		"a.", alias+".") + SubscriptionDueInstantSQL(alias)
 }
 

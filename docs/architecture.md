@@ -195,7 +195,7 @@ Under `internal/`:
 
 Five jobs take a [leader lease](#design-rules):
 
-- **`billing`**, every hour (5 minutes when `APP_ENV=local`). Runs for live mode, then test mode. Retries stuck charges and tax. Charges invoices waiting for payment. Checks billing thresholds (spend or usage) and ends trials. Closes billing periods into invoices. Resumes paused collection and expires credits.
+- **`billing`**, every hour (5 minutes when `APP_ENV=local`). Runs for live mode, then test mode. Retries stuck charges and tax. Charges invoices waiting for payment. Checks billing thresholds (spend or usage). Closes billing periods into invoices. Resumes paused collection and expires credits.
 - **`dunning`**, at the same interval. Runs the payment retries that are due, queues their emails and takes final actions.
 - **`webhook_outbox`**, every 2 seconds. Sends queued webhook events.
 - **`email_outbox`**, every 5 seconds. Sends queued emails.

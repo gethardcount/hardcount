@@ -59,8 +59,8 @@ func TestListDueRuns_InFlightGate(t *testing.T) {
 	}
 
 	dstore := dunning.NewPostgresStore(db)
-	policy, err := dstore.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+	_, err = dstore.PutPolicy(ctx, tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3, 3, 3},
 		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
@@ -85,7 +85,7 @@ func TestListDueRuns_InFlightGate(t *testing.T) {
 			t.Fatalf("create invoice %s: %v", num, err)
 		}
 		run, err := dstore.CreateRun(ctx, tenantID, domain.InvoiceDunningRun{
-			InvoiceID: inv.ID, CustomerID: cust.ID, PolicyID: policy.ID,
+			InvoiceID: inv.ID, CustomerID: cust.ID,
 			State: domain.DunningActive, Reason: "payment_failed",
 		})
 		if err != nil {

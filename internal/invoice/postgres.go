@@ -4259,7 +4259,7 @@ func (s *PostgresStore) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, 
 // id for invoices that share a created_at, so a
 // caller allocating a fixed total across the set has a deterministic order for
 // residual-cent assignment. Returns ErrNotFound when nothing funded the period
-// (trial / pure in_arrears) so callers keep their existing no-op behavior.
+// (pure in_arrears) so callers keep their existing no-op behavior.
 func (s *PostgresStore) FindFundingInvoicesForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) ([]domain.Invoice, error) {
 	if subscriptionID == "" {
 		return nil, errs.ErrNotFound

@@ -1,7 +1,7 @@
 # ADR-123: New accounts start with a default dunning policy that retries three times and changes nothing
 
 **Date:** 2026-10-17
-**Status:** Accepted; amended 2026-10-26 by [ADR-130](130-usage-prices-belong-to-the-plan.md): recipes no longer create a dunning policy ([amendment](#amendment-2026-10-26-recipes-create-no-dunning-policy)).
+**Status:** Accepted; amended 2026-10-26 by [ADR-130](130-usage-prices-belong-to-the-plan.md): recipes no longer create a dunning policy ([amendment](#amendment-2026-10-26-recipes-create-no-dunning-policy)).; amended 2026-11-25: the seeded policy is the account's one policy, and nothing takes its place
 
 **Amended 2026-10-26 ([ADR-130](130-usage-prices-belong-to-the-plan.md), built in #1389).** A recipe no longer creates a dunning policy, so only an operator's first enabled policy takes over the seeded default. Where this ADR says "by hand or from a recipe", read "by hand". The seeded default and its takeover rule stay.
 
@@ -178,3 +178,12 @@ and its default as they were. So:
   this ADR), ADR-112 (two final actions), ADR-116 (the card-less collector)
 - Migration 0180 (`dunning_policies.seeded`)
 - Issue #1152
+
+## Amendment 2026-11-25: one policy per mode
+
+An account now has at most one dunning policy per mode (ADR-036,
+amendment of 2026-11-25). A new account still gets one in each mode, with
+the same schedule and final actions, but it has no name, is not marked
+`seeded`, and there is no default to hand over: the takeover rule and the
+`seeded` column are gone. An operator changes the policy with
+`PUT /v1/dunning/policy` or on the Payment retries page's Policy tab.

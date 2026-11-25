@@ -88,17 +88,11 @@ func (s *PostgresStore) ListItemIntervalsTx(ctx context.Context, tx *sql.Tx, sub
 // subscription whose period was backdated to midnight would otherwise bill
 // the usage another subscription already billed that day.
 //
-// Two sources, with a plan's meters every meter it has ever priced, as in
-// FindMeterConflicts:
-//   - billing_intervals of the other subscriptions that ended in the window,
-//     zero-width rows left out (they covered nothing). This covers an
-//     immediate or scheduled cancel, an item removal and a plan swap away.
-//   - a never-activated trial that was canceled in the window, on its live
-//     items' plans. A trial writes no billing_intervals, and its usage is
-//     free, so its cancel instant is where its coverage ended. A row with
-//     no trial end covered nothing: a subscription canceled before it ever
-//     started (a draft in earlier releases, or canceled by migration 00235)
-//     has no start and no period.
+// The source is billing_intervals of the other subscriptions that ended in
+// the window, with a plan's meters every meter it has ever priced, as in
+// FindMeterConflicts. Zero-width rows are left out (they covered nothing).
+// This covers an immediate or scheduled cancel, an item removal and a plan
+// swap away.
 func (s *PostgresStore) ListCustomerMeterCoverageEnds(ctx context.Context, tenantID, customerID, excludeSubID string, from, to time.Time) ([]domain.MeterCoverageEnd, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -114,19 +108,7 @@ func (s *PostgresStore) ListCustomerMeterCoverageEnds(ctx context.Context, tenan
 		WHERE sub.customer_id = $1
 		  AND sub.id <> $2
 		  AND bi.ends_at > bi.starts_at
-		  AND bi.ends_at > $3 AND bi.ends_at < $4
-		UNION ALL
-		SELECT m.meter_id, sub.canceled_at
-		FROM subscriptions sub
-		JOIN subscription_items si
-		  ON si.subscription_id = sub.id AND si.deleted_at IS NULL
-		JOIN (SELECT DISTINCT plan_id, meter_id FROM plan_prices) m ON m.plan_id = si.plan_id
-		WHERE sub.customer_id = $1
-		  AND sub.id <> $2
-		  AND sub.status = 'canceled'
-		  AND sub.activated_at IS NULL
-		  AND sub.trial_end_at IS NOT NULL
-		  AND sub.canceled_at > $3 AND sub.canceled_at < $4`,
+		  AND bi.ends_at > $3 AND bi.ends_at < $4`,
 		customerID, excludeSubID, from, to)
 	if err != nil {
 		return nil, err

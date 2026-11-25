@@ -15,14 +15,12 @@ import (
 )
 
 type memStore struct {
-	// Multi-policy-per-tenant memStore. Tests can mutate policies map
-	// directly or via the upsert/set-default methods. defaultID points
-	// at the is_default=true row (exactly one per fixture).
-	policies  map[string]domain.DunningPolicy
-	defaultID string
-	runs      map[string]domain.InvoiceDunningRun
-	events    []domain.InvoiceDunningEvent
-	hookErrs  []error // errors returned by UpdateRunIfActive `then` hooks (non-vetoing)
+	// policy is the account's one policy; nil means the mode has none.
+	// Tests change it in place.
+	policy   *domain.DunningPolicy
+	runs     map[string]domain.InvoiceDunningRun
+	events   []domain.InvoiceDunningEvent
+	hookErrs []error // errors returned by UpdateRunIfActive `then` hooks (non-vetoing)
 	// started records the dunning.started payloads StartRun enqueued (the
 	// PostgresStore's in-tx outbox row).
 	started []map[string]any
@@ -41,15 +39,14 @@ type memStore struct {
 
 func newMemStore() *memStore {
 	policy := domain.DunningPolicy{
-		ID: "dpol_1", TenantID: "t1", Name: "Default",
-		Enabled: true, IsDefault: true,
+		ID: "dpol_1", TenantID: "t1",
+		Enabled:                 true,
 		RetryDays:               []int{3, 3, 5},
 		FinalSubscriptionAction: domain.SubActionNone,
 		FinalInvoiceAction:      domain.InvActionNone,
 	}
 	return &memStore{
-		policies:     map[string]domain.DunningPolicy{"dpol_1": policy},
-		defaultID:    "dpol_1",
+		policy:       &policy,
 		runs:         make(map[string]domain.InvoiceDunningRun),
 		awaiting:     make(map[string]string),
 		paymentMoved: make(map[string]bool),
@@ -86,11 +83,10 @@ func (m *memStore) TakeAwaitedRetryTx(_ context.Context, _ *sql.Tx, invoiceID, p
 	for id, r := range m.runs {
 		if r.InvoiceID == invoiceID && r.State == domain.DunningActive && m.awaiting[id] == paymentIntentID {
 			delete(m.awaiting, id)
-			p, ok := m.policies[r.PolicyID]
-			if !ok {
+			if m.policy == nil {
 				return domain.InvoiceDunningRun{}, domain.DunningPolicy{}, false, errs.ErrNotFound
 			}
-			return r, p, true, nil
+			return r, *m.policy, true, nil
 		}
 	}
 	return domain.InvoiceDunningRun{}, domain.DunningPolicy{}, false, nil
@@ -115,91 +111,27 @@ func (m *memStore) RecordRetryFailureTx(_ context.Context, _ *sql.Tx, run domain
 	return nil
 }
 
-func (m *memStore) GetPolicyByID(_ context.Context, _ string, id string) (domain.DunningPolicy, error) {
-	p, ok := m.policies[id]
-	if !ok {
+func (m *memStore) GetPolicy(_ context.Context, _ string) (domain.DunningPolicy, error) {
+	if m.policy == nil {
 		return domain.DunningPolicy{}, errs.ErrNotFound
 	}
-	return p, nil
+	return *m.policy, nil
 }
 
-func (m *memStore) GetDefaultPolicy(_ context.Context, _ string) (domain.DunningPolicy, error) {
-	if m.defaultID == "" {
-		return domain.DunningPolicy{}, errs.ErrNotFound
-	}
-	return m.policies[m.defaultID], nil
-}
-
-func (m *memStore) ListPolicies(_ context.Context, _ string) ([]domain.DunningPolicy, error) {
-	out := make([]domain.DunningPolicy, 0, len(m.policies))
-	// Default first, then insertion order (map iteration nondeterministic
-	// for the non-default rows — tests that need ordering set IDs).
-	if m.defaultID != "" {
-		out = append(out, m.policies[m.defaultID])
-	}
-	for id, p := range m.policies {
-		if id == m.defaultID {
-			continue
-		}
-		out = append(out, p)
-	}
-	return out, nil
-}
-
-func (m *memStore) DeletePolicy(_ context.Context, _, id string) error {
-	if _, ok := m.policies[id]; !ok {
-		return errs.ErrNotFound
-	}
-	if id == m.defaultID {
-		return errs.InvalidState("cannot delete default policy")
-	}
-	delete(m.policies, id)
-	return nil
-}
-
-func (m *memStore) SetDefaultPolicy(_ context.Context, _, id string) error {
-	p, ok := m.policies[id]
-	if !ok {
-		return errs.ErrNotFound
-	}
-	if cur, ok := m.policies[m.defaultID]; ok {
-		cur.IsDefault = false
-		m.policies[m.defaultID] = cur
-	}
-	p.IsDefault = true
-	m.policies[id] = p
-	m.defaultID = id
-	return nil
-}
-
-func (m *memStore) CountCustomersOnPolicy(_ context.Context, _, _ string) (int, error) {
-	// memStore has no customer table; tests that want a specific
-	// count override this via a wrapper if needed.
-	return 0, nil
-}
-
-func (m *memStore) UpsertPolicy(_ context.Context, tenantID string, p domain.DunningPolicy) (domain.DunningPolicy, error) {
-	if p.ID == "" {
-		p.ID = fmt.Sprintf("dpol_%d", len(m.policies)+1)
-	}
+func (m *memStore) PutPolicy(_ context.Context, tenantID string, p domain.DunningPolicy) (domain.DunningPolicy, error) {
+	p.ID = "dpol_1"
 	p.TenantID = tenantID
-	if p.IsDefault {
-		// Caller can't set default via Upsert (matches postgres behaviour).
-		p.IsDefault = m.policies[p.ID].IsDefault
-	}
-	m.policies[p.ID] = p
+	m.policy = &p
 	return p, nil
 }
 
-// SeedDefaultPoliciesTx records the policy it was handed (one mode only —
+// SeedPoliciesTx records the policy it was handed (one mode only —
 // the in-memory store has no modes) so a unit test can check what the
 // service passed down; the per-mode writes are pinned against Postgres.
-func (m *memStore) SeedDefaultPoliciesTx(_ context.Context, _ *sql.Tx, tenantID string, p domain.DunningPolicy, onSeeded func(domain.DunningPolicy, bool) error) error {
-	p.ID = fmt.Sprintf("dpol_%d", len(m.policies)+1)
+func (m *memStore) SeedPoliciesTx(_ context.Context, _ *sql.Tx, tenantID string, p domain.DunningPolicy, onSeeded func(domain.DunningPolicy, bool) error) error {
+	p.ID = "dpol_1"
 	p.TenantID = tenantID
-	p.IsDefault = true
-	p.Seeded = true
-	m.policies[p.ID] = p
+	m.policy = &p
 	if onSeeded != nil {
 		return onSeeded(p, false)
 	}
@@ -440,9 +372,6 @@ func TestStartDunning(t *testing.T) {
 		if run.NextActionAt == nil {
 			t.Error("next_action_at should be set from retry schedule")
 		}
-		if run.PolicyID != "dpol_1" {
-			t.Errorf("policy_id: got %q, want dpol_1", run.PolicyID)
-		}
 	})
 
 	t.Run("idempotent — returns existing", func(t *testing.T) {
@@ -476,7 +405,7 @@ func TestStartDunning(t *testing.T) {
 // after the moment the failure is recorded, so an invoice declined days after
 // its issue still gets its grace.
 func TestStartDunning_FirstRetryAnchor(t *testing.T) {
-	grace := 3 * 24 * time.Hour // newMemStore's default policy
+	grace := 3 * 24 * time.Hour // newMemStore's policy
 	now := time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)
 	svc := NewService(newMemStore(), &noopRetrier{}, clock.NewFake(now))
 	run, err := svc.StartDunning(context.Background(), "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
@@ -493,9 +422,9 @@ func TestStartDunning_FirstRetryAnchor(t *testing.T) {
 
 func TestStartDunning_DisabledPolicy(t *testing.T) {
 	store := newMemStore()
-	p := store.policies[store.defaultID]
+	p := *store.policy
 	p.Enabled = false
-	store.policies[store.defaultID] = p
+	store.policy = &p
 	svc := NewService(store, &noopRetrier{}, nil)
 
 	_, err := svc.StartDunning(context.Background(), "t1", "inv_2", "cus_1", domain.DunningCausePaymentFailed)
@@ -505,7 +434,7 @@ func TestStartDunning_DisabledPolicy(t *testing.T) {
 }
 
 // TestStartDunning_NoPolicyConfigured locks the resilience seam (Finding 2):
-// a tenant with NO effective/default policy must yield a DELIBERATE-SKIP
+// a tenant with no policy in the mode must yield a DELIBERATE-SKIP
 // ErrInvalidState (the same class as disabled) — NOT a raw ErrNotFound — so the
 // money-path enrollment sweep swallows it instead of failing on it.
 // Mutation guard: before the fix this returned a fmt.Errorf wrapping ErrNotFound
@@ -513,7 +442,7 @@ func TestStartDunning_DisabledPolicy(t *testing.T) {
 // sweep error.
 func TestStartDunning_NoPolicyConfigured(t *testing.T) {
 	store := newMemStore()
-	store.defaultID = "" // no default → GetDefaultPolicy returns ErrNotFound
+	store.policy = nil // no policy → GetPolicy returns ErrNotFound
 	svc := NewService(store, &noopRetrier{}, nil)
 
 	_, err := svc.StartDunning(context.Background(), "t1", "inv_3", "cus_1", domain.DunningCausePaymentFailed)
@@ -697,13 +626,12 @@ func (c *capturingUncollect) MarkUncollectible(_ context.Context, _, invoiceID s
 	return nil
 }
 
-func TestUpsertPolicy(t *testing.T) {
+func TestPutPolicy(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store, &noopRetrier{}, nil)
 	ctx := context.Background()
 
-	policy, err := svc.UpsertPolicy(ctx, "t1", domain.DunningPolicy{
-		Name:      "Custom",
+	policy, err := svc.PutPolicy(ctx, "t1", domain.DunningPolicy{
 		Enabled:   true,
 		RetryDays: []int{3, 3, 5},
 	})
@@ -728,17 +656,17 @@ func TestUpsertPolicy(t *testing.T) {
 	}
 
 	// No schedule is no policy: there is no default schedule to fall back to.
-	if _, err := svc.UpsertPolicy(ctx, "t1", domain.DunningPolicy{Name: "Bad", Enabled: true}); err == nil {
+	if _, err := svc.PutPolicy(ctx, "t1", domain.DunningPolicy{Enabled: true}); err == nil {
 		t.Error("expected an error for a policy with no retry_days")
 	}
 }
 
-// TestUpsertPolicy_RetryDaysBounds: every entry is a whole number of days
+// TestPutPolicy_RetryDaysBounds: every entry is a whole number of days
 // from 1 to 30 and there are 1 to 15 of them, on every writer. A wait the
 // retry path could not schedule must be refused at save (the FLOW TC5 "3d"
 // livelock, 2026-07-18, was an entry that saved fine and wedged the run at
 // retry time).
-func TestUpsertPolicy_RetryDaysBounds(t *testing.T) {
+func TestPutPolicy_RetryDaysBounds(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store, &noopRetrier{}, nil)
 	ctx := context.Background()
@@ -762,8 +690,8 @@ func TestUpsertPolicy_RetryDaysBounds(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			for writer, upsert := range map[string]func() error{
-				"UpsertPolicy": func() error {
-					_, err := svc.UpsertPolicy(ctx, "t1", domain.DunningPolicy{Name: "P", Enabled: true, RetryDays: tc.days})
+				"PutPolicy": func() error {
+					_, err := svc.PutPolicy(ctx, "t1", domain.DunningPolicy{Enabled: true, RetryDays: tc.days})
 					return err
 				},
 			} {
@@ -965,20 +893,13 @@ func TestStartDunning_CauseStamped(t *testing.T) {
 // dun", so both must be the same DELIBERATE-SKIP class the enrollment sweeps
 // swallow — never a raw error that fails a sweep.
 //
-// Why this exists (FLOW TC5 walk, 2026-08-04): POST /v1/dunning/policies
-// decodes straight into the domain struct, so omitting `enabled` creates a
-// DISABLED policy — and the first policy a tenant creates is auto-promoted to
-// default. An API caller therefore ends up with a policy that is
-// simultaneously the tenant default and inert: no error at create, no dunning
-// run, and — before the fix this test guards — no log line either, while the
-// no-policy path next door logged a WARN. The dashboard never hits it (its
-// form sends enabled:true) and the recipe installer sets Enabled explicitly,
-// so this is the API/SDK-caller trap specifically.
+// A policy turned off starts no run and raises no error, so the log line this
+// skip writes is its only trace, as the no-policy path next door logs a WARN.
 func TestStartDunning_DisabledPolicy_SkipsSameClassAsNoPolicy(t *testing.T) {
 	store := newMemStore()
-	p := store.policies["dpol_1"]
-	p.Enabled = false // the shape POST /v1/dunning/policies produces without `enabled`
-	store.policies["dpol_1"] = p
+	p := *store.policy
+	p.Enabled = false
+	store.policy = &p
 	svc := NewService(store, &noopRetrier{}, nil)
 
 	_, err := svc.StartDunning(context.Background(), "t1", "inv_disabled", "cus_1", domain.DunningCausePaymentFailed)

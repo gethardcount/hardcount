@@ -74,7 +74,6 @@ func goldenSubscription() Subscription {
 		Status:                      SubscriptionActive,
 		BillingTime:                 BillingTimeCalendar,
 		StartedAt:                   at(-30 * 24 * time.Hour),
-		ActivatedAt:                 at(-30 * 24 * time.Hour),
 		CurrentBillingPeriodStart:   at(0),
 		CurrentBillingPeriodEnd:     at(31 * 24 * time.Hour),
 		CurrentBillingPeriodDisplay: "read-time only",
@@ -130,7 +129,6 @@ func goldenDunningRun() InvoiceDunningRun {
 		TenantID:         "hc_ten_golden",
 		InvoiceID:        "hc_inv_golden",
 		CustomerID:       "hc_cus_golden",
-		PolicyID:         "hc_dpol_golden",
 		State:            DunningEscalated,
 		Reason:           "payment_failed",
 		AttemptCount:     4,
@@ -201,11 +199,7 @@ func goldenWebhookData(t *testing.T, eventType string) map[string]any {
 	case EventSubscriptionCollectionPaused:
 		return SubscriptionWebhookData(goldenSubscription(), map[string]any{"triggered_by": "operator"})
 	case EventSubscriptionCanceled:
-		return SubscriptionWebhookData(goldenSubscription(), map[string]any{"canceled_by": "schedule", "reason": "trial_end_cancel"})
-	case EventSubscriptionTrialEnded:
-		return SubscriptionWebhookData(goldenSubscription(), map[string]any{"ended_at": goldenAt, "triggered_by": "schedule"})
-	case EventSubscriptionTrialExtended:
-		return SubscriptionWebhookData(goldenSubscription(), map[string]any{"triggered_by": "operator"})
+		return SubscriptionWebhookData(goldenSubscription(), map[string]any{"canceled_by": "schedule"})
 	case EventSubscriptionCollectionResumed:
 		return SubscriptionWebhookData(goldenSubscription(), map[string]any{"triggered_by": "schedule", "resumed_at": goldenAt})
 	case EventSubscriptionItemAdded, EventSubscriptionItemUpdated, EventSubscriptionItemRemoved,

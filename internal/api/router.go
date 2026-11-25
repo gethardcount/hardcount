@@ -176,7 +176,7 @@ func (s *Server) routes() chi.Router {
 		HashPassword:  user.HashPassword,
 		CreateUserTx:  user.NewPostgresStore(s.db).CreateInTx,
 		CreateKeyTx:   s.authSvc.CreateKeyTx,
-		SeedDunningTx: s.DunningSvc.SeedDefaultPoliciesTx,
+		SeedDunningTx: s.DunningSvc.SeedPoliciesTx,
 		Audit:         s.auditLogger,
 	}
 	audit.MustWired(&bootstrapDeps)

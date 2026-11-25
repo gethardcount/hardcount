@@ -16,7 +16,7 @@ import (
 // snapshot column persists through the INSERT and scans back into the struct.
 // The in-memory store echoes any field set on the struct, so only a REAL
 // round-trip catches a column dropped from the INSERT or a scanInvDest ordinal
-// that drifted out of sync with invCols (the Finding-1 activated_at trap).
+// that drifted out of sync with invCols.
 //
 // Mutation-verify: drop `billing_timezone` from the INSERT column list (or its
 // $N value) — Get returns an empty BillingTimezone and this fails.

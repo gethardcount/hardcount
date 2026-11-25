@@ -107,7 +107,7 @@ export function releaseSummary(r: HeldUsageReleaseResult): { title: string; desc
     parts.push(`${r.pending_threshold_invoice.toLocaleString('en-US')} fall in time this period's spend-threshold invoice covered, and that invoice is not paid yet. The period's invoice charges them only if the spend-threshold invoice is voided before the period's invoice is built. A written-off invoice can still be voided.`)
   }
   if (r.outside_open_period > 0) {
-    parts.push(`${r.outside_open_period.toLocaleString('en-US')} fall in time no subscription bills (before it starts, in a free trial, or after it ends) or in time already invoiced. Bill them with a one-off invoice if needed.`)
+    parts.push(`${r.outside_open_period.toLocaleString('en-US')} fall in time no subscription bills (before it starts or after it ends) or in time already invoiced. Bill them with a one-off invoice if needed.`)
   }
   if (r.deduplicated > 0) parts.push(`${r.deduplicated.toLocaleString('en-US')} were already recorded and were not added again.`)
   if (r.more_to_release > 0) parts.push(`${rowsWord(r.more_to_release)} more are ready. One release takes at most 5,000 rows; release again to record them.`)

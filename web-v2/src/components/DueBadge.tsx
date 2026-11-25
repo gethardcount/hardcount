@@ -11,16 +11,11 @@ interface DueBadgeProps {
   now: EffectiveNow | undefined
 }
 
-// DueBadge renders an invoice's due-date status as the operator-
-// facing terms the industry uses: "Past due", "Due today", "Due in N
-// days". Unlike the generic ExpiryBadge, this component is scoped to
-// invoice semantics — invoices don't expire, they go past-due.
-//
-// Stripe / Lago / Orb / Recurly / Chargebee all use "Past due". The
-// previous implementation reused ExpiryBadge here and rendered
-// "Expired", which suggests terminal state and confused operators
-// looking at an Open invoice that's still actionable (collect, void,
-// credit, email all remain valid past the due date).
+// DueBadge renders an invoice's due-date status in the operator-facing
+// terms the industry uses (Stripe, Lago, Orb, Recurly, Chargebee): "Past
+// due", "Due today", "Due in N days". An invoice does not expire, it goes
+// past due: "Expired" would suggest a terminal state, while collect, void,
+// credit and email all remain valid on an open invoice past its due date.
 export function DueBadge({ dueAt, warningDays = 3, className, now }: DueBadgeProps) {
   if (!dueAt || now === undefined) return null
 

@@ -1,7 +1,7 @@
 // One status vocabulary: each state has one label and one tone everywhere.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { dunningRunStatus, genericStatus, humanizeStatus, invoicePaymentChip, invoiceStatus, sentEmailStatus, subscriptionFlags, subscriptionStatus, trialBadgeEndsAt, webhookStatus } from '../src/lib/statusLabels.ts'
+import { dunningRunStatus, genericStatus, humanizeStatus, invoicePaymentChip, invoiceStatus, sentEmailStatus, subscriptionFlags, subscriptionStatus, webhookStatus } from '../src/lib/statusLabels.ts'
 
 const now = Date.parse('2026-10-16T12:00:00Z')
 
@@ -38,7 +38,7 @@ test('subscriptionStatus and flags: paused collection and scheduled cancel are v
   assert.deepEqual(subscriptionStatus({ status: 'active' }), { label: 'Active', tone: 'success' })
   assert.deepEqual(subscriptionStatus({ status: 'canceled' }), { label: 'Canceled', tone: 'neutral' })
   assert.deepEqual(subscriptionFlags({ status: 'active', pause_collection: { behavior: 'keep_as_draft' } }, 0), [{ label: 'Collection paused', tone: 'warning' }])
-  assert.deepEqual(subscriptionFlags({ status: 'trialing', cancel_at_period_end: true }, 0), [{ label: 'Cancel scheduled', tone: 'warning' }])
+  assert.deepEqual(subscriptionFlags({ status: 'active', cancel_at_period_end: true }, 0), [{ label: 'Cancel scheduled', tone: 'warning' }])
   // A canceled subscription carries no live flags.
   assert.deepEqual(subscriptionFlags({ status: 'canceled', pause_collection: {} }, 0), [])
 })
@@ -69,17 +69,6 @@ test('invoicePaymentChip never repeats what the invoice badge already says', () 
   // A payment state the badge does not carry still shows.
   assert.deepEqual(invoicePaymentChip({ status: 'finalized', payment_status: 'pending' }), { label: 'Pending', tone: 'warning' })
   assert.deepEqual(invoicePaymentChip({ status: 'finalized', payment_status: 'unknown' }), { label: 'Unknown', tone: 'neutral' })
-})
-
-test('trialBadgeEndsAt: only a subscription still in its trial shows a trial badge', () => {
-  const end = '2026-10-01T00:00:00Z'
-  assert.equal(trialBadgeEndsAt({ status: 'trialing', trial_end_at: end }), end)
-  // A trial that ended (or was ended now) leaves trial_end_at behind: an
-  // active, paying subscription read a red "Expired" badge (sweep E5).
-  for (const status of ['active', 'canceled', 'paused']) {
-    assert.equal(trialBadgeEndsAt({ status, trial_end_at: end }), null, status)
-  }
-  assert.equal(trialBadgeEndsAt({ status: 'trialing' }), null)
 })
 
 // A dunning run being chased is amber, never the green "active" means for a

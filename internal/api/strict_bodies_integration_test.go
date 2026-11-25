@@ -226,8 +226,8 @@ func TestStrictBodies_BodylessRoutesRefuseABody(t *testing.T) {
 
 // TestStrictBodies_PatchRefusesFieldsItCannotChange: every PATCH route names
 // the field a caller tried to change but cannot, with 422, and changes
-// nothing. Before, the customer, dunning policy and webhook endpoint PATCH
-// routes answered 200 and dropped the field; the Stripe webhook-secret PATCH
+// nothing. Before, the customer and webhook endpoint PATCH routes answered
+// 200 and dropped the field; the Stripe webhook-secret PATCH
 // answered whatever the rest of the request deserved.
 func TestStrictBodies_PatchRefusesFieldsItCannotChange(t *testing.T) {
 	r := newStrictRig(t)
@@ -259,10 +259,6 @@ func TestStrictBodies_PatchRefusesFieldsItCannotChange(t *testing.T) {
 	})
 	subID := flowStr(sub, "id")
 	itemID := flowStr(flowList(sub, "items")[0], "id")
-	policy := flowStr(create("POST", "/v1/dunning/policies", map[string]any{
-		"name": "Strict policy", "enabled": true, "retry_days": []int{3, 4},
-		"final_subscription_action": "pause", "final_invoice_action": "none",
-	}), "id")
 	hook := flowStr(create("POST", "/v1/webhook-endpoints/endpoints", map[string]any{
 		"url": "http://localhost:9001/strict-bodies",
 	})["endpoint"].(map[string]any), "id")
@@ -278,8 +274,6 @@ func TestStrictBodies_PatchRefusesFieldsItCannotChange(t *testing.T) {
 		// encoding/json alone matches a key without regard to case.
 		{"/v1/customers/" + cus, "DISPLAY_NAME", "Renamed", "/v1/customers/" + cus},
 		{"/v1/customers/" + cus, "Email", "x@strict-bodies.test", "/v1/customers/" + cus},
-		{"/v1/dunning/policies/" + policy, "is_default", true, "/v1/dunning/policies/" + policy},
-		{"/v1/dunning/policies/" + policy, "id", "hc_dpol_other", "/v1/dunning/policies/" + policy},
 		{"/v1/meters/" + meter, "event_name", "strict_renamed", "/v1/meters/" + meter},
 		{"/v1/plans/" + planID, "currency", "EUR", "/v1/plans/" + planID},
 		{"/v1/plans/" + planID + "/prices/" + priceID, "meter_id", "hc_mtr_other", "/v1/plans/" + planID},

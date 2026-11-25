@@ -72,10 +72,10 @@ func (e *capturingEscalationEmail) SendDunningEscalationTx(ctx context.Context, 
 }
 
 func twoAxisPolicy(store *memStore, sub domain.DunningSubscriptionAction, inv domain.DunningInvoiceAction) {
-	p := store.policies[store.defaultID]
+	p := *store.policy
 	p.FinalSubscriptionAction = sub
 	p.FinalInvoiceAction = inv
-	store.policies[store.defaultID] = p
+	store.policy = &p
 }
 
 func makeDue(store *memStore, runID string) {
@@ -119,7 +119,7 @@ func TestExhaust_CancelAndWriteOff_BothApply(t *testing.T) {
 
 // TestExhaust_PartialFailure_ReattemptSkipsTheDoneHalf is the convergence
 // guarantee. Both subscription movers refuse an already-terminal sub
-// (the cancel's compare-and-set matches only trialing/active), so without the
+// (the cancel's compare-and-set matches only an active row), so without the
 // skip-if-done read a re-attempt after a partial failure would fail forever
 // on the half that already succeeded and never reach the half that did not.
 //

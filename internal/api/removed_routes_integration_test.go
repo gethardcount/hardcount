@@ -14,15 +14,16 @@ import (
 	"github.com/gethardcount/hardcount/internal/webhook"
 )
 
-// TestRemovedRoutes_AnswerNotFound pins the operations removed after v0.8.2
-// (simplification audit B2). Each one had a kept operation that does
-// the same job, so it was removed rather than kept as a second way in.
+// TestRemovedRoutes_AnswerNotFound pins removed operations. Most have a kept
+// operation that does the same job (simplification audit B2), so the router
+// serves only that one.
 //
 // Each case calls the removed operation with ids that exist, so a handler
 // that is still mounted would answer it, and checks that the router answers
 // 404 itself: code route_not_found, not a handler's not_found.
-// Each case also calls the kept replacement with the same ids and expects it
-// to answer, so a router that refuses everything cannot pass.
+// Each case also calls a kept operation with the same ids, the replacement
+// where there is one, and expects it to answer, so a router that refuses
+// everything cannot pass.
 func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
@@ -55,9 +56,10 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 		"billing_time": "anniversary",
 	}).want(t, 201, "create subscription").body, "id")
 	// A dunning policy, so finalizing an invoice with no card opens a run.
-	call("POST", "/v1/dunning/policies", map[string]any{
-		"name": "Removed routes policy", "enabled": true, "retry_days": []int{3, 3},
-	}).want(t, 201, "create dunning policy")
+	call("PUT", "/v1/dunning/policy", map[string]any{
+		"final_subscription_action": "pause", "final_invoice_action": "none",
+		"enabled": true, "retry_days": []int{3, 3},
+	}).want(t, 200, "create dunning policy")
 	dunnedID := flowStr(call("POST", "/v1/invoices", map[string]any{
 		"customer_id": customerID,
 		"line_items":  []map[string]any{{"description": "Dunned service", "quantity": 1, "unit_amount_cents": 4200}},
@@ -159,6 +161,52 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 			body:       map[string]any{"resolution": "invoice_voided"},
 			keptMethod: "POST", kept: "/v1/invoices/" + dunnedID + "/void",
 		},
+		// An account has one dunning policy per mode.
+		{
+			name:   "dunning policies list",
+			method: "GET", path: "/v1/dunning/policies",
+			keptMethod: "GET", kept: "/v1/dunning/policy",
+		},
+		{
+			name:   "dunning policy create",
+			method: "POST", path: "/v1/dunning/policies",
+			body:       map[string]any{"name": "Second", "enabled": true, "retry_days": []int{3}},
+			keptMethod: "GET", kept: "/v1/dunning/policy",
+		},
+		{
+			name:   "dunning policy by id",
+			method: "GET", path: "/v1/dunning/policies/hc_dpol_x",
+			keptMethod: "GET", kept: "/v1/dunning/policy",
+		},
+		{
+			name:   "dunning policy patch",
+			method: "PATCH", path: "/v1/dunning/policies/hc_dpol_x",
+			body:       map[string]any{"enabled": false},
+			keptMethod: "GET", kept: "/v1/dunning/policy",
+		},
+		{
+			name:   "dunning policy delete",
+			method: "DELETE", path: "/v1/dunning/policies/hc_dpol_x",
+			keptMethod: "GET", kept: "/v1/dunning/policy",
+		},
+		{
+			name:   "dunning policy set-default",
+			method: "POST", path: "/v1/dunning/policies/hc_dpol_x/set-default",
+			keptMethod: "GET", kept: "/v1/dunning/policy",
+		},
+		// A subscription bills from its creation, so nothing replaces the
+		// trial operations. The kept call reads the subscription they name.
+		{
+			name:   "subscription end trial",
+			method: "POST", path: "/v1/subscriptions/" + subID + "/end-trial",
+			keptMethod: "GET", kept: "/v1/subscriptions/" + subID,
+		},
+		{
+			name:   "subscription extend trial",
+			method: "POST", path: "/v1/subscriptions/" + subID + "/extend-trial",
+			body:       map[string]any{"trial_end": "2026-12-01T00:00:00Z"},
+			keptMethod: "GET", kept: "/v1/subscriptions/" + subID,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -178,6 +226,13 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 				t.Errorf("kept %s %s = %d %s, want 2xx", tc.keptMethod, tc.kept, kept.status, kept.raw)
 			}
 		})
+	}
+
+	// A customer is no longer assigned a dunning policy: the field is one the
+	// customer update does not take.
+	assign := call("PATCH", "/v1/customers/"+customerID, map[string]any{"dunning_policy_id": "hc_dpol_x"})
+	if assign.status != 422 || flowStr(assign.body, "error", "param") != "dunning_policy_id" {
+		t.Errorf("PATCH customer with dunning_policy_id = %d %s, want 422 naming dunning_policy_id", assign.status, assign.raw)
 	}
 }
 

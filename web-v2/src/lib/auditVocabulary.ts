@@ -73,7 +73,6 @@ export function describeAction(entry: AuditEntry): string {
       }
       if (entry.resource_type === 'payment_method' && metaAction === 'default_changed') return `Set ${label || 'card'} as default`
       if (entry.resource_type === 'subscription' && metaAction === 'cancel_cleared') return `Cleared scheduled cancellation${label ? ` on ${label}` : ''}`
-      if (entry.resource_type === 'subscription' && metaAction === 'trial_ended') return `Trial ended${label ? ` on ${label}` : ''}`
       if (entry.resource_type === 'subscription' && metaAction === 'item_added') return `Added item${label ? ` to ${label}` : ''}`
       if (entry.resource_type === 'subscription' && metaAction === 'item_removed') return `Removed item${label ? ` from ${label}` : ''}`
       if (entry.resource_type === 'setting' && metaAction === 'settings_updated') {
@@ -81,14 +80,12 @@ export function describeAction(entry: AuditEntry): string {
         return n > 0 ? `Updated settings (${n} field${n === 1 ? '' : 's'})` : 'Updated settings'
       }
       if (entry.resource_type === 'dunning_run' && metaAction === 'resolved') return `Resolved payment retries (${entry.metadata?.resolution})`
-      if (entry.resource_type === 'dunning_policy' && metaAction === 'set_default') return `Set retry policy as default${label ? ` (${label})` : ''}`
       if (entry.resource_type === 'webhook_event' && metaAction === 'replayed') return `Replayed webhook event`
       if (entry.resource_type === 'stripe_credentials' && metaAction === 'webhook_secret_set') return `Set Stripe webhook secret (${(entry.metadata?.livemode as boolean) ? 'live' : 'test'})`
       return `Updated ${label || entry.resource_type}`
     case 'delete':
       if (entry.resource_type === 'payment_method') return `Removed ${label || 'card'}`
       if (entry.resource_type === 'webhook_endpoint') return `Deleted webhook endpoint`
-      if (entry.resource_type === 'dunning_policy') return `Deleted retry policy`
       if (entry.resource_type === 'stripe_credentials') return `Disconnected Stripe (${(entry.metadata?.livemode as boolean) ? 'live' : 'test'})`
       return `Deleted ${label || entry.resource_type}`
     // Written only by earlier releases, when a draft subscription was

@@ -94,7 +94,6 @@
     }
   ],
   "subscription": {
-    "activated_at": "2026-04-10T14:30:00Z",
     "billing_anchor_day": 10,
     "billing_time": "anniversary",
     "cancel_at_period_end": false,

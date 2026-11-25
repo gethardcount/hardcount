@@ -112,19 +112,13 @@ func seedDueSubscriptions(t *testing.T, db *postgres.DB, n int) exactlyOnceSeed 
 	subIDs := make([]string, 0, n)
 	for i := 0; i < n; i++ {
 		sub, err := subStore.Create(ctx, tenantID, domain.Subscription{
-			Code:        fmt.Sprintf("sub-failover-%03d", i),
-			DisplayName: fmt.Sprintf("Failover %03d", i),
-			CustomerID:  cust.ID,
-			Items:       []domain.SubscriptionItem{{PlanID: plan.ID, Quantity: 1}},
-			Status:      domain.SubscriptionActive,
-			BillingTime: domain.BillingTimeCalendar,
-			StartedAt:   &periodStart,
-			// activated_at is required for an ACTIVE sub by the doctor check
-			// live_sub_cycle_stamps_complete_and_watermark_aligned. Creating
-			// through the store directly skips the activation path that would
-			// normally stamp it, so the fixture must — otherwise the post-crash
-			// doctor sweep reports 40 violations that the crash did not cause.
-			ActivatedAt:               &periodStart,
+			Code:                      fmt.Sprintf("sub-failover-%03d", i),
+			DisplayName:               fmt.Sprintf("Failover %03d", i),
+			CustomerID:                cust.ID,
+			Items:                     []domain.SubscriptionItem{{PlanID: plan.ID, Quantity: 1}},
+			Status:                    domain.SubscriptionActive,
+			BillingTime:               domain.BillingTimeCalendar,
+			StartedAt:                 &periodStart,
 			CurrentBillingPeriodStart: &periodStart,
 			CurrentBillingPeriodEnd:   &periodEnd,
 		})
@@ -385,11 +379,11 @@ func seedFailingHeadSubscription(t *testing.T, db *postgres.DB, seed exactlyOnce
 	start, end := seed.periodStart.AddDate(0, -1, 0), seed.periodStart
 	sub, err := subStore.Create(ctx, seed.tenantID, domain.Subscription{
 		Code: "sub-failover-failing", DisplayName: "Failover failing",
-		CustomerID:  healthy.CustomerID,
-		Items:       []domain.SubscriptionItem{{PlanID: healthy.Items[0].PlanID, Quantity: 1}},
-		Status:      domain.SubscriptionActive,
-		BillingTime: domain.BillingTimeCalendar,
-		StartedAt:   &start, ActivatedAt: &start,
+		CustomerID:                healthy.CustomerID,
+		Items:                     []domain.SubscriptionItem{{PlanID: healthy.Items[0].PlanID, Quantity: 1}},
+		Status:                    domain.SubscriptionActive,
+		BillingTime:               domain.BillingTimeCalendar,
+		StartedAt:                 &start,
 		CurrentBillingPeriodStart: &start, CurrentBillingPeriodEnd: &end,
 	})
 	if err != nil {

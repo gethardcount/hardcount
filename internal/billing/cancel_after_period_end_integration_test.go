@@ -624,37 +624,6 @@ func TestImmediateCancel_AlreadyCanceled_StillRefused(t *testing.T) {
 	}
 }
 
-// TestImmediateCancel_TrialNeverActivated_PastPeriodEnd_StillFree: a trial
-// that was never activated is cancelled free (ADR-069), however far past its
-// period end the cancel lands. It pins that the pre-step leaves a trialing
-// subscription alone, and that the write-off sits above the refusal.
-//
-// Mutation seams: drop the status == active test on the pre-step → the trial
-// is activated and billed. Move the write-off below the refusal → 409.
-func TestImmediateCancel_TrialNeverActivated_PastPeriodEnd_StillFree(t *testing.T) {
-	r := newCancelRig(t, "991 cancel lagging trial")
-	r.exec(t, `UPDATE subscriptions SET status = 'trialing', trial_start_at = $1, trial_end_at = $2, activated_at = NULL WHERE id = $3`,
-		r.f.cycleStart.AddDate(0, 0, -14), r.f.cycleStart, r.f.subID)
-	// A trialing subscription has no billable interval yet: activation opens
-	// it. Leaving the fixture's row in place would make an activation fail,
-	// and hide a pre-step that wrongly attempted one.
-	r.exec(t, `DELETE FROM billing_intervals WHERE subscription_id = $1`, r.f.subID)
-	cancelAt := r.f.cycleEnd.Add(time.Hour)
-
-	canceled, credited, err := r.f.subSvc.Cancel(r.at(cancelAt), r.f.tenantID, r.f.subID)
-	if err != nil {
-		t.Fatalf("cancel: %v", err)
-	}
-	if canceled.Status != domain.SubscriptionCanceled || !canceled.CanceledAt.Equal(cancelAt) || canceled.ActivatedAt != nil || credited != 0 {
-		t.Fatalf("cancel: status=%s canceled_at=%v activated_at=%v credited=%dc, want canceled at %v, never activated, no credit",
-			canceled.Status, canceled.CanceledAt, canceled.ActivatedAt, credited, cancelAt)
-	}
-	r.runWritesNothing(t, cancelAt.Add(time.Hour))
-	if invs := r.f.listInvoices(t, r.base); len(invs) != 0 {
-		t.Fatalf("%d invoice(s) for a never-activated trial (first subtotal %dc), want 0", len(invs), invs[0].SubtotalCents)
-	}
-}
-
 // TestImmediateCancel_AtPeriodEndFlag_AfterBoundary_ReturnsCanceledRow: the
 // subscription was already scheduled to cancel at the period end, the
 // boundary has passed, and the operator cancels immediately. The pre-step's

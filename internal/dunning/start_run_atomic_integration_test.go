@@ -39,8 +39,8 @@ func TestStartRun_RunEventAndWebhookAreAllOrNone(t *testing.T) {
 		t.Fatalf("create customer: %v", err)
 	}
 	store := dunning.NewPostgresStore(db)
-	if _, err := store.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+	if _, err := store.PutPolicy(ctx, tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3, 3, 3},
 		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone,
 	}); err != nil {
 		t.Fatalf("upsert policy: %v", err)

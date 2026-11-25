@@ -16,7 +16,8 @@ import (
 // "paused" is not a status: the dashboard's Paused tab sent ?status=paused
 // and always showed nothing (sweep E6), because a paused subscription stays
 // active and only its collection pauses. "archived" is not a status either:
-// nothing ever wrote it, so it was removed before the first release.
+// nothing ever wrote it, so it was removed before the first release. Nor is
+// "trialing": a subscription is active from its create.
 func TestListHandler_StatusAndCollectionParams(t *testing.T) {
 	const tenantID = "t1"
 	store := newMemStore()
@@ -25,7 +26,7 @@ func TestListHandler_StatusAndCollectionParams(t *testing.T) {
 
 	for query, want := range map[string]int{
 		"":                                 http.StatusOK,
-		"?status=trialing":                 http.StatusOK,
+		"?status=trialing":                 http.StatusUnprocessableEntity,
 		"?status=active":                   http.StatusOK,
 		"?status=canceled":                 http.StatusOK,
 		"?billing=failing":                 http.StatusOK,
@@ -63,6 +64,7 @@ func TestListHandler_FilterParamsAnswer422WithParam(t *testing.T) {
 
 	for query, param := range map[string]string{
 		"?status=archived":    "status",
+		"?status=trialing":    "status",
 		"?collection=running": "collection",
 		"?billing=ok":         "billing",
 	} {
@@ -104,7 +106,7 @@ func TestListHandler_FilterMessageListsAllowedValues(t *testing.T) {
 	for _, tc := range []struct {
 		query, want string
 	}{
-		{"?status=archived", "trialing, active, canceled"},
+		{"?status=archived", "must be one of active, canceled"},
 		{`?collection=running`, "paused"},
 		{`?billing=ok`, "failing"},
 	} {

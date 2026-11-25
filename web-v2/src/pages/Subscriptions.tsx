@@ -41,8 +41,6 @@ import { TableSkeleton } from '@/components/ui/TableSkeleton'
 
 import { Plus, Search, Download, ArrowUpDown, ArrowUp, ArrowDown, Repeat } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
-import { ExpiryBadge } from '@/components/ExpiryBadge'
-import { trialBadgeEndsAt } from '@/lib/statusLabels'
 import { formatCivilDate } from '@/lib/dates'
 import { nextBillCell, periodLabels } from '@/lib/subscriptionPeriod'
 import { useNowResolver } from '@/hooks/useNow'
@@ -129,7 +127,7 @@ export default function SubscriptionsPage() {
     queryFn: () => api.listPlans(),
   })
 
-  // Each row's "now", for Trial ends and a timed collection pause.
+  // Each row's "now", for a timed collection pause.
   const resolveNow = useNowResolver()
 
   const subs = subsData?.data ?? []
@@ -163,7 +161,7 @@ export default function SubscriptionsPage() {
   const totalPages = Math.ceil(total / PAGE_SIZE)
 
   // Server-side streaming export: full tenant dataset (every column
-  // on Subscription including item plan_ids, trial/started/canceled
+  // on Subscription including item plan_ids, started/canceled
   // timestamps), not just the currently-visible page.
   const handleExport = async () => {
     try {
@@ -352,26 +350,15 @@ export default function SubscriptionsPage() {
                               {sub.billing_failure.parked ? 'Billing stopped' : 'Billing failing'}
                             </Badge>
                           )}
-                          {/* Only while the trial runs: trial_end_at stays on
-                              the record after it ends, and an active, paying
-                              subscription read a red "Expired". */}
-                          <ExpiryBadge
-                            expiresAt={trialBadgeEndsAt(sub)}
-                            label="Trial ends"
-                            warningDays={3}
-                            now={resolveNow(sub)}
-                          />
                         </div>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground whitespace-normal min-w-[9rem]">
                         {(() => {
                           // Same dates as the subscription page: a canceled
                           // row reads "Ended …", never a renewal date.
-                          const firstPlan = plans.find(p => p.id === sub.items?.[0]?.plan_id)
                           const cell = nextBillCell(periodLabels(
                             sub,
                             { date: (iso) => formatDate(iso), lastDay: (iso) => formatCivilDate(iso, undefined) },
-                            firstPlan?.base_bill_timing,
                           ))
                           if (!cell) return '\u2014'
                           return <span className={cn(cell.tone === 'scheduled' && 'text-warning-foreground')}>{cell.text}</span>

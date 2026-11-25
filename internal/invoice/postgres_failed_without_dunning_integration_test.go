@@ -104,8 +104,8 @@ func TestListFailedWithoutDunningRun_CandidateSet(t *testing.T) {
 	// Give withResolvedRun a RESOLVED dunning run — the point is that a run EXISTS in
 	// a NON-active state, so the state-agnostic NOT EXISTS still excludes it.
 	dstore := dunning.NewPostgresStore(db)
-	pol, err := dstore.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "backfill-pol", Enabled: true, RetryDays: []int{1, 3, 5},
+	_, err = dstore.PutPolicy(ctx, tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{1, 3, 5},
 		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone,
 	})
 	if err != nil {
@@ -113,7 +113,7 @@ func TestListFailedWithoutDunningRun_CandidateSet(t *testing.T) {
 	}
 	resolvedAt := time.Now().UTC()
 	if _, err := dstore.CreateRun(ctx, tenantID, domain.InvoiceDunningRun{
-		InvoiceID: withResolvedRun, CustomerID: cust.ID, PolicyID: pol.ID,
+		InvoiceID: withResolvedRun, CustomerID: cust.ID,
 		State: domain.DunningResolved, Resolution: domain.ResolutionPaymentRecovered, ResolvedAt: &resolvedAt,
 	}); err != nil {
 		t.Fatalf("seed resolved dunning run: %v", err)

@@ -79,7 +79,6 @@ import type {
   CustomerOverview,
   CustomerPriceOverride,
   CustomerUsage,
-  DeleteDunningPolicy200,
   DeleteWebhookEndpoint200,
   DiscardHeldUsage200,
   DiscardHeldUsageBody,
@@ -94,7 +93,6 @@ import type {
   ExportInvoicesCsvParams,
   ExportSubscriptionsCsvParams,
   ExportUsageEventsCsvParams,
-  ExtendSubscriptionTrialBody,
   ForbiddenResponse,
   GetAnalyticsOverviewParams,
   GetAnalyticsRevenueChart200,
@@ -148,8 +146,6 @@ import type {
   ListCustomerSentEmailsParams,
   ListCustomers200,
   ListCustomersParams,
-  ListDunningPolicies200,
-  ListDunningPoliciesParams,
   ListDunningRuns200,
   ListDunningRunsParams,
   ListHeldUsage200,
@@ -228,7 +224,6 @@ import type {
   SendInvoice200,
   SendInvoiceBody,
   SendTestEmail200,
-  SetDefaultDunningPolicy200,
   SetStripeWebhookSecretBody,
   SetSubscriptionBillingThresholdsBody,
   StripeConnection,
@@ -607,9 +602,6 @@ export const getCreateCustomerUrl = () => {
  * Creates a customer in the mode of your API key. `external_id` must be
  * unique in the account and mode. The create is written to the audit
  * log.
- *
- * `dunning_policy_id` is not a create field: assign a policy with
- * `PATCH /v1/customers/{id}`.
  * @summary Create a customer
  */
 export const createCustomer = async (createCustomerBody: CreateCustomerBody, options?: RequestInit): Promise<Customer> => {
@@ -690,8 +682,8 @@ export const getListCustomersUrl = (params?: ListCustomersParams,) => {
 /**
  * Customers in the mode of your API key, newest first unless you choose
  * a sort. The list answer leaves out `additional_emails`,
- * `email_status`, the bounce fields, `dunning_policy_id` and
- * `stripe_customer_id`: get one customer for those.
+ * `email_status`, the bounce fields and `stripe_customer_id`: get one
+ * customer for those.
  * @summary List customers
  */
 export const listCustomers = async (params?: ListCustomersParams, options?: RequestInit): Promise<ListCustomers200> => {
@@ -979,13 +971,9 @@ export const getUpdateCustomerUrl = (id: string,) => {
  * is ignored, so you cannot clear the email here.
  *
  * - `status: archived` is refused with 409 `invalid_state` while the
- *   customer has an active or trialing subscription, which still bills.
+ *   customer has an active subscription, which still bills.
  *   Cancel those subscriptions first. Archiving does not stop dunning
  *   (the retries of failed payments) on unpaid invoices.
- * - `dunning_policy_id` set to `""` removes the assignment, so the
- *   account's default policy applies. A set ID must be a policy in this
- *   account and mode, or the call returns 404. The change applies to the
- *   next dunning run, not to runs already started.
  * - `additional_emails` replaces the whole CC list; `[]` clears it.
  *   Entries are lowercased and deduplicated, and may not equal the
  *   primary email. More than 10 after deduplication is refused with
@@ -1091,8 +1079,8 @@ export const getUpsertCustomerBillingProfileUrl = (id: string,) => {
  *
  * Country, currency and tax ID are stored in upper case.
  *
- * A currency that differs from the plan currency of a trialing or
- * active subscription is refused with 409 `invalid_state`, because
+ * A currency that differs from the plan currency of an active
+ * subscription is refused with 409 `invalid_state`, because
  * invoices would show plan prices in the new currency without
  * conversion.
  *
@@ -1402,14 +1390,13 @@ export const getGetCustomerUsageUrl = (id: string,
 }
 
 /**
- * Usage per meter on the customer's active and trialing subscriptions,
- * priced the same way the invoice prices it. Send both `from` and `to`,
+ * Usage per meter on the customer's active subscriptions, priced the
+ * same way the invoice prices it. Send both `from` and `to`,
  * or neither.
  *
  * With neither, each subscription is rated over its own current billing
  * period, and `period` runs from the earliest start to the latest end of
- * those periods. A trialing subscription's current period is its first
- * paid period, which starts when the trial ends.
+ * those periods.
  *
  * With both, the window is `[from, to)`, at most one year long, and the
  * amounts are an estimate at each subscription's current prices.
@@ -2081,7 +2068,7 @@ export const getGetPublicCostDashboardUrl = (token: string,) => {
  * that no price takes.
  *
  * A token with the wrong prefix or no customer gets 401, the same answer
- * for both. A customer with no active or trialing subscription gets 200
+ * for both. A customer with no active subscription gets 200
  * with `billing_period.source` `no_subscription`: `subscriptions`,
  * `usage` and `totals` are empty, and `credits` still lists the credit
  * balance.
@@ -5884,23 +5871,21 @@ export const getCreateSubscriptionUrl = () => {
 
 /**
  * Creates a subscription that bills a customer for one or more plans.
- * It starts now: `active` from today, or `trialing` when `trial_days`
- * is above 0.
+ * It starts now, `active` from today: its first period starts today in
+ * the account's billing time zone.
  *
  * All the plans must share one billing interval, one base-fee timing
  * (in advance or in arrears) and one currency. The currency must also
  * match the customer's billing profile and the customer's other
- * `trialing` and `active` subscriptions; canceled ones do not
- * count. No two of the plans may bill the same meter, and none may
- * bill a meter that another `trialing` or `active`
- * subscription of the customer bills. The customer and the plans must
+ * `active` subscriptions; canceled ones do not count. No two of the
+ * plans may bill the same meter, and none may bill a meter that
+ * another `active` subscription of the customer bills. The customer and the plans must
  * not be archived.
  *
- * An `active` subscription whose plans bill a non-zero base fee in
- * advance is saved together with its first invoice, in one database
- * transaction: both are saved, or neither is. The invoice is then
- * collected like any other invoice. A `trialing` subscription gets
- * that invoice when its trial ends.
+ * A subscription whose plans bill a non-zero base fee in advance is
+ * saved together with its first invoice, in one database transaction:
+ * both are saved, or neither is. The invoice is then collected like
+ * any other invoice.
  *
  * Sends the `subscription.created` webhook event.
  * @summary Create a subscription
@@ -6284,8 +6269,8 @@ export const getCancelSubscriptionUrl = (id: string,) => {
 }
 
 /**
- * Cancels the subscription immediately. Works on `trialing` and
- * `active` subscriptions. Takes no body.
+ * Cancels the subscription immediately. Works on an `active`
+ * subscription. Takes no body.
  *
  * In the transaction that cancels it, Hardcount writes the final
  * invoice for the part of the current period that has been used
@@ -6295,8 +6280,7 @@ export const getCancelSubscriptionUrl = (id: string,) => {
  * invoice of which nothing was used. After the transaction commits,
  * the credit notes are issued, which is when the balance credit and
  * the tax reversal happen (a failed issue is retried), and then the
- * final invoice is collected, so that credit reduces it. A trial that
- * never became active is canceled with no invoice.
+ * final invoice is collected, so that credit reduces it.
  *
  * If a billing period has already ended, it is billed first. If a
  * scheduled cancel was already due, that cancel takes effect at its
@@ -6381,14 +6365,10 @@ export const getScheduleSubscriptionCancelUrl = (id: string,) => {
  * schedule. If a billing period has ended and is not invoiced yet,
  * it is billed first, so "the current period" is the one running.
  *
- * - **Active subscription.** `at_period_end` cancels at the end of
- *   the current period. `cancel_at` must be on or after the end of
- *   the current period. A date inside a later period is allowed, and
- *   that period is billed up to the date.
- * - **Trialing subscription.** `at_period_end` cancels at the end of
- *   the trial, with no charge. `cancel_at` must be exactly
- *   `trial_end_at` (free cancel) or on or after
- *   `current_billing_period_end`.
+ * `at_period_end` cancels at the end of the current period.
+ * `cancel_at` must be on or after the end of the current period. A
+ * date inside a later period is allowed, and that period is billed up
+ * to the date.
  *
  * The response's `cancel_effective_at` says when the cancel takes
  * effect. Sends the `subscription.cancel_scheduled` webhook event.
@@ -6706,163 +6686,6 @@ export const useResumeSubscriptionCollection = <TError = InvalidBodyResponse | U
       return useMutation(getResumeSubscriptionCollectionMutationOptions(options), queryClient);
     }
 
-export const getEndSubscriptionTrialUrl = (id: string,) => {
-
-
-
-
-  return `/v1/subscriptions/${id}/end-trial`
-}
-
-/**
- * Ends the trial now and makes the subscription `active`. The first
- * paid period starts today, and `trial_end_at` becomes now. Items
- * whose base fee is billed in advance get their first invoice in the
- * same transaction. A subscription with a scheduled cancel is
- * refused: clear the schedule first. Takes no body.
- *
- * Sends the `subscription.trial_ended` webhook event.
- * @summary End a trial now
- */
-export const endSubscriptionTrial = async (id: string, options?: RequestInit): Promise<Subscription> => {
-
-  return orvalClient<Subscription>(getEndSubscriptionTrialUrl(id),
-  {
-    ...options,
-    method: 'POST'
-
-
-  }
-);}
-
-
-
-
-
-export const getEndSubscriptionTrialMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endSubscriptionTrial>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof endSubscriptionTrial>>, TError,{id: string}, TContext> => {
-
-const mutationKey = ['endSubscriptionTrial'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof endSubscriptionTrial>>, {id: string}> = (props) => {
-          const {id} = props ?? {};
-
-          return  endSubscriptionTrial(id,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type EndSubscriptionTrialMutationResult = NonNullable<Awaited<ReturnType<typeof endSubscriptionTrial>>>
-
-    export type EndSubscriptionTrialMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
-
-    /**
- * @summary End a trial now
- */
-export const useEndSubscriptionTrial = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endSubscriptionTrial>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof endSubscriptionTrial>>,
-        TError,
-        {id: string},
-        TContext
-      > => {
-      return useMutation(getEndSubscriptionTrialMutationOptions(options), queryClient);
-    }
-
-export const getExtendSubscriptionTrialUrl = (id: string,) => {
-
-
-
-
-  return `/v1/subscriptions/${id}/extend-trial`
-}
-
-/**
- * Moves the end of the trial later. The first paid period is moved
- * to start at the beginning of the new trial end's day, in your
- * account's billing time zone. A cancel scheduled with
- * `at_period_end` moves with the trial. To shorten a trial, use
- * `POST /v1/subscriptions/{id}/end-trial`.
- *
- * Sends the `subscription.trial_extended` webhook event.
- * @summary Extend a trial
- */
-export const extendSubscriptionTrial = async (id: string,
-    extendSubscriptionTrialBody: ExtendSubscriptionTrialBody, options?: RequestInit): Promise<Subscription> => {
-
-  return orvalClient<Subscription>(getExtendSubscriptionTrialUrl(id),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(extendSubscriptionTrialBody)
-  }
-);}
-
-
-
-
-
-export const getExtendSubscriptionTrialMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof extendSubscriptionTrial>>, TError,{id: string;data: ExtendSubscriptionTrialBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof extendSubscriptionTrial>>, TError,{id: string;data: ExtendSubscriptionTrialBody}, TContext> => {
-
-const mutationKey = ['extendSubscriptionTrial'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof extendSubscriptionTrial>>, {id: string;data: ExtendSubscriptionTrialBody}> = (props) => {
-          const {id,data} = props ?? {};
-
-          return  extendSubscriptionTrial(id,data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type ExtendSubscriptionTrialMutationResult = NonNullable<Awaited<ReturnType<typeof extendSubscriptionTrial>>>
-    export type ExtendSubscriptionTrialMutationBody = ExtendSubscriptionTrialBody
-    export type ExtendSubscriptionTrialMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
-
-    /**
- * @summary Extend a trial
- */
-export const useExtendSubscriptionTrial = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof extendSubscriptionTrial>>, TError,{id: string;data: ExtendSubscriptionTrialBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof extendSubscriptionTrial>>,
-        TError,
-        {id: string;data: ExtendSubscriptionTrialBody},
-        TContext
-      > => {
-      return useMutation(getExtendSubscriptionTrialMutationOptions(options), queryClient);
-    }
-
 export const getSetSubscriptionBillingThresholdsUrl = (id: string,) => {
 
 
@@ -7036,8 +6859,8 @@ export const getAddSubscriptionItemUrl = (id: string,) => {
  * Adds a plan to the subscription as a new item. The plan must use
  * the same billing interval, base-fee timing and currency as the
  * other items. It must not bill a meter that another item of this
- * subscription, or another `trialing` or `active`
- * subscription of the customer, bills. A period that ended and is
+ * subscription, or another `active` subscription of the customer,
+ * bills. A period that ended and is
  * not invoiced yet is billed first. The subscription must not be
  * `canceled`.
  *
@@ -7230,7 +7053,7 @@ export const getRemoveSubscriptionItemUrl = (id: string,
 }
 
 /**
- * Removes an item from a trialing or active subscription. A
+ * Removes an item from an active subscription. A
  * subscription's last item cannot be removed; cancel the subscription
  * instead. A
  * period that ended and is not invoiced yet is billed first. Takes
@@ -7802,8 +7625,7 @@ export const getBackfillUsageEventUrl = () => {
  * bill it; bill it with a one-off invoice if needed. Its 201 carries
  * the `billing_status` Hardcount found (see the `billing_status`
  * field): `after_close` while the subscription that invoiced the
- * period is active or trialing, and `outside_subscription` once it has
- * ended. If another subscription has a billing period that holds the
+ * period is active, and `outside_subscription` once it has ended. If another subscription has a billing period that holds the
  * event's time and is not invoiced yet, that period decides the status
  * instead.
  *
@@ -8390,14 +8212,14 @@ export const getCreateInvoiceUrl = () => {
  *
  * A manual invoice uses the customer's currency. A `currency` that
  * differs from the customer's billing-profile currency, or from the
- * plan currency of any of the customer's trialing or active
- * subscriptions, is refused with 409. A customer with neither
+ * plan currency of any of the customer's active subscriptions, is
+ * refused with 409. A customer with neither
  * may be invoiced in any supported currency.
  *
  * Defaults when a field is left out:
  * - `currency`: the customer's billing-profile currency, then the plan
- *   currency of the customer's trialing or active
- *   subscriptions, then the account's default currency.
+ *   currency of the customer's active subscriptions, then the
+ *   account's default currency.
  * - `net_payment_term_days`: the account's net payment terms. A
  *   negative value is stored as 0 (due on receipt).
  * - `billing_period_start` / `billing_period_end`: now.
@@ -8499,15 +8321,12 @@ export const getCreateInvoicePreviewUrl = () => {
  * current period will close with: base fees prorate for a short first
  * period and per segment after a mid-period item add, quantity change,
  * plan swap or removal, and each meter's usage counts only while a
- * plan carrying it was on the subscription. For a trialing
- * subscription it is the first invoice after the trial: the trial-end
- * invoice when a plan bills in advance, otherwise the close of the
- * first paid period, prorated the same way. With an explicit `period`,
+ * plan carrying it was on the subscription. With an explicit `period`,
  * it is a flat estimate over that window, at today's prices, and warns
  * when a mid-period change makes the invoice differ.
  *
- * Without `subscription_id`, Hardcount uses the customer's active or
- * trialing subscription whose current period started last.
+ * Without `subscription_id`, Hardcount uses the customer's active
+ * subscription whose current period started last.
  * @summary Preview a customer's next invoice
  */
 export const createInvoicePreview = async (createInvoicePreviewBody: CreateInvoicePreviewBody, options?: RequestInit): Promise<InvoicePreview> => {
@@ -9428,7 +9247,7 @@ export const getCollectInvoicePaymentUrl = (id: string,) => {
  * dunning run stays open until the payment settles. A declined card
  * answers 502;
  * the invoice's `payment_status` becomes `failed`, and dunning starts
- * when the customer's policy is enabled. Check
+ * when the account's dunning policy is enabled. Check
  * `payment_status` on the returned invoice.
  *
  * A top-up (`billing_reason` `topup`) is charged here while it is a
@@ -10982,7 +10801,7 @@ export const getFinalizeInvoiceUrl = (id: string,) => {
  *    and `payment.succeeded`, and queues a receipt email to the
  *    customer when they have an email address. A declined charge sets
  *    `payment_status` to `failed`, sends `payment.failed`, and starts
- *    dunning when the customer's policy is enabled.
+ *    dunning when the account's dunning policy is enabled.
  * 3. With no card on file, an email with a link to add one is queued
  *    for the customer, once, when they have an email address and the
  *    server's `PAYMENT_UPDATE_URL` is set; `no_pm_notified_at` records
@@ -12372,7 +12191,7 @@ export const getRunBillingUrl = () => {
 /**
  * Runs the billing run now for this account and mode, the same run
  * the scheduler makes. It invoices every subscription that is due:
- * an `active` or `trialing` subscription whose period ended, or whose
+ * an `active` subscription whose period ended, or whose
  * scheduled mid-period cancel came, more than the invoice grace ago
  * (`INVOICE_GRACE_PERIOD`, 1 hour by default), so usage that arrives
  * late still makes its invoice. A subscription overdue for several
@@ -13885,8 +13704,7 @@ export const getExportSubscriptionsCsvUrl = (params?: ExportSubscriptionsCsvPara
  *
  * Streams every subscription in the caller's mode, newest first,
  * from one consistent snapshot. Columns: id, code, display_name, customer_id, status,
- * billing_time, trial_start_at, trial_end_at, started_at,
- * activated_at, canceled_at, current_billing_period_start,
+ * billing_time, started_at, canceled_at, current_billing_period_start,
  * current_billing_period_end, next_billing_at, plan_ids (plan IDs
  * joined with `|`), created_at.
  *
@@ -14900,30 +14718,24 @@ export function useGetDunningStats<TData = Awaited<ReturnType<typeof getDunningS
 
 
 
-export const getListDunningPoliciesUrl = (params?: ListDunningPoliciesParams,) => {
-  const normalizedParams = new URLSearchParams();
+export const getGetDunningPolicyUrl = () => {
 
-  Object.entries(params || {}).forEach(([key, value]) => {
 
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? 'null' : String(value))
-    }
-  });
 
-  const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `/v1/dunning/policies?${stringifiedParams}` : `/v1/dunning/policies`
+  return `/v1/dunning/policy`
 }
 
 /**
- * Every dunning policy in this account and mode, the default first,
- * then oldest first. Each one carries how many customers are assigned
- * to it.
- * @summary List dunning policies
+ * The account's dunning policy for this mode: how failed payments
+ * are retried and what happens when the retries run out. It governs
+ * every payment retry in the mode. A new account starts with one in
+ * each mode (retries on day 3, 7 and 14, then no final action).
+ * @summary Get the dunning policy
  */
-export const listDunningPolicies = async (params?: ListDunningPoliciesParams, options?: RequestInit): Promise<ListDunningPolicies200> => {
+export const getDunningPolicy = async ( options?: RequestInit): Promise<DunningPolicy> => {
 
-  return orvalClient<ListDunningPolicies200>(getListDunningPoliciesUrl(params),
+  return orvalClient<DunningPolicy>(getGetDunningPolicyUrl(),
   {
     ...options,
     method: 'GET'
@@ -14936,216 +14748,29 @@ export const listDunningPolicies = async (params?: ListDunningPoliciesParams, op
 
 
 
-export const getListDunningPoliciesQueryKey = (params?: ListDunningPoliciesParams,) => {
+export const getGetDunningPolicyQueryKey = () => {
     return [
-    `/v1/dunning/policies`, ...(params ? [params] : [])
+    `/v1/dunning/policy`
     ] as const;
     }
 
 
-export const getListDunningPoliciesQueryOptions = <TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(params?: ListDunningPoliciesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetDunningPolicyQueryOptions = <TData = Awaited<ReturnType<typeof getDunningPolicy>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListDunningPoliciesQueryKey(params);
+  const queryKey =  queryOptions?.queryKey ?? getGetDunningPolicyQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDunningPolicies>>> = () => listDunningPolicies(params, requestOptions);
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDunningPolicy>>> = () => getDunningPolicy(requestOptions);
 
 
 
 
 
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
-}
-
-export type ListDunningPoliciesQueryResult = NonNullable<Awaited<ReturnType<typeof listDunningPolicies>>>
-export type ListDunningPoliciesQueryError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse
-
-
-export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
- params: undefined |  ListDunningPoliciesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>> & Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listDunningPolicies>>,
-          TError,
-          Awaited<ReturnType<typeof listDunningPolicies>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
- params?: ListDunningPoliciesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>> & Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listDunningPolicies>>,
-          TError,
-          Awaited<ReturnType<typeof listDunningPolicies>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
- params?: ListDunningPoliciesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List dunning policies
- */
-
-export function useListDunningPolicies<TData = Awaited<ReturnType<typeof listDunningPolicies>>, TError = UnauthorizedResponse | ForbiddenResponse | InvalidPageResponse | RateLimitedResponse>(
- params?: ListDunningPoliciesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDunningPolicies>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
- ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
-
-  const queryOptions = getListDunningPoliciesQueryOptions(params,options)
-
-  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-
-
-
-
-
-
-export const getCreateDunningPolicyUrl = () => {
-
-
-
-
-  return `/v1/dunning/policies`
-}
-
-/**
- * A dunning policy decides how failed payments are retried and what
- * happens when the retries run out. Every account starts with one
- * policy per mode, "Default retries", as the default. The first
- * enabled policy you create in a mode takes the default from it,
- * unless you have edited it or made it the default yourself; later
- * ones do not (use set-default). Customers without an assigned policy
- * use the default, so check `is_default` in the response. Assign a
- * policy to a customer with `dunning_policy_id` on
- * `PATCH /v1/customers/{id}`.
- *
- * `enabled` defaults to false. A disabled policy starts no dunning, so
- * send `enabled: true` for the policy to take effect. A policy created
- * disabled never takes the default from "Default retries". A run that
- * has started keeps following its policy as it is when each retry
- * runs.
- * @summary Create a dunning policy
- */
-export const createDunningPolicy = async (dunningPolicyInput: DunningPolicyInput, options?: RequestInit): Promise<DunningPolicy> => {
-
-  return orvalClient<DunningPolicy>(getCreateDunningPolicyUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(dunningPolicyInput)
-  }
-);}
-
-
-
-
-
-export const getCreateDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDunningPolicy>>, TError,{data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof createDunningPolicy>>, TError,{data: DunningPolicyInput}, TContext> => {
-
-const mutationKey = ['createDunningPolicy'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createDunningPolicy>>, {data: DunningPolicyInput}> = (props) => {
-          const {data} = props ?? {};
-
-          return  createDunningPolicy(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type CreateDunningPolicyMutationResult = NonNullable<Awaited<ReturnType<typeof createDunningPolicy>>>
-    export type CreateDunningPolicyMutationBody = DunningPolicyInput
-    export type CreateDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse
-
-    /**
- * @summary Create a dunning policy
- */
-export const useCreateDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDunningPolicy>>, TError,{data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof createDunningPolicy>>,
-        TError,
-        {data: DunningPolicyInput},
-        TContext
-      > => {
-      return useMutation(getCreateDunningPolicyMutationOptions(options), queryClient);
-    }
-
-export const getGetDunningPolicyUrl = (id: string,) => {
-
-
-
-
-  return `/v1/dunning/policies/${id}`
-}
-
-/**
- * @summary Get a dunning policy
- */
-export const getDunningPolicy = async (id: string, options?: RequestInit): Promise<DunningPolicy> => {
-
-  return orvalClient<DunningPolicy>(getGetDunningPolicyUrl(id),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getGetDunningPolicyQueryKey = (id: string,) => {
-    return [
-    `/v1/dunning/policies/${id}`
-    ] as const;
-    }
-
-
-export const getGetDunningPolicyQueryOptions = <TData = Awaited<ReturnType<typeof getDunningPolicy>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getGetDunningPolicyQueryKey(id);
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDunningPolicy>>> = () => getDunningPolicy(id, requestOptions);
-
-
-
-
-
-   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
 export type GetDunningPolicyQueryResult = NonNullable<Awaited<ReturnType<typeof getDunningPolicy>>>
@@ -15153,7 +14778,7 @@ export type GetDunningPolicyQueryError = UnauthorizedResponse | ForbiddenRespons
 
 
 export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunningPolicy>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
- id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData>> & Pick<
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getDunningPolicy>>,
           TError,
@@ -15163,7 +14788,7 @@ export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunning
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunningPolicy>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData>> & Pick<
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getDunningPolicy>>,
           TError,
@@ -15173,19 +14798,19 @@ export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunning
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunningPolicy>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Get a dunning policy
+ * @summary Get the dunning policy
  */
 
 export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunningPolicy>>, TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDunningPolicy>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetDunningPolicyQueryOptions(id,options)
+  const queryOptions = getGetDunningPolicyQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -15198,32 +14823,33 @@ export function useGetDunningPolicy<TData = Awaited<ReturnType<typeof getDunning
 
 
 
-export const getUpdateDunningPolicyUrl = (id: string,) => {
+export const getPutDunningPolicyUrl = () => {
 
 
 
 
-  return `/v1/dunning/policies/${id}`
+  return `/v1/dunning/policy`
 }
 
 /**
- * Replaces every setting of the policy with the body. This is not a
- * partial update: an omitted field takes its default (`enabled`
- * false, `name` empty, pause the subscription, leave the invoice
- * open), and `retry_days` is required. Send the full policy.
- * `is_default` cannot be changed here; use set-default. Editing the
- * "Default retries" policy the account started with sets its
- * `seeded` to false. Runs already started follow the new settings
- * from their next step.
- * @summary Replace a dunning policy's settings
+ * Creates the account's dunning policy for this mode, or replaces
+ * every setting of the one it has with the body. This is not a
+ * partial update: all four settings are required, and a body that
+ * leaves one out is refused with 422, `param` naming it.
+ *
+ * A disabled policy starts no dunning for a payment that fails from
+ * then on; runs already started keep retrying. Runs already started
+ * follow a new schedule and new final actions from their next step,
+ * so a schedule shorter than the retries a run has made ends that run
+ * with the final actions.
+ * @summary Set the dunning policy
  */
-export const updateDunningPolicy = async (id: string,
-    dunningPolicyInput: DunningPolicyInput, options?: RequestInit): Promise<DunningPolicy> => {
+export const putDunningPolicy = async (dunningPolicyInput: DunningPolicyInput, options?: RequestInit): Promise<DunningPolicy> => {
 
-  return orvalClient<DunningPolicy>(getUpdateDunningPolicyUrl(id),
+  return orvalClient<DunningPolicy>(getPutDunningPolicyUrl(),
   {
     ...options,
-    method: 'PATCH',
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(dunningPolicyInput)
   }
@@ -15233,11 +14859,11 @@ export const updateDunningPolicy = async (id: string,
 
 
 
-export const getUpdateDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDunningPolicy>>, TError,{id: string;data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof updateDunningPolicy>>, TError,{id: string;data: DunningPolicyInput}, TContext> => {
+export const getPutDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putDunningPolicy>>, TError,{data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof putDunningPolicy>>, TError,{data: DunningPolicyInput}, TContext> => {
 
-const mutationKey = ['updateDunningPolicy'];
+const mutationKey = ['putDunningPolicy'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -15247,10 +14873,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateDunningPolicy>>, {id: string;data: DunningPolicyInput}> = (props) => {
-          const {id,data} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putDunningPolicy>>, {data: DunningPolicyInput}> = (props) => {
+          const {data} = props ?? {};
 
-          return  updateDunningPolicy(id,data,requestOptions)
+          return  putDunningPolicy(data,requestOptions)
         }
 
 
@@ -15260,172 +14886,22 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type UpdateDunningPolicyMutationResult = NonNullable<Awaited<ReturnType<typeof updateDunningPolicy>>>
-    export type UpdateDunningPolicyMutationBody = DunningPolicyInput
-    export type UpdateDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
+    export type PutDunningPolicyMutationResult = NonNullable<Awaited<ReturnType<typeof putDunningPolicy>>>
+    export type PutDunningPolicyMutationBody = DunningPolicyInput
+    export type PutDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse
 
     /**
- * @summary Replace a dunning policy's settings
+ * @summary Set the dunning policy
  */
-export const useUpdateDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDunningPolicy>>, TError,{id: string;data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
+export const usePutDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putDunningPolicy>>, TError,{data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof updateDunningPolicy>>,
+        Awaited<ReturnType<typeof putDunningPolicy>>,
         TError,
-        {id: string;data: DunningPolicyInput},
+        {data: DunningPolicyInput},
         TContext
       > => {
-      return useMutation(getUpdateDunningPolicyMutationOptions(options), queryClient);
-    }
-
-export const getDeleteDunningPolicyUrl = (id: string,) => {
-
-
-
-
-  return `/v1/dunning/policies/${id}`
-}
-
-/**
- * Deletes the policy. Refused for the default policy, for a policy
- * that customers are still assigned to, and for a policy that has run
- * payment retries (their history refers to it). The route takes no
- * body.
- * @summary Delete a dunning policy
- */
-export const deleteDunningPolicy = async (id: string, options?: RequestInit): Promise<DeleteDunningPolicy200> => {
-
-  return orvalClient<DeleteDunningPolicy200>(getDeleteDunningPolicyUrl(id),
-  {
-    ...options,
-    method: 'DELETE'
-
-
-  }
-);}
-
-
-
-
-
-export const getDeleteDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDunningPolicy>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteDunningPolicy>>, TError,{id: string}, TContext> => {
-
-const mutationKey = ['deleteDunningPolicy'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteDunningPolicy>>, {id: string}> = (props) => {
-          const {id} = props ?? {};
-
-          return  deleteDunningPolicy(id,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type DeleteDunningPolicyMutationResult = NonNullable<Awaited<ReturnType<typeof deleteDunningPolicy>>>
-
-    export type DeleteDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
-
-    /**
- * @summary Delete a dunning policy
- */
-export const useDeleteDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDunningPolicy>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof deleteDunningPolicy>>,
-        TError,
-        {id: string},
-        TContext
-      > => {
-      return useMutation(getDeleteDunningPolicyMutationOptions(options), queryClient);
-    }
-
-export const getSetDefaultDunningPolicyUrl = (id: string,) => {
-
-
-
-
-  return `/v1/dunning/policies/${id}/set-default`
-}
-
-/**
- * Makes this policy the default and the previous default a normal
- * policy, in one step. Customers without an assigned policy use the
- * new default for dunning started from now on. A policy made default
- * this way is no longer `seeded`. The route takes no body.
- * @summary Make a dunning policy the default
- */
-export const setDefaultDunningPolicy = async (id: string, options?: RequestInit): Promise<SetDefaultDunningPolicy200> => {
-
-  return orvalClient<SetDefaultDunningPolicy200>(getSetDefaultDunningPolicyUrl(id),
-  {
-    ...options,
-    method: 'POST'
-
-
-  }
-);}
-
-
-
-
-
-export const getSetDefaultDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setDefaultDunningPolicy>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof setDefaultDunningPolicy>>, TError,{id: string}, TContext> => {
-
-const mutationKey = ['setDefaultDunningPolicy'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setDefaultDunningPolicy>>, {id: string}> = (props) => {
-          const {id} = props ?? {};
-
-          return  setDefaultDunningPolicy(id,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type SetDefaultDunningPolicyMutationResult = NonNullable<Awaited<ReturnType<typeof setDefaultDunningPolicy>>>
-
-    export type SetDefaultDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
-
-    /**
- * @summary Make a dunning policy the default
- */
-export const useSetDefaultDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setDefaultDunningPolicy>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof setDefaultDunningPolicy>>,
-        TError,
-        {id: string},
-        TContext
-      > => {
-      return useMutation(getSetDefaultDunningPolicyMutationOptions(options), queryClient);
+      return useMutation(getPutDunningPolicyMutationOptions(options), queryClient);
     }
 
 export const getCreatePriceOverrideUrl = () => {
@@ -15448,8 +14924,7 @@ export const getCreatePriceOverrideUrl = () => {
  * period; the current period keeps the rate it started with. It applies from the
  * join when a subscription of the customer first joins the plan in a
  * period after it is created: an override created before a subscription
- * starts (after a trial, before the trial ends), even on the same day,
- * applies from its first period. The create is written to the audit
+ * starts, even on the same day, applies from its first period. The create is written to the audit
  * log.
  * @summary Create a customer price override
  */
@@ -16918,7 +16393,7 @@ export const getBootstrapUrl = () => {
  * query string.
  *
  * In one transaction it creates the first account with its default
- * settings and default dunning policies, its owner user, a test secret
+ * settings, a dunning policy in each mode, its owner user, a test secret
  * key and a live secret key. The response is the only place the keys
  * appear, and the password too when Hardcount generated it. The
  * response has `Cache-Control: no-store`.

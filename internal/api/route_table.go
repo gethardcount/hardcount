@@ -360,14 +360,10 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/settings/stripe"}:                 needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.connect (Log)")),
 	{"DELETE", "/v1/settings/stripe/{mode}"}:        needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.delete (Log)")),
 	{"PATCH", "/v1/settings/stripe/{mode}/webhook"}: needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.setWebhook (Log)")),
-	// Dunning policies.
-	{"GET", "/v1/dunning/policies"}:                   needs(dunningRead).withPaging(),
-	{"POST", "/v1/dunning/policies"}:                  needs(dunningWrite).withAudit(explicit("dunning.Handler.createPolicy (Log)")),
-	{"GET", "/v1/dunning/policies/{id}"}:              needs(dunningRead),
-	{"PATCH", "/v1/dunning/policies/{id}"}:            needs(dunningWrite).withAudit(explicit("dunning.Handler.updatePolicy (Log)")),
-	{"DELETE", "/v1/dunning/policies/{id}"}:           needs(dunningWrite).withAudit(explicit("dunning.Handler.deletePolicy (Log)")),
-	{"POST", "/v1/dunning/policies/{id}/set-default"}: needs(dunningWrite).withAudit(explicit("dunning.Handler.setDefaultPolicy (Log)")),
-	{"GET", "/v1/dunning/stats"}:                      needs(dunningRead),
+	// The account's dunning policy for the request's mode.
+	{"GET", "/v1/dunning/policy"}: needs(dunningRead),
+	{"PUT", "/v1/dunning/policy"}: needs(dunningWrite).withAudit(explicit("dunning.Handler.putPolicy (Log)")),
+	{"GET", "/v1/dunning/stats"}:  needs(dunningRead),
 	// Outbound webhooks.
 	{"GET", "/v1/webhook-endpoints/endpoints"}:                                      needs(apikeyWrite).withPaging(),
 	{"POST", "/v1/webhook-endpoints/endpoints"}:                                     needs(apikeyWrite).withAudit(explicit("webhook.Handler.createEndpoint (Log)")).withShowOnce(),
@@ -413,8 +409,6 @@ var routeTable = map[routeKey]routeDecl{
 	{"PUT", "/v1/subscriptions/{id}/billing-thresholds"}:               needs(subscriptionWrite).withAudit(explicit("subscription.Handler.setBillingThresholds (Log)")),
 	{"DELETE", "/v1/subscriptions/{id}/billing-thresholds"}:            needs(subscriptionWrite).withAudit(explicit("subscription.Handler.clearBillingThresholds (Log)")),
 	{"POST", "/v1/subscriptions/{id}/cancel"}:                          needs(subscriptionWrite).withAudit(explicit("subscription.Service.Cancel (LogInTx)")),
-	{"POST", "/v1/subscriptions/{id}/end-trial"}:                       needs(subscriptionWrite).withAudit(explicit("subscription.Handler.endTrial (Log)")),
-	{"POST", "/v1/subscriptions/{id}/extend-trial"}:                    needs(subscriptionWrite).withAudit(explicit("subscription.Handler.extendTrial (Log)")),
 	{"POST", "/v1/subscriptions/{id}/items"}:                           needs(subscriptionWrite).withAudit(explicit("subscription.Handler.addItem (Log)")),
 	{"PATCH", "/v1/subscriptions/{id}/items/{itemID}"}:                 needs(subscriptionWrite).withAudit(explicit("subscription.Handler.updateItem (Log)")),
 	{"DELETE", "/v1/subscriptions/{id}/items/{itemID}"}:                needs(subscriptionWrite).withAudit(explicit("subscription.Handler.removeItem (Log)")),

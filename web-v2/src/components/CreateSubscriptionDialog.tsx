@@ -8,7 +8,7 @@ import { Loader2, Plus, Trash2 } from 'lucide-react'
 import { api, type Customer, type Plan, type Subscription } from '@/lib/api'
 import { applyApiError } from '@/lib/formErrors'
 import { hasUsableCard } from '@/lib/paymentReadiness'
-import { wholeNumberIn, wholeUnits } from '@/lib/priceInput'
+import { wholeUnits } from '@/lib/priceInput'
 import { toast } from 'sonner'
 
 import { CustomerCombobox } from '@/components/CustomerCombobox'
@@ -38,9 +38,6 @@ import {
 // has been folded in. Industry convention (Stripe / Chargebee) is one
 // create-subscription form across entry points, with the parent ID
 // pre-filled.
-// The longest trial the server takes (subscription.maxTrialDays).
-const MAX_TRIAL_DAYS = 730
-
 const schema = z.object({
   code: z.string().min(1, 'Code is required').regex(/^[a-zA-Z0-9_-]+$/, 'Only letters, numbers, hyphens, and underscores'),
   display_name: z.string().min(1, 'Display name is required'),
@@ -54,9 +51,6 @@ const schema = z.object({
     { message: 'Each plan can only appear once per subscription' },
   ),
   billing_time: z.string(),
-  // Blank is no trial. parseInt cut "2.7" to 2 and sent "-5" as -5.
-  trial_days: z.string().refine(v => v.trim() === '' || wholeNumberIn(v, 0, MAX_TRIAL_DAYS) !== null,
-    `Trial days must be a whole number from 0 to ${MAX_TRIAL_DAYS}`),
 })
 
 type FormData = z.infer<typeof schema>
@@ -68,7 +62,6 @@ function emptyDefaults(customerId: string): FormData {
     customer_id: customerId,
     items: [{ plan_id: '', quantity: '1' }],
     billing_time: 'calendar',
-    trial_days: '',
   }
 }
 
@@ -114,12 +107,11 @@ export function CreateSubscriptionDialog({
         quantity: wholeUnits(it.quantity)!,
       })),
       billing_time: data.billing_time,
-      ...(data.trial_days.trim() ? { trial_days: wholeNumberIn(data.trial_days, 0, MAX_TRIAL_DAYS)! } : {}),
     }),
     onSuccess: (created) => {
       onCreated(created)
       // No card on file: warn, and never block the create. Without a card
-      // no invoice is collected automatically, after a trial or without one.
+      // no invoice is collected automatically.
       void api.listCustomerPaymentMethods(created.customer_id)
         .then(res => {
           if (!hasUsableCard(res.data ?? [])) {
@@ -131,7 +123,7 @@ export function CreateSubscriptionDialog({
         .catch(() => { /* best-effort nudge — never block on the check */ })
     },
     onError: (err) => {
-      applyApiError(form, err, ['code', 'display_name', 'customer_id', 'items', 'billing_time', 'trial_days'])
+      applyApiError(form, err, ['code', 'display_name', 'customer_id', 'items', 'billing_time'])
     },
   })
 
@@ -143,7 +135,7 @@ export function CreateSubscriptionDialog({
         <DialogHeader>
           <DialogTitle>Create subscription</DialogTitle>
           <DialogDescription>
-            Put a customer on a plan. It starts now, or starts its trial now.
+            Put a customer on a plan. It starts now.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -318,19 +310,6 @@ export function CreateSubscriptionDialog({
                         <option value="anniversary">Anniversary (sub start)</option>
                       </select>
                     </FormControl>
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="trial_days"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Trial period</FormLabel>
-                    <FormControl>
-                      <Input type="number" min={0} max={MAX_TRIAL_DAYS} step={1} placeholder="0 days" {...field} />
-                    </FormControl>
-                    <FormMessage />
                   </FormItem>
                 )}
               />

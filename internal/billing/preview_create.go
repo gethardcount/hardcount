@@ -70,7 +70,7 @@ type CreatePreviewPeriod struct {
 //   - CustomerID: required. The customer to preview against. Cross-tenant
 //     IDs surface as 404 via the RLS-safe customer lookup.
 //   - SubscriptionID: optional. When omitted, the service picks the
-//     customer's primary active or trialing subscription (most recent
+//     customer's primary active subscription (most recent
 //     cycle start wins). When passed, the service verifies the sub
 //     belongs to the customer (defensive against the rare double-typo
 //     case).
@@ -130,7 +130,7 @@ func (s *PreviewService) CreatePreview(ctx context.Context, tenantID string, req
 //     against the operator typoing both IDs to plausible-but-wrong values.
 //
 //   - Implicit (subscriptionID == ""): list the customer's subs, filter
-//     to active or trialing, pick the one with the most recent
+//     to active, pick the one with the most recent
 //     current_period_start (same heuristic as customer-usage's primary
 //     active subscription pick). Zero matches → coded
 //     customer_has_no_subscription so the dashboard's empty-state branch
@@ -164,21 +164,21 @@ func (s *PreviewService) resolveSubscription(ctx context.Context, tenantID, cust
 	if !ok {
 		return domain.Subscription{}, errs.Invalid(
 			"customer_id",
-			"customer has no active or trialing subscription; pass subscription_id explicitly to preview a non-active sub",
+			"customer has no active subscription; pass subscription_id explicitly to preview a non-active sub",
 		).WithCode("customer_has_no_subscription")
 	}
 	return primary, nil
 }
 
 // pickPrimarySubscription mirrors customer-usage's "primary active
-// subscription" heuristic: filter to active or trialing, pick the most
+// subscription" heuristic: filter to active, pick the most
 // recent current_period_start. A canceled sub is excluded: it has no
 // projected bill to preview.
 func pickPrimarySubscription(subs []domain.Subscription) (domain.Subscription, bool) {
 	var primary *domain.Subscription
 	for i := range subs {
 		sub := &subs[i]
-		if sub.Status != domain.SubscriptionActive && sub.Status != domain.SubscriptionTrialing {
+		if sub.Status != domain.SubscriptionActive {
 			continue
 		}
 		if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {

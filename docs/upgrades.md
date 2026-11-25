@@ -105,8 +105,7 @@ previous version: see
 ### Migration 00235: draft subscriptions are canceled
 
 The release with migration `00235_no_draft_subscriptions` removes draft
-subscriptions: a subscription starts, or starts its trial, when it is
-created. The migration does three things:
+subscriptions: a subscription starts when it is created. The migration does three things:
 
 - It cancels every draft subscription. A draft has billed nothing, so there
   is no invoice. No `subscription.canceled` webhook is sent for these
@@ -149,9 +148,77 @@ Run one version at a time for this upgrade. A copy of the previous version
 that keeps running can no longer create a draft: the database refuses the
 row.
 
-### Migration 00248: paid prepaid-credit invoices become top-ups
+### Migration 00249: trialing subscriptions are canceled
 
-The release with migration `00248_dispute_loss_credit_note` makes each paid
+The release with migration `00249_remove_trials` removes trials: a
+subscription is active from its creation, and bills from the start of that
+day. The migration does
+three things:
+
+- It cancels every trialing subscription. A trial has billed nothing, so
+  there is no invoice and nothing is owed. No `subscription.canceled`
+  webhook is sent for these subscriptions, and no audit log entry is
+  written.
+- It deletes a webhook endpoint that listened only to
+  `subscription.trial_ended` or `subscription.trial_extended`.
+- It removes those two events from every other endpoint's event list.
+
+Before you upgrade, on the release you run now, end the trial of each
+trialing subscription that should go on billing:
+
+1. List them in the database shell
+   (`docker compose exec postgres psql -U hardcount -d hardcount` on one
+   VM). The dashboard's Subscriptions page marks the same rows with a
+   **Trial ends** badge, one account and mode at a time.
+
+   ```sql
+   SET app.bypass_rls = 'on';
+   SELECT id, tenant_id, livemode, code, trial_end_at, cancel_at_period_end, cancel_at FROM subscriptions WHERE status = 'trialing';
+   ```
+
+   **You see:** one row for each trialing subscription, or `(0 rows)`.
+2. End the trial of each one that should bill: **End trial now** on the
+   subscription's page, or `POST /v1/subscriptions/{id}/end-trial` with an
+   API key of its account and mode. This bills its first period now. A
+   trial with a scheduled cancel cannot be ended: undo the scheduled cancel
+   first, or let the upgrade cancel it.
+
+   **You see:** the subscription's status is `active`.
+3. Let the server run for one minute after the last one, so that its
+   `subscription.trial_ended` webhook goes out. Then take the backup (step 2
+   of [Before you upgrade](#before-you-upgrade)) and upgrade as the rest of
+   this page says.
+
+The upgrade cancels a trial you did not end. To bill the customer
+afterwards, create the subscription again: it is active and bills from the
+start of the day it is created. Give it a new `code`: the canceled
+subscription keeps its own.
+
+What changes for a billing period that is open when you upgrade:
+
+- **A trial you ended before upgrading.** Its first period started at
+  midnight of the day the trial ended. Before the upgrade, usage on that day
+  up to the trial's end was free. After it, the period's invoice bills that
+  usage too. The same holds for a trial that converted by itself and is
+  still in its first period.
+- **A trial whose end has passed but that is still `trialing`.** Its
+  conversion had not run yet. The upgrade cancels it like any other trial and
+  does not bill its first period. Before you stop the old version, wait
+  until step 1's list shows no row with `trial_end_at` in the past, or end
+  those trials yourself.
+- **A price changed on the day a trial ended, before it ended.** For that
+  first period, usage is billed at the price from before the change.
+- **A canceled trial that you create again on the same day.** The new
+  subscription bills that day's usage from midnight, including what the
+  trial used. Create it the next day to leave that day free.
+
+Run one version at a time for this upgrade. A copy of the previous version
+that keeps running fails on every subscription it reads: the migration drops
+`trial_start_at`, `trial_end_at` and `activated_at`, which it reads.
+
+### Migration 00251: paid prepaid-credit invoices become top-ups
+
+The release with migration `00251_dispute_loss_credit_note` makes each paid
 invoice from v0.10.0 that sold prepaid credit and nothing else, with no tax
 and with its credit grant, a top-up (`billing_reason` `topup`). A credit
 note on it then takes the unused credit back, as commit relief does. The

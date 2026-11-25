@@ -2,7 +2,6 @@ package domain
 
 import (
 	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -11,7 +10,6 @@ import (
 type SubscriptionStatus string
 
 const (
-	SubscriptionTrialing SubscriptionStatus = "trialing"
 	SubscriptionActive   SubscriptionStatus = "active"
 	SubscriptionCanceled SubscriptionStatus = "canceled"
 )
@@ -51,7 +49,7 @@ func SameCalendarDayIn(a, b time.Time, loc *time.Location) bool {
 
 // beginningOfMonthIn snaps `t` to the first-of-month-at-00:00 in `loc`,
 // returned as UTC. Calendar-billing anchor helper. Shared between
-// subscription.Service (creation / trial end / reset) and
+// subscription.Service (creation / reset) and
 // billing.Engine (cycle close re-anchoring) so both compute the same
 // boundary from the same inputs. loc=nil falls back to UTC.
 func beginningOfMonthIn(t time.Time, loc *time.Location) time.Time {
@@ -82,8 +80,8 @@ func LoadLocationOrUTC(name string) *time.Location {
 // the same across a DST change. A plain t.AddDate(0, 0, n) on a UTC instant
 // adds n×24h instead, which lands one hour off in loc when the span crosses a
 // DST change and can move the result across civil midnight.
-// Day-grade deadlines read as dates in the tenant timezone (invoice due dates,
-// trial ends) go through here. loc=nil falls back to UTC.
+// Day-grade deadlines read as dates in the tenant timezone (invoice due dates)
+// go through here. loc=nil falls back to UTC.
 func AddDaysIn(t time.Time, n int, loc *time.Location) time.Time {
 	if loc == nil {
 		loc = time.UTC
@@ -284,7 +282,7 @@ func IsPeriodStartOnAnchor(t time.Time, anchorDay int, loc *time.Location) bool 
 // does), so the result no longer varies with whether the input time.Time was
 // freshly built in UTC or DB-scanned as time.Local. Day-grade adds are not
 // TZ-invariant either: N days on a UTC instant is N×24h, which crosses a DST
-// change one hour off civil time. Due dates and trial ends use AddDaysIn.
+// change one hour off civil time. Due dates use AddDaysIn.
 func addIntervalIn(t time.Time, interval BillingInterval, loc *time.Location) time.Time {
 	if loc == nil {
 		loc = time.UTC
@@ -469,8 +467,8 @@ type ItemInterval struct {
 }
 
 // MeterCoverageEnd is an instant at which a subscription stopped covering a
-// meter: one of its billing_intervals on a plan carrying the meter ended, or
-// a never-activated trial carrying it was canceled. The billing engine reads
+// meter: one of its billing_intervals on a plan carrying the meter ended. The
+// billing engine reads
 // another subscription's ends on the same customer and meter as the floor of
 // a usage window (ADR-012 amendment 2026-10-22).
 type MeterCoverageEnd struct {
@@ -500,18 +498,15 @@ type SubscriptionItemChange struct {
 }
 
 type Subscription struct {
-	ID           string                  `json:"id"`
-	TenantID     string                  `json:"tenant_id,omitempty"`
-	Code         string                  `json:"code"`
-	DisplayName  string                  `json:"display_name"`
-	CustomerID   string                  `json:"customer_id"`
-	Status       SubscriptionStatus      `json:"status"`
-	BillingTime  SubscriptionBillingTime `json:"billing_time"`
-	TrialStartAt *time.Time              `json:"trial_start_at,omitempty"`
-	TrialEndAt   *time.Time              `json:"trial_end_at,omitempty"`
-	StartedAt    *time.Time              `json:"started_at,omitempty"`
-	ActivatedAt  *time.Time              `json:"activated_at,omitempty"`
-	CanceledAt   *time.Time              `json:"canceled_at,omitempty"`
+	ID          string                  `json:"id"`
+	TenantID    string                  `json:"tenant_id,omitempty"`
+	Code        string                  `json:"code"`
+	DisplayName string                  `json:"display_name"`
+	CustomerID  string                  `json:"customer_id"`
+	Status      SubscriptionStatus      `json:"status"`
+	BillingTime SubscriptionBillingTime `json:"billing_time"`
+	StartedAt   *time.Time              `json:"started_at,omitempty"`
+	CanceledAt  *time.Time              `json:"canceled_at,omitempty"`
 	// CancelAt is a future timestamp at which the billing cycle should
 	// transition the subscription to canceled. Distinct from CanceledAt
 	// (past-tense, set only when the cancel has fired). Nil means no
@@ -522,16 +517,12 @@ type Subscription struct {
 	// transitions the sub to canceled and skips the next invoice. Setting
 	// false before the boundary fires undoes the schedule.
 	CancelAtPeriodEnd bool `json:"cancel_at_period_end"`
-	// CancelEffectiveAt is the DERIVED, read-only answer to "when does this
-	// subscription actually cancel?" (ADR-069). Hardcount's
-	// current_billing_period_end on a TRIALING sub is the end of the first
-	// PAID period (unlike Stripe, where period_end == trial_end while
-	// trialing), so every consumer re-deriving the date from the flag needs
-	// status-aware logic — and both existing UI surfaces got it wrong.
-	// Populated at scan time from one choke point; never persisted:
-	//   trialing + at_period_end → trial_end_at (free cancel)
-	//   otherwise  at_period_end → current_billing_period_end
-	//   explicit cancel_at       → cancel_at
+	// CancelEffectiveAt is the derived, read-only answer to "when does this
+	// subscription cancel?", so no consumer re-derives the date from the
+	// schedule fields. Populated at scan time from one choke point; never
+	// persisted:
+	//   explicit cancel_at → cancel_at
+	//   at_period_end      → current_billing_period_end
 	CancelEffectiveAt *time.Time `json:"cancel_effective_at,omitempty"`
 	// PauseCollection holds the Stripe-parity collection-pause state. When
 	// non-nil, the cycle still advances but the engine generates the
@@ -578,47 +569,20 @@ type Subscription struct {
 	Items []SubscriptionItem `json:"items,omitempty"`
 }
 
-// ErrTrialCancelDue: a trialing→active store transition was blocked because
-// a cancel schedule is due at trial end (ADR-069). Every activation writer
-// (subscription service scans, EndTrial, the billing engine's trial branch)
-// routes this to the dedicated free CancelAtTrialEnd transition instead of
-// activating and billing a customer who canceled. Lives in domain so the
-// billing engine can route on it without a peer import.
-var ErrTrialCancelDue = errors.New("trial has a cancel schedule due — route to CancelAtTrialEnd")
-
-// ErrTrialNotDue: the trial-end flip found the trial still running past the
-// time it acted for, because Extend trial moved its end after the caller read
-// the row. Nothing is due yet; the caller skips the row.
-var ErrTrialNotDue = errors.New("the trial has not ended yet")
-
-// ErrTrialCancelConflict: CancelAtTrialEnd's CAS matched no row — the
-// schedule was cleared, the trial extended, or another site already
-// canceled. The caller treats the sub as NOT handled this pass.
-var ErrTrialCancelConflict = errors.New("trial-end cancel conflicted — re-read and route")
-
-// billingStartedAt is the instant the subscription began to bill: its trial
-// end when it had a trial (trial usage is free), else its start. Nil when
-// neither is set: a subscription canceled before it ever started (a draft in
-// earlier releases, or canceled by migration 00235) has no start and no period.
-func (s Subscription) billingStartedAt() *time.Time {
-	if s.TrialEndAt != nil {
-		return s.TrialEndAt
-	}
-	return s.StartedAt
-}
-
 // PlanJoinedAt is the instant from which an item was on the plan of one
 // stretch of its life (ADR-130 §4 step 3, amended 2026-10-26): the latest of
 // from, where the stretch begins (a billing interval's start in the window
 // read, a swap onto the plan, or zero when unknown), the item's creation
 // when it was added after the subscription was created, and the
-// subscription's billing start. A billing interval opened by an add on a
+// subscription's start. A billing interval opened by an add on a
 // period's first day starts at the period start (ADR-012), so the add's own
 // instant is the item's creation. Items created with the subscription share
 // its created_at.
 func (s Subscription) PlanJoinedAt(itemCreatedAt, from time.Time) time.Time {
 	at := from
-	if b := s.billingStartedAt(); b != nil && b.After(at) {
+	// A subscription canceled before it ever started (a draft in earlier
+	// releases, or canceled by migration 00235) has no start.
+	if b := s.StartedAt; b != nil && b.After(at) {
 		at = *b
 	}
 	if itemCreatedAt.After(s.CreatedAt) && itemCreatedAt.After(at) {
@@ -628,16 +592,13 @@ func (s Subscription) PlanJoinedAt(itemCreatedAt, from time.Time) time.Time {
 }
 
 // DeriveCancelEffectiveAt computes CancelEffectiveAt from the schedule
-// fields (ADR-069). Called from the subscription store's row scan — the one
-// choke point every read path flows through.
+// fields. Called from the subscription store's row scan — the one choke
+// point every read path flows through.
 func (s *Subscription) DeriveCancelEffectiveAt() {
 	s.CancelEffectiveAt = nil
 	switch {
 	case s.CancelAt != nil:
 		t := *s.CancelAt
-		s.CancelEffectiveAt = &t
-	case s.CancelAtPeriodEnd && s.Status == SubscriptionTrialing && s.TrialEndAt != nil:
-		t := *s.TrialEndAt
 		s.CancelEffectiveAt = &t
 	case s.CancelAtPeriodEnd && s.CurrentBillingPeriodEnd != nil:
 		t := *s.CurrentBillingPeriodEnd

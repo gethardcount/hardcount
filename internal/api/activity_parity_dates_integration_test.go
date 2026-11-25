@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
@@ -58,40 +57,6 @@ func newDatesRigOn(t *testing.T, name string, clk clock.Clock) *datesRig {
 	return r
 }
 
-// trialSub creates a customer and a subscription with a 14-day trial on the
-// in_advance plan. It returns the subscription id and its trial end.
-func (r *datesRig) trialSub(key string) (string, time.Time) {
-	r.t.Helper()
-	cust := map[string]any{"external_id": "dates-" + key, "display_name": "Dates " + key, "email": "billing@dates.test"}
-	customerID := flowStr(r.call("POST", "/v1/customers", flowReq{body: cust}).want(r.t, 201, key+": create customer").body, "id")
-	sub := r.call("POST", "/v1/subscriptions", flowReq{body: map[string]any{
-		"code": "dates-" + key, "display_name": "Dates " + key, "customer_id": customerID,
-		"items": []map[string]any{{"plan_id": r.planID, "quantity": 1}}, "billing_time": "anniversary",
-		"trial_days": 14,
-	}}).want(r.t, 201, key+": create subscription").body
-	trialEnd, err := time.Parse(time.RFC3339, flowStr(sub, "trial_end_at"))
-	if err != nil {
-		r.t.Fatalf("%s: trial_end_at %q: %v", key, flowStr(sub, "trial_end_at"), err)
-	}
-	return flowStr(sub, "id"), trialEnd.UTC()
-}
-
-// subLine returns the subscription timeline's one line titled title.
-func (r *datesRig) subLine(subID, title string) map[string]any {
-	r.t.Helper()
-	events := flowList(r.call("GET", "/v1/subscriptions/"+subID+"/timeline", flowReq{}).want(r.t, 200, "subscription timeline").body, "events")
-	var found []map[string]any
-	for _, l := range linesOf(r.t, events) {
-		if l["title"] == title {
-			found = append(found, l)
-		}
-	}
-	if len(found) != 1 {
-		r.t.Fatalf("subscription timeline has %d %q lines, want 1: %s", len(found), title, mustJSON(linesOf(r.t, events)))
-	}
-	return found[0]
-}
-
 // invoices returns the subscription's invoices, oldest created first.
 func (r *datesRig) invoices(subID string) []map[string]any {
 	r.t.Helper()
@@ -123,50 +88,6 @@ func at(t *testing.T, m map[string]any, key string) time.Time {
 		t.Fatalf("%s = %v: %v", key, m[key], err)
 	}
 	return v.UTC()
-}
-
-// wantAt fails unless m[key] is want, to the second.
-func wantAt(t *testing.T, what string, m map[string]any, key string, want time.Time) {
-	t.Helper()
-	if got := at(t, m, key); !got.Truncate(time.Second).Equal(want.Truncate(time.Second)) {
-		t.Errorf("%s %s = %v, want %v (off by %v)", what, key, got, want, got.Sub(want))
-	}
-}
-
-// TestActivityDates_TrialRunsOut: a trial that runs out is dated at the
-// expiry tick, and its day-1 invoice is issued at trial_end_at.
-func TestActivityDates_TrialRunsOut(t *testing.T) {
-	r := newDatesRig(t, "Activity Dates Trial")
-
-	t.Run("real clock: one expiry tick", func(t *testing.T) {
-		subID, trialEnd := r.trialSub("wall")
-		// Move the trial, and the period that follows it, so it ended a
-		// minute ago.
-		shift := time.Now().UTC().Add(-time.Minute).Sub(trialEnd)
-		admin := testutil.AdminPool(t)
-		if _, err := admin.Exec(`UPDATE subscriptions SET
-			trial_start_at = trial_start_at + $1 * interval '1 microsecond',
-			trial_end_at = trial_end_at + $1 * interval '1 microsecond',
-			current_billing_period_start = current_billing_period_start + $1 * interval '1 microsecond',
-			current_billing_period_end = current_billing_period_end + $1 * interval '1 microsecond',
-			next_billing_at = next_billing_at + $1 * interval '1 microsecond'
-			WHERE id = $2`, shift.Microseconds(), subID); err != nil {
-			t.Fatalf("move the trial end: %v", err)
-		}
-		trialEnd = trialEnd.Add(shift).Truncate(time.Microsecond)
-
-		before := time.Now().UTC()
-		if n, errs := r.srv.SubscriptionSvc.ProcessExpiredTrials(postgres.WithLivemode(context.Background(), false), 100); n != 1 || len(errs) != 0 {
-			t.Fatalf("trial expiry tick: flipped=%d errs=%v, want 1 and none", n, errs)
-		}
-		after := time.Now().UTC()
-
-		line := r.subLine(subID, "Trial ended")
-		if got := at(t, line, "occurred_at"); got.Before(before.Add(-time.Second)) || got.After(after.Add(time.Second)) {
-			t.Errorf(`"Trial ended" line at %v, want within the tick (%v – %v)`, got, before, after)
-		}
-		wantAt(t, "day-1 invoice", r.dayOne(subID), "issued_at", trialEnd)
-	})
 }
 
 // subWithItem creates a customer and an active subscription on planID,

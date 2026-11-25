@@ -1297,7 +1297,7 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 	// read: each may say that
 	// retries keep their schedule only while a charge retry is still to come
 	// (InvoiceDunningRun.RetryScheduled: active, not paused, attempts left
-	// under the bound policy). No run, or a read error, leaves retrying false, and the notice
+	// under the policy). No run, or a read error, leaves retrying false, and the notice
 	// then says no retry is scheduled — the direction that still sends the
 	// operator to get a new card, rather than waiting on a retry that may
 	// never run.

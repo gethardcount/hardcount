@@ -62,7 +62,7 @@ clean.
 
 A dunning run is the automatic retries after a failed payment.
 
-- [ ] Payment retries → Policies: "Default retries" is the default and enabled. A bootstrap creates it in both modes (ADR-123). Its row reads "3 retries, on day 3, 7 and 14". When its retries run out it changes nothing: final actions none and none. Running the demo first does not change this: a recipe creates no dunning policy.
+- [ ] Payment retries → Policy: the policy is enabled. A bootstrap creates it in both modes (ADR-123). Its form reads "3 retries, on day 3, 7 and 14". When its retries run out it changes nothing: "Leave it active" and "Leave it open and due". Running the demo first does not change this: a recipe creates no dunning policy.
 - [ ] Create a customer with an email. With `stripe listen` running, open its setup link (Add payment method) and save card `0341` in Checkout → the card is listed on the customer.
 - [ ] Subscribe the customer to a plan whose base fee is billed in advance (the dashboard's plan form starts on in arrears; the API needs `base_bill_timing`) → the first invoice is declined and a dunning run starts.
 - [ ] Open the invoice link in the payment-failed email and pay with `4242` (Checkout offers the saved `0341` first: click **Change**) → the invoice is paid, and the dunning run shows recovered.
@@ -135,8 +135,8 @@ The `upgrade` CI job runs steps 1 to 5 and 7 on every pull request ([What CI run
    **You see:** one `migration applied` line per migration, then `migrations applied`, with `version` set to the new release's last migration number, and no error. `hardcount migrate status` now says `up to date`.
 5. Open the invoice from step 1.
    **You see:** the same number, total and line amounts. Its PDF has the same lines and amounts as the one you downloaded. The "Generated on" time at the bottom differs, because each PDF is made when you open it. A release that changes what the PDF prints says so in its notes.
-6. Open **Payment retries → Policies**.
-   **You see:** the same policies as before the upgrade. An upgrade never adds or changes a retry policy on an existing account.
+6. Open **Payment retries → Policy**.
+   **You see:** the account's retry policy, with the settings it had before the upgrade. An upgrade never adds a retry policy to an account that has none.
 7. Run `./quickstart.sh demo` again.
    **You see:** a second finalized invoice for a new demo customer.
 8. Run `./quickstart.sh destroy --yes` when you are done.

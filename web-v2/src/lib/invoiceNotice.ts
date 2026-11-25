@@ -3,6 +3,7 @@
 // out, so the unit tests can check every branch without rendering.
 
 import { formatDate } from '@/lib/api'
+import type { SubscriptionStatus } from '@/lib/gen/schemas/subscriptionStatus'
 
 // The page shows at most one notice above the invoice (the most urgent one).
 // Two can apply:
@@ -40,7 +41,7 @@ export interface WrittenOffSubscriptionLine {
 }
 
 export function writtenOffSubscriptionLine(
-  subscription: { status: string; pause_collection?: unknown | null } | null | undefined,
+  subscription: { status: SubscriptionStatus; pause_collection?: unknown | null } | null | undefined,
 ): WrittenOffSubscriptionLine | null {
   // A one-off invoice has no subscription, so there is nothing to say.
   if (!subscription) return null

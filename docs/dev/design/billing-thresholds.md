@@ -18,6 +18,7 @@
 > 6. The scheduler tick is now reconcilers → auto-charge retry → dunning enrollment → threshold scan → cycle scan.
 > 7. `amount_gte` is integer cents in the currency's **minor** unit; the body's "major-unit-cents" contradicts itself.
 > 8. A threshold counts and bills **usage only** (2026-10-23). `amount_gte` is compared with the period's usage so far, and the base fee, in advance or in arrears, is billed by the period's own invoice, not the threshold invoice.
+> 9. A subscription has no trial and no `trialing` status (2026-11-25): the scan reads only active subscriptions, and the plan's trialing-skip test has nothing to test.
 >
 > Related design docs: `docs/dev/design/create-preview.md` (same wire conventions), `docs/dev/design/multi-dim-meters.md` (`usage.AggregateByPricingRules`).
 

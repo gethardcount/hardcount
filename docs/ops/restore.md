@@ -339,9 +339,9 @@ Each line names a refund made after the backup, of a payment the restored databa
    SELECT role, last_tick_age_s FROM leader_status WHERE role = 'billing';
    SELECT count(*) AS due, min(next_billing_at) AS oldest
    FROM subscriptions
-   WHERE livemode AND status IN ('active', 'trialing')
+   WHERE livemode AND status = 'active'
      AND (next_billing_at <= now() - interval '1 hour'
-          OR (status = 'active' AND cancel_at <= now() - interval '1 hour'));
+          OR cancel_at <= now() - interval '1 hour');
    ```
 
    **You see:** `last_tick_age_s` starts again from a few seconds when the run ends, and `due` falls to 0. `1 hour` is the default invoice grace, `INVOICE_GRACE_PERIOD`: use your value if you set one. A subscription whose billing fails stays counted: see [Subscriptions whose billing is failing](runbook/billing-failing.md). If nothing changes, see [A background job is stuck](runbook/background-job-stuck.md).

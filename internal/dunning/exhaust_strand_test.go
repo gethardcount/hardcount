@@ -48,7 +48,7 @@ func finalAttemptRun(t *testing.T, store *memStore, svc *Service) domain.Invoice
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}
-	run.AttemptCount = store.policies[store.defaultID].Retries() - 1
+	run.AttemptCount = store.policy.Retries() - 1
 	due := time.Now().UTC().Add(-time.Minute)
 	run.NextActionAt = &due
 	store.runs[run.ID] = run
@@ -58,10 +58,10 @@ func finalAttemptRun(t *testing.T, store *memStore, svc *Service) domain.Invoice
 // manualReviewPolicy: retries exhaust into escalation with no terminal
 // mover, so the escalation write is the only thing exhaustion does.
 func manualReviewPolicy(store *memStore) {
-	p := store.policies[store.defaultID]
+	p := *store.policy
 	p.FinalSubscriptionAction = domain.SubActionNone
 	p.FinalInvoiceAction = domain.InvActionNone
-	store.policies[store.defaultID] = p
+	store.policy = &p
 }
 
 // TestExhaust_InterruptedAfterFinalAttempt_IsRedriven is SB-1 itself, wired
@@ -421,9 +421,9 @@ func TestExhaustOnEntry_LoweredPolicy_StampsWhenItRan(t *testing.T) {
 	oldRetry := time.Now().UTC().Add(-72 * time.Hour)
 	r.LastAttemptAt = &oldRetry
 	mem.runs[run.ID] = r
-	p := mem.policies[mem.defaultID]
+	p := *mem.policy
 	p.RetryDays = p.RetryDays[:r.AttemptCount] // the operator shortens it
-	mem.policies[mem.defaultID] = p
+	mem.policy = &p
 
 	tick := time.Now().UTC().Truncate(time.Microsecond)
 	if _, errs := svc.ProcessDueRuns(clock.WithEffectiveNow(context.Background(), tick), "t1", 20); len(errs) != 0 {

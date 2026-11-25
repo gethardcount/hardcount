@@ -48,10 +48,9 @@ import (
 // by the shared-fate tests. This is the shrinking set doing its
 // job: one entry removed, proven, gone.
 var residualOwnTxAuditWriters = map[string]int{
-	// Engine-driven subscription lifecycle. Cancel appears twice: end-of-period cancel
-	// on the billing run, and the cancel-at-period-end sweep.
-	"cancel":                              2,
-	"update":                              1,
+	// Engine-driven subscription lifecycle: the scheduled cancel the billing run
+	// fires, and a scheduled plan change it applies.
+	"cancel":                              1,
 	"subscription.pending_change_applied": 1,
 
 	// Usage-threshold scanning. Neither mutates money directly — they record that a
@@ -71,9 +70,7 @@ var residualOwnTxAuditWriters = map[string]int{
 // hiding in a handler file would be mis-bucketed here, not missed.
 var requestScopedOwnTxWriters = map[string]int{
 	"billing/run":    1,
-	"dunning/create": 1,
-	"dunning/update": 2,
-	"dunning/delete": 1,
+	"dunning/update": 1,
 	"webhook/create": 1,
 	// update ×3: endpoint PATCH, the event replay, and the single-receiver
 	// delivery replay (endpoint drill-down).

@@ -12,10 +12,10 @@ an example message. How messages are delivered, signed and retried:
   object the API returns for that resource, as it was when Hardcount made
   the event.
 - **"Also in `data`"** lists the other keys an event carries beside the
-  resource. Two are sent only when they apply, and their events say when:
-  `reason` on `subscription.canceled` and `resumed_at` on
-  `subscription.collection_resumed`. Every other key is always sent, even
-  when it is empty, such as `applied` on `dunning.escalated`.
+  resource. One is sent only when it applies, and its event says when:
+  `resumed_at` on `subscription.collection_resumed`. Every other key is
+  always sent, even when it is empty, such as `applied` on
+  `dunning.escalated`.
 - **The examples are the real shape of each message.** Hardcount sends the
   body on one line, with its keys in this order; it is indented here. Tests
   check every example against the code that builds the message
@@ -1143,10 +1143,9 @@ A customer's payment method was set up or replaced through Stripe Checkout.
 `GET /v1/subscriptions/{id}` returns it, without
 `current_billing_period_display` (a date range the API writes out when you
 read it). A cancel's time is the subscription's `canceled_at`. A scheduled
-cancel's time is its `cancel_at` and `cancel_effective_at`. These fields,
-`trial_end_at` and `pause_collection` are left out when they are not set.
-The example subscription has no cancel, trial or pause, so its examples do
-not show them.
+cancel's time is its `cancel_at` and `cancel_effective_at`. These fields
+and `pause_collection` are left out when they are not set. The example
+subscription has no cancel or pause, so its examples do not show them.
 
 ### `subscription.created`
 
@@ -1162,7 +1161,6 @@ A subscription was created.
   "created_at": "2026-10-01T12:00:00Z",
   "data": {
     "subscription": {
-      "activated_at": "2026-09-01T12:00:00Z",
       "billing_thresholds": {
         "amount_gte": 50000,
         "item_thresholds": []
@@ -1207,12 +1205,10 @@ A subscription was created.
 
 A subscription was canceled. `canceled_by` says who canceled it:
 `operator` (a dashboard user or an API key), `customer`, `schedule` (a
-cancel set for later, such as at trial end), `dunning` (Hardcount's
-automatic payment retries ran out) or `system` (Hardcount itself). A cancel
-by dunning says `dunning`. A cancel at trial end carries
-`reason: trial_end_cancel`; other cancels have no `reason`.
+cancel set for later), `dunning` (Hardcount's automatic payment retries ran
+out) or `system` (Hardcount itself). A cancel by dunning says `dunning`.
 
-**Also in `data`:** `canceled_by`, `reason`.
+**Also in `data`:** `canceled_by`.
 
 <details>
 <summary>Example message</summary>
@@ -1222,9 +1218,7 @@ by dunning says `dunning`. A cancel at trial end carries
   "created_at": "2026-10-01T12:00:00Z",
   "data": {
     "canceled_by": "schedule",
-    "reason": "trial_end_cancel",
     "subscription": {
-      "activated_at": "2026-09-01T12:00:00Z",
       "billing_thresholds": {
         "amount_gte": 50000,
         "item_thresholds": []
@@ -1265,121 +1259,6 @@ by dunning says `dunning`. A cancel at trial end carries
 
 </details>
 
-### `subscription.trial_ended`
-
-A trial ended. `triggered_by` is `operator` or `schedule`, and `ended_at`
-is when it ended.
-
-**Also in `data`:** `ended_at`, `triggered_by`.
-
-<details>
-<summary>Example message</summary>
-
-```json
-{
-  "created_at": "2026-10-01T12:00:00Z",
-  "data": {
-    "ended_at": "2026-10-01T12:00:00Z",
-    "subscription": {
-      "activated_at": "2026-09-01T12:00:00Z",
-      "billing_thresholds": {
-        "amount_gte": 50000,
-        "item_thresholds": []
-      },
-      "billing_time": "calendar",
-      "cancel_at_period_end": false,
-      "code": "acme-pro",
-      "created_at": "2026-09-01T12:00:00Z",
-      "current_billing_period_end": "2026-11-01T12:00:00Z",
-      "current_billing_period_start": "2026-10-01T12:00:00Z",
-      "customer_id": "hc_cus_golden",
-      "display_name": "Acme Pro",
-      "id": "hc_sub_golden",
-      "items": [
-        {
-          "created_at": "2026-09-01T12:00:00Z",
-          "id": "hc_si_golden",
-          "pending_plan_effective_at": "2026-11-01T12:00:00Z",
-          "pending_plan_id": "hc_pln_team",
-          "plan_id": "hc_pln_pro",
-          "quantity": 3,
-          "subscription_id": "hc_sub_golden",
-          "tenant_id": "hc_ten_golden",
-          "updated_at": "2026-10-01T12:00:00Z"
-        }
-      ],
-      "next_billing_at": "2026-11-01T12:00:00Z",
-      "started_at": "2026-09-01T12:00:00Z",
-      "status": "active",
-      "tenant_id": "hc_ten_golden",
-      "updated_at": "2026-10-01T12:00:00Z"
-    },
-    "triggered_by": "schedule"
-  },
-  "event_type": "subscription.trial_ended",
-  "id": "hc_whevt_golden"
-}
-```
-
-</details>
-
-### `subscription.trial_extended`
-
-A trial's end date moved later. The new end is the subscription's
-`trial_end_at`. `triggered_by` is `operator`.
-
-**Also in `data`:** `triggered_by`.
-
-<details>
-<summary>Example message</summary>
-
-```json
-{
-  "created_at": "2026-10-01T12:00:00Z",
-  "data": {
-    "subscription": {
-      "activated_at": "2026-09-01T12:00:00Z",
-      "billing_thresholds": {
-        "amount_gte": 50000,
-        "item_thresholds": []
-      },
-      "billing_time": "calendar",
-      "cancel_at_period_end": false,
-      "code": "acme-pro",
-      "created_at": "2026-09-01T12:00:00Z",
-      "current_billing_period_end": "2026-11-01T12:00:00Z",
-      "current_billing_period_start": "2026-10-01T12:00:00Z",
-      "customer_id": "hc_cus_golden",
-      "display_name": "Acme Pro",
-      "id": "hc_sub_golden",
-      "items": [
-        {
-          "created_at": "2026-09-01T12:00:00Z",
-          "id": "hc_si_golden",
-          "pending_plan_effective_at": "2026-11-01T12:00:00Z",
-          "pending_plan_id": "hc_pln_team",
-          "plan_id": "hc_pln_pro",
-          "quantity": 3,
-          "subscription_id": "hc_sub_golden",
-          "tenant_id": "hc_ten_golden",
-          "updated_at": "2026-10-01T12:00:00Z"
-        }
-      ],
-      "next_billing_at": "2026-11-01T12:00:00Z",
-      "started_at": "2026-09-01T12:00:00Z",
-      "status": "active",
-      "tenant_id": "hc_ten_golden",
-      "updated_at": "2026-10-01T12:00:00Z"
-    },
-    "triggered_by": "operator"
-  },
-  "event_type": "subscription.trial_extended",
-  "id": "hc_whevt_golden"
-}
-```
-
-</details>
-
 ### `subscription.cancel_scheduled`
 
 A cancel at period end was scheduled.
@@ -1394,7 +1273,6 @@ A cancel at period end was scheduled.
   "created_at": "2026-10-01T12:00:00Z",
   "data": {
     "subscription": {
-      "activated_at": "2026-09-01T12:00:00Z",
       "billing_thresholds": {
         "amount_gte": 50000,
         "item_thresholds": []
@@ -1450,7 +1328,6 @@ nothing.
   "created_at": "2026-10-01T12:00:00Z",
   "data": {
     "subscription": {
-      "activated_at": "2026-09-01T12:00:00Z",
       "billing_thresholds": {
         "amount_gte": 50000,
         "item_thresholds": []
@@ -1512,7 +1389,6 @@ the pause; resume it yourself.
   "created_at": "2026-10-01T12:00:00Z",
   "data": {
     "subscription": {
-      "activated_at": "2026-09-01T12:00:00Z",
       "billing_thresholds": {
         "amount_gte": 50000,
         "item_thresholds": []
@@ -1582,7 +1458,6 @@ nothing. `triggered_by` is `operator`, `schedule` (its resume date came) or
   "data": {
     "resumed_at": "2026-10-01T12:00:00Z",
     "subscription": {
-      "activated_at": "2026-09-01T12:00:00Z",
       "billing_thresholds": {
         "amount_gte": 50000,
         "item_thresholds": []
@@ -1639,7 +1514,6 @@ A plan was added to the subscription. `item_id` names the new item.
   "data": {
     "item_id": "hc_si_golden",
     "subscription": {
-      "activated_at": "2026-09-01T12:00:00Z",
       "billing_thresholds": {
         "amount_gte": 50000,
         "item_thresholds": []
@@ -1695,7 +1569,6 @@ An item's plan or quantity changed. `item_id` names the item.
   "data": {
     "item_id": "hc_si_golden",
     "subscription": {
-      "activated_at": "2026-09-01T12:00:00Z",
       "billing_thresholds": {
         "amount_gte": 50000,
         "item_thresholds": []
@@ -1751,7 +1624,6 @@ An item was removed. `item_id` names it; it is no longer in `items`.
   "data": {
     "item_id": "hc_si_golden",
     "subscription": {
-      "activated_at": "2026-09-01T12:00:00Z",
       "billing_thresholds": {
         "amount_gte": 50000,
         "item_thresholds": []
@@ -1808,7 +1680,6 @@ A plan change for the next billing period was scheduled. The item's
   "data": {
     "item_id": "hc_si_golden",
     "subscription": {
-      "activated_at": "2026-09-01T12:00:00Z",
       "billing_thresholds": {
         "amount_gte": 50000,
         "item_thresholds": []
@@ -1867,7 +1738,6 @@ before the cancel reached it, the call answers 409 and sends nothing:
   "data": {
     "item_id": "hc_si_golden",
     "subscription": {
-      "activated_at": "2026-09-01T12:00:00Z",
       "billing_thresholds": {
         "amount_gte": 50000,
         "item_thresholds": []
@@ -1928,7 +1798,6 @@ means Hardcount builds its invoice and starts the next period.
     "item_id": "hc_si_golden",
     "old_plan_id": "hc_pln_basic",
     "subscription": {
-      "activated_at": "2026-09-01T12:00:00Z",
       "billing_thresholds": {
         "amount_gte": 50000,
         "item_thresholds": []
@@ -1997,7 +1866,6 @@ the period's usage so far, or a usage count on one item. "So far" ends one
     "invoice_id": "hc_inv_golden",
     "running_subtotal": 50100,
     "subscription": {
-      "activated_at": "2026-09-01T12:00:00Z",
       "billing_thresholds": {
         "amount_gte": 50000,
         "item_thresholds": []
@@ -2145,7 +2013,6 @@ Payment retries started for an invoice.
       "invoice_id": "hc_inv_golden",
       "last_attempt_at": "2026-10-01T11:00:00Z",
       "paused": false,
-      "policy_id": "hc_dpol_golden",
       "reason": "payment_failed",
       "resolution": "retries_exhausted",
       "resolved_at": "2026-10-01T12:00:00Z",
@@ -2188,7 +2055,6 @@ applied.
       "invoice_id": "hc_inv_golden",
       "last_attempt_at": "2026-10-01T11:00:00Z",
       "paused": false,
-      "policy_id": "hc_dpol_golden",
       "reason": "payment_failed",
       "resolution": "retries_exhausted",
       "resolved_at": "2026-10-01T12:00:00Z",
@@ -2228,7 +2094,6 @@ someone resolved it by hand. The run's `resolution` says why.
       "invoice_id": "hc_inv_golden",
       "last_attempt_at": "2026-10-01T11:00:00Z",
       "paused": false,
-      "policy_id": "hc_dpol_golden",
       "reason": "payment_failed",
       "resolution": "retries_exhausted",
       "resolved_at": "2026-10-01T12:00:00Z",

@@ -44,8 +44,8 @@ func newPauseRig(t *testing.T, name string, invoiceAction domain.DunningInvoiceA
 	r.ctx = clock.WithoutInstant(leadertest.Token(t, r.admin, postgres.WithLivemode(context.Background(), false), leader.RoleDunning))
 	r.invs = invoice.NewPostgresStore(r.db)
 	r.runs = dunning.NewPostgresStore(r.db)
-	pol, err := r.srv.DunningSvc.UpsertPolicy(r.ctx, r.tenantID, domain.DunningPolicy{
-		Name: "pause on exhaustion", Enabled: true, RetryDays: []int{3},
+	pol, err := r.srv.DunningSvc.PutPolicy(r.ctx, r.tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3},
 		FinalSubscriptionAction: domain.SubActionPause, FinalInvoiceAction: invoiceAction,
 	})
 	if err != nil {
@@ -90,14 +90,14 @@ func (r *pauseRig) openInvoice(subID, number string, cents int64) string {
 func (r *pauseRig) armRun(invoiceID, customerID string, next time.Time) string {
 	r.t.Helper()
 	if run, err := r.runs.GetActiveRunByInvoice(r.ctx, r.tenantID, invoiceID); err == nil {
-		if _, err := r.admin.Exec(`UPDATE invoice_dunning_runs SET policy_id = $1, attempt_count = $2, next_action_at = $3
-			WHERE id = $4`, r.pol.ID, r.pol.Retries(), next, run.ID); err != nil {
+		if _, err := r.admin.Exec(`UPDATE invoice_dunning_runs SET attempt_count = $1, next_action_at = $2
+			WHERE id = $3`, r.pol.Retries(), next, run.ID); err != nil {
 			r.t.Fatalf("arm run: %v", err)
 		}
 		return run.ID
 	}
 	run, err := r.runs.CreateRun(r.ctx, r.tenantID, domain.InvoiceDunningRun{
-		InvoiceID: invoiceID, CustomerID: customerID, PolicyID: r.pol.ID,
+		InvoiceID: invoiceID, CustomerID: customerID,
 		State: domain.DunningActive, Reason: "payment_failed", AttemptCount: r.pol.Retries(), NextActionAt: &next,
 	})
 	if err != nil {

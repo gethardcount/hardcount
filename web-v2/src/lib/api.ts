@@ -19,6 +19,7 @@ import type { RecipeInstance } from './gen/schemas/recipeInstance'
 import type { ActivityLine } from './gen/schemas/activityLine'
 import type { CreditNoteStats } from './gen/schemas/creditNoteStats'
 import type { ProviderCostRate } from './gen/schemas/providerCostRate'
+import type { SubscriptionStatus } from './gen/schemas/subscriptionStatus'
 
 const API_BASE = '/v1'
 
@@ -225,7 +226,7 @@ export const api = {
   // Subscriptions
   listSubscriptions: (params?: string) =>
     apiRequest<{ data: Subscription[]; total: number }>('GET', `/subscriptions${params ? '?' + params : ''}`),
-  createSubscription: (data: { code: string; display_name: string; customer_id: string; items: { plan_id: string; quantity?: number }[]; billing_time?: string; trial_days?: number }) =>
+  createSubscription: (data: { code: string; display_name: string; customer_id: string; items: { plan_id: string; quantity?: number }[]; billing_time?: string }) =>
     apiRequest<Subscription>('POST', '/subscriptions', data),
 
   // Pricing
@@ -422,7 +423,7 @@ export const api = {
     ),
 
   // Customer updates
-  updateCustomer: (id: string, data: { display_name?: string; email?: string; additional_emails?: string[]; dunning_policy_id?: string; status?: 'active' | 'archived' }) =>
+  updateCustomer: (id: string, data: { display_name?: string; email?: string; additional_emails?: string[]; status?: 'active' | 'archived' }) =>
     apiRequest<Customer>('PATCH', `/customers/${id}`, data),
 
   // Subscription detail
@@ -453,10 +454,6 @@ export const api = {
     apiRequest<Subscription>('PUT', `/subscriptions/${id}/billing-thresholds`, body),
   clearSubscriptionBillingThresholds: (id: string) =>
     apiRequest<Subscription>('DELETE', `/subscriptions/${id}/billing-thresholds`),
-  endSubscriptionTrial: (id: string) =>
-    apiRequest<Subscription>('POST', `/subscriptions/${id}/end-trial`),
-  extendSubscriptionTrial: (id: string, body: { trial_end: string }) =>
-    apiRequest<Subscription>('POST', `/subscriptions/${id}/extend-trial`, body),
   // Item CRUD. PATCH body is either `{quantity}` or `{new_plan_id, immediate}`,
   // never both — mirrors the backend's UpdateItemInput guard. Both mutations
   // take an Idempotency-Key (same contract as the credits calls): item
@@ -494,16 +491,6 @@ export const api = {
     apiRequest<{ sent_to: string }>('POST', '/settings/email/test'),
 
   // Dunning
-  // Dunning policies (campaigns model, ADR-036). Multi-policy-per-
-  // tenant with exactly one is_default. Customer assignment flows
-  // through the customer Update endpoint (PATCH /customers/{id} body
-  // carries dunning_policy_id).
-  listDunningPolicies: () => listAll<DunningPolicyWithCount>('/dunning/policies'),
-  getDunningPolicy: (id: string) => apiRequest<DunningPolicy>('GET', `/dunning/policies/${id}`),
-  createDunningPolicy: (data: Partial<DunningPolicy>) => apiRequest<DunningPolicy>('POST', '/dunning/policies', data),
-  updateDunningPolicy: (id: string, data: Partial<DunningPolicy>) => apiRequest<DunningPolicy>('PATCH', `/dunning/policies/${id}`, data),
-  deleteDunningPolicy: (id: string) => apiRequest<{ status: string }>('DELETE', `/dunning/policies/${id}`),
-  setDefaultDunningPolicy: (id: string) => apiRequest<{ status: string }>('POST', `/dunning/policies/${id}/set-default`),
   listDunningRuns: (params?: string) => apiRequest<{ data: DunningRun[]; total: number }>('GET', `/dunning/runs${params ? '?' + params : ''}`),
   getDunningRun: (id: string) => apiRequest<{ run: DunningRun; events: DunningEvent[] }>('GET', `/dunning/runs/${id}`),
   // Aggregate counts + at-risk sum for the dashboard stat cards.
@@ -684,10 +671,6 @@ export interface Customer {
   email_status?: 'unknown' | 'ok' | 'bounced' | 'complained'
   email_last_bounced_at?: string
   email_bounce_reason?: string
-  // DunningPolicyID assigns this customer to a specific dunning
-  // policy (ADR-036 campaigns model). Empty/undefined = use the
-  // tenant default. Updatable via PATCH /customers/{id}.
-  dunning_policy_id?: string
 }
 
 export interface SubscriptionItem {
@@ -780,7 +763,7 @@ export interface Subscription {
   // Present on all list/get responses from FEAT-5 onward. Pre-FEAT-5 code
   // paths may omit it, so treat as optional and fall back gracefully.
   items?: SubscriptionItem[]
-  status: string
+  status: SubscriptionStatus
   billing_time: string
   current_billing_period_start?: string
   current_billing_period_end?: string
@@ -792,12 +775,10 @@ export interface Subscription {
   // labels can pass undefined to formatCivil* and fall back to the tenant TZ.
   current_billing_period_display?: string
   next_billing_at?: string
-  trial_start_at?: string
-  trial_end_at?: string
   cancel_at_period_end?: boolean
   // Derived, read-only: the backend's authoritative "when does it actually
-  // cancel" (trialing+flag → trial end; active+flag → period end; explicit
-  // cancel_at otherwise). Consumers must not re-derive from the flag.
+  // cancel" (cancel_at when set; otherwise, with the flag, the period end).
+  // Consumers must not re-derive from the flag.
   cancel_effective_at?: string
   cancel_at?: string
   canceled_at?: string
@@ -1043,7 +1024,7 @@ export interface TimelineEvent {
   // ADR-020.
   detail?: string
   // RFC3339 timestamp the end of detail refers to (the subscription
-  // timeline's "Trial now ends", "Resumes", "On" cases). When set, the
+  // timeline's "Resumes" and "On" cases). When set, the
   // renderer formats it in tenant TZ via formatDateTime so the sub-
   // line stays consistent with the main row timestamp instead of
   // mixing the operator's TZ with backend-baked UTC.
@@ -1461,44 +1442,10 @@ export interface InvoicePreviewTotal {
   amount_cents: number
 }
 
-// DunningPolicy = a named campaign (ADR-036). Multi-policy-per-tenant;
-// one row per (tenant, livemode) carries is_default=true and is used
-// when a customer has no explicit dunning_policy_id assignment.
-export interface DunningPolicy {
-  id: string
-  name: string
-  enabled: boolean
-  is_default: boolean
-  // True for the "Default retries" policy the account was created with,
-  // until it is edited or made the default (ADR-123). While true, the next
-  // policy created takes over the default.
-  seeded: boolean
-  // Days to wait before each retry: the first after the failed payment (or
-  // the collection that found no card), each later one after the retry
-  // before it. Its length is the number of
-  // retries (lib/dunningSchedule).
-  retry_days: number[]
-  // The two terminal decisions (ADR-112): 'none' | 'pause' | 'cancel' and
-  // 'none' | 'mark_uncollectible'. They replaced a single `final_action`,
-  // which could not express "cancel and write off".
-  final_subscription_action: string
-  final_invoice_action: string
-  created_at?: string
-  updated_at?: string
-}
-
-// DunningPolicyWithCount augments the policy list rows with the
-// explicit-assignment count for the admin page's "N customers
-// assigned" badge.
-export interface DunningPolicyWithCount extends DunningPolicy {
-  assigned_customers: number
-}
-
 export interface DunningRun {
   id: string
   invoice_id: string
   customer_id: string
-  policy_id: string
   state: string
   reason: string
   attempt_count: number
@@ -1513,7 +1460,7 @@ export interface DunningRun {
   invoice_number?: string
   invoice_amount_due_cents?: number
   invoice_currency?: string
-  // How many retries the run's policy makes, the length of its retry_days
+  // How many retries the policy for the run's mode makes, the length of its retry_days
   // (list responses).
   max_retry_attempts?: number
 }

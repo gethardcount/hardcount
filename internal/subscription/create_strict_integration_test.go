@@ -40,8 +40,8 @@ func (f fixedZoneSettings) Get(context.Context, string) (domain.TenantSettings, 
 }
 
 // strictCreateFixture is POST /v1/subscriptions through the real router, the
-// idempotency middleware and Postgres, for an in_advance plan (a create that
-// starts now bills day 1).
+// idempotency middleware and Postgres, for an in_advance plan (a create bills
+// day 1).
 type strictCreateFixture struct {
 	t      *testing.T
 	db     *postgres.DB
@@ -52,7 +52,6 @@ type strictCreateFixture struct {
 	biller *createBillerSpy
 	srv    http.Handler
 	now    time.Time
-	loc    *time.Location
 }
 
 func newStrictCreateFixture(t *testing.T, name string) *strictCreateFixture {
@@ -76,14 +75,10 @@ func newStrictCreateFixture(t *testing.T, name string) *strictCreateFixture {
 		t.Fatalf("create plan: %v", err)
 	}
 
-	loc, err := time.LoadLocation("America/New_York")
-	if err != nil {
-		t.Fatalf("load zone: %v", err)
-	}
 	svc := NewService(NewPostgresStore(db), nil)
 	svc.SetPlanReader(ps)
 	svc.SetCustomerReader(custs)
-	svc.SetSettingsReader(fixedZoneSettings{tz: loc.String()})
+	svc.SetSettingsReader(fixedZoneSettings{tz: "America/New_York"})
 	biller := &createBillerSpy{}
 	svc.SetBiller(biller)
 	h := NewHandler(svc)
@@ -91,7 +86,7 @@ func newStrictCreateFixture(t *testing.T, name string) *strictCreateFixture {
 	return &strictCreateFixture{
 		t: t, db: db, ctx: ctx, tenant: tenantID, custID: cust.ID, planID: plan.ID,
 		biller: biller, srv: middleware.Idempotency(db, nil)(h.Routes()),
-		now: time.Date(2026, 3, 5, 15, 0, 0, 0, time.UTC), loc: loc,
+		now: time.Date(2026, 3, 5, 15, 0, 0, 0, time.UTC),
 	}
 }
 
@@ -140,21 +135,21 @@ func decodeSub(t *testing.T, rr *httptest.ResponseRecorder) domain.Subscription 
 	return s
 }
 
-// TestCreateSubscription_UnknownFieldRefused is D-05: `trial_period_days` (the
-// Stripe spelling) instead of `trial_days` was dropped by the decoder, so a
-// caller asking for a 14-day trial got an active subscription billed on day 1
-// with a 201. The unknown key is now a 422 naming it, nothing is written, and
-// the 422 is not cached under the Idempotency-Key, so the corrected retry
-// with the same key creates the trial.
+// TestCreateSubscription_UnknownFieldRefused is D-05: a key the create body
+// does not define, such as `billing_cycle_anchor` (the Stripe field), is a
+// 422 naming it, not dropped while the caller gets a 201 for a subscription
+// that ignores it. Nothing is written, and the 422 is not cached under the
+// Idempotency-Key, so the corrected retry with the same key creates the
+// subscription.
 func TestCreateSubscription_UnknownFieldRefused(t *testing.T) {
 	f := newStrictCreateFixture(t, "Strict Create Unknown Field")
 
-	rr := f.post(f.body("strict-1", `"trial_period_days":14`), "idem-strict-1")
+	rr := f.post(f.body("strict-1", `"billing_cycle_anchor":1772668800`), "idem-strict-1")
 	if rr.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("trial_period_days: status %d, want 422; body %s", rr.Code, rr.Body.String())
+		t.Fatalf("billing_cycle_anchor: status %d, want 422; body %s", rr.Code, rr.Body.String())
 	}
-	if e := decodeEnvelope(t, rr); e.Error.Param != "trial_period_days" {
-		t.Errorf("param: got %q, want trial_period_days", e.Error.Param)
+	if e := decodeEnvelope(t, rr); e.Error.Param != "billing_cycle_anchor" {
+		t.Errorf("param: got %q, want billing_cycle_anchor", e.Error.Param)
 	}
 	if n := f.subCount(); n != 0 {
 		t.Fatalf("a refused create wrote %d subscription rows", n)
@@ -176,61 +171,18 @@ func TestCreateSubscription_UnknownFieldRefused(t *testing.T) {
 	}
 
 	// Corrected body under the SAME key: the 422 was released, not cached.
-	rr = f.post(f.body("strict-1", `"trial_days":14`), "idem-strict-1")
+	rr = f.post(f.body("strict-1", ""), "idem-strict-1")
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("corrected retry with the same key: status %d, want 201; body %s", rr.Code, rr.Body.String())
 	}
 	if rr.Header().Get("Idempotent-Replayed") != "" {
 		t.Fatal("corrected retry was a replay of the refusal")
 	}
-	if s := decodeSub(t, rr); s.Status != domain.SubscriptionTrialing {
-		t.Fatalf("trial_days:14 status: got %q, want trialing", s.Status)
+	if s := decodeSub(t, rr); s.Status != domain.SubscriptionActive {
+		t.Fatalf("corrected retry: status %q, want active", s.Status)
 	}
-	if f.biller.calls != 0 {
-		t.Fatalf("a trialing create ran the day-1 bill %d times", f.biller.calls)
-	}
-}
-
-// TestCreateSubscription_TrialDaysBounds is D-03: a negative trial_days was
-// read as "no trial" (charged on day 1) and any size was
-// accepted. trial_days is 0..730 (Stripe: a trial "can be at most two years").
-func TestCreateSubscription_TrialDaysBounds(t *testing.T) {
-	f := newStrictCreateFixture(t, "Strict Create Trial Bounds")
-
-	for _, days := range []string{"-1", "731"} {
-		rr := f.post(f.body("bound-"+strings.TrimPrefix(days, "-"), `"trial_days":`+days+``), "")
-		if rr.Code != http.StatusUnprocessableEntity {
-			t.Fatalf("trial_days %s: status %d, want 422; body %s", days, rr.Code, rr.Body.String())
-		}
-		if e := decodeEnvelope(t, rr); e.Error.Param != "trial_days" {
-			t.Errorf("trial_days %s: param %q, want trial_days", days, e.Error.Param)
-		}
-	}
-	if n := f.subCount(); n != 0 {
-		t.Fatalf("out-of-range trial_days wrote %d subscription rows", n)
-	}
-	if f.biller.calls != 0 {
-		t.Fatalf("out-of-range trial_days ran the day-1 bill %d times", f.biller.calls)
-	}
-
-	rr := f.post(f.body("bound-730", `"trial_days":730`), "")
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("trial_days 730: status %d, want 201; body %s", rr.Code, rr.Body.String())
-	}
-	s := decodeSub(t, rr)
-	if s.Status != domain.SubscriptionTrialing || s.TrialEndAt == nil {
-		t.Fatalf("trial_days 730: status %q trial_end %v, want trialing with an end", s.Status, s.TrialEndAt)
-	}
-	if want := domain.AddDaysIn(f.now, 730, f.loc); !s.TrialEndAt.Equal(want) {
-		t.Errorf("trial_end_at: got %s, want %s", s.TrialEndAt, want)
-	}
-
-	rr = f.post(f.body("bound-0", `"trial_days":0`), "")
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("trial_days 0: status %d, want 201; body %s", rr.Code, rr.Body.String())
-	}
-	if s := decodeSub(t, rr); s.Status != domain.SubscriptionActive || s.TrialEndAt != nil {
-		t.Fatalf("trial_days 0: status %q trial_end %v, want active with no trial", s.Status, s.TrialEndAt)
+	if f.biller.calls != 1 {
+		t.Fatalf("the corrected create ran the day-1 bill %d times, want 1", f.biller.calls)
 	}
 }
 

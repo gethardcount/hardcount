@@ -20,9 +20,9 @@ func TestDueInstant(t *testing.T) {
 		{"mid-period cancel first", Subscription{Status: SubscriptionActive, NextBillingAt: &nb, CancelAt: &before}, &before},
 		{"cancel after the close", Subscription{Status: SubscriptionActive, NextBillingAt: &nb, CancelAt: &after}, &nb},
 		{"cancel at the close", Subscription{Status: SubscriptionActive, NextBillingAt: &nb, CancelAt: &nb}, &nb},
-		{"trialing ignores cancel_at", Subscription{Status: SubscriptionTrialing, NextBillingAt: &nb, CancelAt: &before}, &nb},
+		{"canceled ignores cancel_at", Subscription{Status: SubscriptionCanceled, NextBillingAt: &nb, CancelAt: &before}, &nb},
 		{"no next_billing_at, active cancel", Subscription{Status: SubscriptionActive, CancelAt: &before}, &before},
-		{"no next_billing_at, trialing cancel", Subscription{Status: SubscriptionTrialing, CancelAt: &before}, nil},
+		{"no next_billing_at, canceled cancel", Subscription{Status: SubscriptionCanceled, CancelAt: &before}, nil},
 		{"nothing due", Subscription{Status: SubscriptionActive}, nil},
 	}
 	for _, c := range cases {

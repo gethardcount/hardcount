@@ -150,14 +150,6 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	if sub.BillingThresholds == nil {
 		return false, nil
 	}
-	// Only ACTIVE subs fire thresholds. Trialing is skipped for the same reason
-	// the natural cycle skips it — there's nothing billable, so a threshold
-	// "cross" during trial would just emit a zero-amount draft; defer until the
-	// status flips. (ListWithThresholds returns active+trialing, hence the
-	// explicit gate here.)
-	if sub.Status != domain.SubscriptionActive {
-		return false, nil
-	}
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return false, nil
 	}

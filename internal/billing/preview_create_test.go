@@ -198,14 +198,6 @@ func TestPickPrimarySubscription(t *testing.T) {
 			wantID: "s1",
 		},
 		{
-			name: "trialing sub picked",
-			subs: []domain.Subscription{
-				{ID: "s1", Status: domain.SubscriptionTrialing, CurrentBillingPeriodStart: timePtr(lateStart), CurrentBillingPeriodEnd: timePtr(lateEnd)},
-			},
-			wantOk: true,
-			wantID: "s1",
-		},
-		{
 			name: "most recent cycle wins on tie",
 			subs: []domain.Subscription{
 				{ID: "s1", Status: domain.SubscriptionActive, CurrentBillingPeriodStart: timePtr(earlyStart), CurrentBillingPeriodEnd: timePtr(earlyEnd)},

@@ -93,12 +93,6 @@ func TestResolvePeriod(t *testing.T) {
 	leap1 := time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC)
 	leapDec31End := time.Date(2028, 12, 31, 23, 59, 59, 999_999_000, time.UTC)
 
-	oct1 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-	oct10 := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
-	oct24 := time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC)
-	nov1 := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
-	nov24 := time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC)
-
 	subWithCycle := func(start, end time.Time) domain.Subscription {
 		return domain.Subscription{
 			ID:                        "sub_1",
@@ -107,12 +101,6 @@ func TestResolvePeriod(t *testing.T) {
 			CurrentBillingPeriodStart: &start,
 			CurrentBillingPeriodEnd:   &end,
 		}
-	}
-	trialingWithCycle := func(start, end time.Time) domain.Subscription {
-		sub := subWithCycle(start, end)
-		sub.ID = "sub_trial"
-		sub.Status = domain.SubscriptionTrialing
-		return sub
 	}
 
 	cases := []struct {
@@ -123,7 +111,6 @@ func TestResolvePeriod(t *testing.T) {
 		wantFrom    time.Time
 		wantTo      time.Time
 		wantErrCode string
-		now         time.Time // the bound instant; zero → jun1
 	}{
 		{
 			name:       "default to current cycle",
@@ -189,40 +176,6 @@ func TestResolvePeriod(t *testing.T) {
 			wantErrCode: "",
 		},
 		{
-			// Sub A active Oct 1 → Nov 1. On Oct 10 sub B starts a 14-day
-			// trial; its stored period is the first PAID one, Oct 24 → Nov 24.
-			// Until Oct 24 the default must stay on A's running cycle.
-			name: "future trial cycle is skipped while another cycle runs",
-			subs: []domain.Subscription{
-				subWithCycle(oct1, nov1),
-				trialingWithCycle(oct24, nov24),
-			},
-			now:        oct10,
-			wantSource: "current_billing_cycle",
-			wantFrom:   oct1,
-			wantTo:     nov1,
-		},
-		{
-			name: "trial cycle is picked once it has started",
-			subs: []domain.Subscription{
-				subWithCycle(oct1, nov1),
-				trialingWithCycle(oct24, nov24),
-			},
-			now:        oct24,
-			wantSource: "current_billing_cycle",
-			wantFrom:   oct24,
-			wantTo:     nov24,
-		},
-		{
-			// No cycle has started: keep the long-standing pick (latest start).
-			name:       "only a future trial cycle falls back to it",
-			subs:       []domain.Subscription{trialingWithCycle(oct24, nov24)},
-			now:        oct10,
-			wantSource: "current_billing_cycle",
-			wantFrom:   oct24,
-			wantTo:     nov24,
-		},
-		{
 			name: "multi-sub picks latest period start",
 			subs: []domain.Subscription{
 				subWithCycle(apr1, may1),
@@ -236,11 +189,7 @@ func TestResolvePeriod(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			now := tc.now
-			if now.IsZero() {
-				now = jun1 // after every default-case cycle start above
-			}
-			from, to, source, err := resolvePeriod(tc.period, tc.subs, now)
+			from, to, source, err := resolvePeriod(tc.period, tc.subs)
 			if tc.wantSource == "" {
 				if err == nil {
 					t.Fatalf("expected error, got from=%v to=%v source=%s", from, to, source)

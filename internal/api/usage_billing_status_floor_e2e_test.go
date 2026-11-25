@@ -16,17 +16,17 @@ import (
 // invoices the close builds.
 
 // TestBillingStatus_FirstDayBeforeTheStartBeforeAPaidThreshold: the
-// subscription starts at 11:00 on day D with no trial, so its first period
-// starts at midnight of D. A threshold fire at 20:00 bills calls from
-// midnight to 20:00, and its invoice is paid. A late 09:00 event is before
-// the fire's end, like one at 11:30: the close bills calls only from 20:00,
-// so neither is billed, and both are after_close.
+// subscription starts at 11:00 on day D, so its first period starts at
+// midnight of D. A threshold fire at 20:00 bills calls from midnight to
+// 20:00, and its invoice is paid. A late 09:00 event is before the fire's
+// end, like one at 11:30: the close bills calls only from 20:00, so neither
+// is billed, and both are after_close.
 //
 // Mutation check: draw the threshold flag only past the subscription's
 // start instant → the 09:00 event carries no status.
 func TestBillingStatus_FirstDayBeforeTheStartBeforeAPaidThreshold(t *testing.T) {
 	r := newLagRigBare(t, "in_arrears", 0)
-	r.newSub("mid-day", r.planA, dayAt(11, 0), nil)
+	r.newSub("mid-day", r.planA, dayAt(11, 0))
 	if s := r.sub(); !s.CurrentBillingPeriodStart.Equal(uwDay) {
 		t.Fatalf("period start = %v, want midnight of day D %v", s.CurrentBillingPeriodStart, uwDay)
 	}
@@ -61,17 +61,17 @@ func TestBillingStatus_FirstDayBeforeTheStartBeforeAPaidThreshold(t *testing.T) 
 }
 
 // TestBillingStatus_FirstDayBeforeTheStartInTheInvoicedFirstPeriod: the
-// subscription starts at 11:00 on day D with no trial. A 09:00 event sent
-// at 12:00 is billed by the first invoice: the period starts at midnight. A
-// 09:30 event sent after that invoice is after_close, as any late event of
-// an invoiced period is. It is not outside_subscription: the subscription
-// billed that time.
+// subscription starts at 11:00 on day D. A 09:00 event sent at 12:00 is
+// billed by the first invoice: the period starts at midnight. A 09:30 event
+// sent after that invoice is after_close, as any late event of an invoiced
+// period is. It is not outside_subscription: the subscription billed that
+// time.
 //
 // Mutation check: take the floor from the start instant, not the first
 // billed instant → the late event is outside_subscription.
 func TestBillingStatus_FirstDayBeforeTheStartInTheInvoicedFirstPeriod(t *testing.T) {
 	r := newLagRigBare(t, "in_arrears", 0)
-	r.newSub("mid-day", r.planA, dayAt(11, 0), nil)
+	r.newSub("mid-day", r.planA, dayAt(11, 0))
 	out := r.postLabelled("calls", "early-0900", dayAt(9, 0), dayAt(12, 0), 5, nil)
 	wantStatus(t, "event before the start instant, in the open first period", out, "")
 	if got := r.closePeriod(uwDay).sum("usage"); got != 5 {
@@ -103,7 +103,7 @@ func TestBillingStatus_LaterPeriodWhileTheCloseIsBehind(t *testing.T) {
 	plan := r.planPricing("plan_behind",
 		map[string]any{"meter_id": tokens, "dimension_match": map[string]any{"model": "a"}},
 		map[string]any{"meter_id": tokens, "dimension_match": map[string]any{"model": "c"}})
-	r.newSub("behind", plan, lagP0, nil)
+	r.newSub("behind", plan, lagP0)
 
 	// A used plan's price write is in force from the instant it is saved,
 	// on the database clock (ADR-130 §4). The rig serves May 20 on a fake

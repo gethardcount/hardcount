@@ -42,8 +42,8 @@ func TestDunningEvent_RecordedAt_DualStamp(t *testing.T) {
 		t.Fatalf("create invoice: %v", err)
 	}
 
-	policy, err := dunStore.UpsertPolicy(base, tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+	_, err = dunStore.PutPolicy(base, tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3, 3, 3},
 		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
@@ -54,7 +54,7 @@ func TestDunningEvent_RecordedAt_DualStamp(t *testing.T) {
 	ctx := clock.WithEffectiveNow(base, at)
 
 	run, err := dunStore.CreateRun(ctx, tenantID, domain.InvoiceDunningRun{
-		InvoiceID: inv.ID, CustomerID: cust.ID, PolicyID: policy.ID,
+		InvoiceID: inv.ID, CustomerID: cust.ID,
 		State: domain.DunningActive, AttemptCount: 0,
 	})
 	if err != nil {

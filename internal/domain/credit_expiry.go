@@ -37,7 +37,7 @@ func DrawsCreditAsOfIssue(reason InvoiceBillingReason) bool {
 // expiry sweeps must not retire the grant (ADR-071 §2). A draw is owed in two
 // cases:
 //
-//   - (i) An active or trialing subscription of the grant's customer is due
+//   - (i) An active subscription of the grant's customer is due
 //     at or before the grant expires. Its close draws on the grant.
 //   - (ii) A period or threshold invoice of the customer, issued at or before
 //     the grant expires, is a draft or is queued for collection. Its
@@ -73,7 +73,7 @@ func CreditDrawOwedExceptSQL(g, exceptInvoice string) string {
 	return `(EXISTS (
 			SELECT 1 FROM subscriptions s
 			 WHERE s.tenant_id = ` + g + `.tenant_id AND s.customer_id = ` + g + `.customer_id
-			   AND s.status IN ('active','trialing')
+			   AND s.status = 'active'
 			   AND ` + SubscriptionDueInstantSQL("s") + ` <= ` + g + `.expires_at)
 		OR ` + creditDrawPendingSQL(g, except) + `)`
 }

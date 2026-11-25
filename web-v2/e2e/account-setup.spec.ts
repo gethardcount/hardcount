@@ -71,14 +71,12 @@ interface RecipePreview {
   }
 }
 interface DunningPolicy {
-  id: string
-  name: string
   enabled: boolean
-  is_default: boolean
   retry_days: number[]
   final_subscription_action: string
   final_invoice_action: string
-  assigned_customers: number
+  created_at: string
+  updated_at: string
 }
 
 function escapeRegExp(s: string): string {
@@ -574,132 +572,64 @@ test('install a recipe: the preview lists what it will create, the install creat
   expect(meters.filter(m => m.event_name === 'gpu_seconds').map(m => m.id)).toEqual(instance.created_objects.meter_ids)
 })
 
-test('retry policies: create one turned off, turn it on and edit it, give it to a customer (it cannot be deleted then), and make it the default', async ({ page }) => {
-  const id = uniq()
-  const name = `E2E retries ${id}`
-  const customer = await createCustomer()
-  const policies = async () => (await api<{ data: DunningPolicy[] }>('GET', '/dunning/policies')).data
-  const policy = async (policyId: string) => (await policies()).find(p => p.id === policyId)
-  // A policy's row in the policies table, and its cells by column:
-  // Name, Retries, When retries run out, Customers, Status, actions.
-  const policyRow = (policyName: string) => page.getByRole('main').getByRole('row')
-    .filter({ has: page.getByText(policyName, { exact: true }) })
-  const cell = (policyName: string, column: number) => policyRow(policyName).getByRole('cell').nth(column)
-  // The row's actions are in its menu.
-  const menu = async (policyName: string) => {
-    await page.getByRole('button', { name: `Actions for policy ${policyName}`, exact: true }).click()
-    return page.getByRole('menu')
-  }
-  let restoreDefault: string | undefined
-
-  try {
-    // Created turned off, so it cannot take the default on its own
-    // (ADR-123); it leaves the subscription and invoice alone when retries
-    // run out.
-    await page.goto('/dunning?tab=policies')
-    await page.getByRole('main').getByRole('button', { name: 'New policy' }).first().click()
-    const create = page.getByRole('dialog', { name: 'New retry policy' })
-    await field(create, 'Name').getByRole('textbox').fill(name)
-    await create.getByRole('switch').click()
-    await expect(create.getByRole('switch')).not.toBeChecked()
-    // One list of waits in days: the first after the failed payment, each
-    // next one after the retry before it.
-    await field(create, 'Days before each retry').getByRole('textbox').fill('2, 3, 5')
-    await expect(create.getByText('3 retries, on day 2, 5 and 10 after the failed payment or missing card.', { exact: true })).toBeVisible()
-    // The default, pause, keeps new invoices as drafts; runs already open on
-    // other unpaid invoices keep retrying, so it must not say charging stops.
-    await expect(create.getByText(/^Invoices created while collection is paused stay drafts, so nothing charges them\. Retries already running on other unpaid invoices continue\./)).toBeVisible()
-    await field(create, 'Do this to the subscription').getByRole('combobox').click()
-    await page.getByRole('option', { name: 'Leave it active' }).click()
-    await expect(create.getByText(/^The subscription keeps billing as normal\. The unpaid invoice stays open and due\./)).toBeVisible()
-    const creating = apiCall(page, 'POST', /\/dunning\/policies$/)
-    await create.getByRole('button', { name: 'Save' }).click()
-    const createdRes = await creating
-    expect(createdRes.status()).toBe(201)
-    const created = (await createdRes.json()) as DunningPolicy
-    expect(created).toMatchObject({
-      name, enabled: false, is_default: false, retry_days: [2, 3, 5],
-      final_subscription_action: 'none', final_invoice_action: 'none',
-    })
-    await expect(toasts(page).getByText('Policy created', { exact: true })).toBeVisible()
-    await expect(cell(name, 1)).toHaveText('3 retries, on day 2, 5 and 10')
-    await expect(cell(name, 2)).toHaveText('No action')
-    await expect(cell(name, 3)).toHaveText('0')
-    await expect(cell(name, 4)).toHaveText('Off')
-
-    // Turn it on with four retries: a fourth wait is a fourth retry. A
-    // wait that is not whole days is refused before it is sent.
-    await (await menu(name)).getByRole('menuitem', { name: 'Edit', exact: true }).click()
-    const edit = page.getByRole('dialog', { name: 'Edit policy' })
-    await edit.getByRole('switch').click()
-    await expect(edit.getByRole('switch')).toBeChecked()
-    const days = field(edit, 'Days before each retry').getByRole('textbox')
-    await days.fill('2, 3, 36h')
-    await expect(edit.getByText('Each wait is a whole number of days from 1 to 30.', { exact: true })).toBeVisible()
-    await expect(edit.getByRole('button', { name: 'Save' })).toBeDisabled()
-    await days.fill('2, 3, 5, 7')
-    await expect(edit.getByText('4 retries, on day 2, 5, 10 and 17 after the failed payment or missing card.', { exact: true })).toBeVisible()
-    const saving = apiCall(page, 'PATCH', new RegExp(`/dunning/policies/${created.id}$`))
-    await edit.getByRole('button', { name: 'Save' }).click()
-    expect((await saving).ok()).toBe(true)
-    await expect(toasts(page).getByText('Policy saved', { exact: true })).toBeVisible()
-    expect(await policy(created.id)).toMatchObject({
-      enabled: true, is_default: false, retry_days: [2, 3, 5, 7],
-    })
-    await expect(cell(name, 4)).toHaveText('On')
-    await expect(cell(name, 1)).toHaveText('4 retries, on day 2, 5, 10 and 17')
-
-    // Give it to one customer: their page names it instead of the default.
-    await page.goto(`/customers/${customer.id}`)
-    const dunning = card(page, 'Retry policy')
-    await expect(dunning.getByText('Account default', { exact: true })).toBeVisible()
-    await dunning.getByRole('button', { name: 'Change' }).click()
-    const assign = page.getByRole('dialog', { name: 'Retry policy' })
-    await assign.getByRole('button', { name: /^Account default/ }).click()
-    await pick(page, name, name)
-    const assigning = apiCall(page, 'PATCH', new RegExp(`/customers/${customer.id}$`))
-    await assign.getByRole('button', { name: 'Save' }).click()
-    expect((await assigning).ok()).toBe(true)
-    await expect(toasts(page).getByText('Retry policy assignment saved', { exact: true })).toBeVisible()
-    expect((await api<{ dunning_policy_id?: string }>('GET', `/customers/${customer.id}`)).dunning_policy_id).toBe(created.id)
-    await expect(dunning).toContainText(name)
-    await expect(dunning.getByText('Account default', { exact: true })).toHaveCount(0)
-    await expect(field(dunning, 'Schedule')).toContainText('4 retries, on day 2, 5, 10 and 17')
-
-    // While a customer has it, the policy cannot be deleted: the page says
-    // why and asks nothing.
-    await page.goto('/dunning?tab=policies')
-    expect((await policy(created.id))?.assigned_customers).toBe(1)
-    await expect(cell(name, 3)).toHaveText('1')
-    await (await menu(name)).getByRole('menuitem', { name: 'Delete', exact: true }).click()
-    await expect(toasts(page).getByText('1 customer(s) assigned — reassign them first', { exact: true })).toBeVisible()
-    await expect(page.getByRole('alertdialog')).toHaveCount(0)
-    expect(await policy(created.id)).toBeDefined()
-
-    // Make it the default: the badge moves from the old default to it.
-    const previous = (await policies()).find(p => p.is_default)
-    restoreDefault = previous?.id
-    const settingDefault = apiCall(page, 'POST', new RegExp(`/dunning/policies/${created.id}/set-default$`))
-    await (await menu(name)).getByRole('menuitem', { name: 'Make default', exact: true }).click()
-    expect((await settingDefault).ok()).toBe(true)
-    await expect(toasts(page).getByText('Default policy updated', { exact: true })).toBeVisible()
-    expect((await policies()).filter(p => p.is_default).map(p => p.id)).toEqual([created.id])
-    await expect(policyRow(name).getByText('Default', { exact: true })).toBeVisible()
-    // The default can be edited, not made default again or deleted.
-    const own = await menu(name)
-    await expect(own.getByRole('menuitem', { name: 'Edit', exact: true })).toBeVisible()
-    await expect(own.getByRole('menuitem', { name: 'Make default', exact: true })).toHaveCount(0)
-    await expect(own.getByRole('menuitem', { name: 'Delete', exact: true })).toHaveCount(0)
-    await page.keyboard.press('Escape')
-    if (previous?.name) {
-      await expect(policyRow(previous.name).getByText('Default', { exact: true })).toHaveCount(0)
-      await expect((await menu(previous.name)).getByRole('menuitem', { name: 'Make default', exact: true })).toBeVisible()
-      await page.keyboard.press('Escape')
+// The account's one retry policy is shared by every spec running at once, so
+// this test answers the policy route itself: first with no policy, then with
+// whatever the form saved.
+test('retry policy: with none the tab says retries are not set up, the form starts from a new account\'s policy and Save creates it; the saved policy fills the form', async ({ page }) => {
+  let stored: DunningPolicy | null = null
+  const puts: unknown[] = []
+  await page.route(url => url.pathname === '/v1/dunning/policy', async route => {
+    if (route.request().method() === 'PUT') {
+      const body = route.request().postDataJSON() as Omit<DunningPolicy, 'created_at' | 'updated_at'>
+      puts.push(body)
+      stored = { ...body, created_at: '2026-11-25T10:00:00Z', updated_at: `2026-11-25T10:00:0${puts.length}Z` }
+      return route.fulfill({ json: stored })
     }
-  } finally {
-    // Every test shares this workspace's default: put the old one back.
-    if (restoreDefault) await api('POST', `/dunning/policies/${restoreDefault}/set-default`)
-  }
+    return stored
+      ? route.fulfill({ json: stored })
+      : route.fulfill({ status: 404, json: { error: { type: 'invalid_request_error', code: 'not_found', message: 'dunning_policy not found' } } })
+  })
+
+  await page.goto('/dunning?tab=policy')
+  await expect(page.getByRole('tab', { name: 'Policy', selected: true })).toBeVisible()
+  await expect(page.getByText('Retries are not set up', { exact: true }).first()).toBeVisible()
+  const form = page.getByRole('form', { name: 'Retry policy' })
+  const days = field(form, 'Days before each retry').getByRole('textbox')
+  // With no policy the form starts from the one a new account gets: three
+  // retries, then nothing changes.
+  await expect(days).toHaveValue('3, 4, 7')
+  await expect(form.getByText(/^The subscription keeps billing as normal\. The unpaid invoice stays open and due\./)).toBeVisible()
+
+  // One list of waits in days: the first after the failed payment, each next
+  // one after the retry before it. A wait that is not whole days is refused
+  // before it is sent.
+  await days.fill('2, 3, 36h')
+  await expect(form.getByText('Each wait is a whole number of days from 1 to 30.', { exact: true })).toBeVisible()
+  await expect(form.getByRole('button', { name: 'Save' })).toBeDisabled()
+  await days.fill('2, 3, 5')
+  await expect(form.getByText('3 retries, on day 2, 5 and 10 after the failed payment or missing card.', { exact: true })).toBeVisible()
+  // Pause keeps new invoices as drafts; runs already open on other unpaid
+  // invoices keep retrying, so it must not say charging stops.
+  await field(form, 'Do this to the subscription').getByRole('combobox').click()
+  await page.getByRole('option', { name: 'Pause collection (keep drafting invoices)' }).click()
+  await expect(form.getByText(/^Invoices created while collection is paused stay drafts, so nothing charges them\. Retries already running on other unpaid invoices continue\./)).toBeVisible()
+  await field(form, 'Do this to the subscription').getByRole('combobox').click()
+  await page.getByRole('option', { name: 'Leave it active' }).click()
+  await expect(form.getByText(/^The subscription keeps billing as normal\. The unpaid invoice stays open and due\./)).toBeVisible()
+  await form.getByRole('button', { name: 'Save' }).click()
+  await expect(toasts(page).getByText('Policy saved', { exact: true })).toBeVisible()
+  expect(puts).toEqual([{ enabled: true, retry_days: [2, 3, 5], final_subscription_action: 'none', final_invoice_action: 'none' }])
+  await expect(page.getByText('Retries are not set up', { exact: true })).toHaveCount(0)
+
+  // The form now shows the saved policy. Turned off, the tab says so, and a
+  // second Save replaces the policy whole.
+  await expect(days).toHaveValue('2, 3, 5')
+  await form.getByRole('switch').click()
+  await expect(form.getByRole('switch')).not.toBeChecked()
+  await days.fill('2, 3, 5, 7')
+  await form.getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByText('Retries are turned off', { exact: true }).first()).toBeVisible()
+  expect(puts[1]).toEqual({ enabled: false, retry_days: [2, 3, 5, 7], final_subscription_action: 'none', final_invoice_action: 'none' })
 })
 
 // A plan priced per model and token type reads as a rate card: one row per

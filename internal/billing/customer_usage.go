@@ -16,12 +16,8 @@ import (
 // close would bill it if no threshold invoice had billed part of it: its
 // plan windows, usage floors and tier ladder (rateCurrentPeriod). Usage a
 // threshold invoice already billed is counted: this is the period's usage,
-// not what is left to bill (the live balance's unbilled usage). A trialing
-// subscription whose period closes without an invoice has no usage to bill.
+// not what is left to bill (the live balance's unbilled usage).
 func (e *Engine) RateCurrentPeriod(ctx context.Context, sub domain.Subscription) (domain.RatedSubscription, error) {
-	if sub.Status == domain.SubscriptionTrialing && !trialPeriodBilled(sub) {
-		return domain.RatedSubscription{}, nil
-	}
 	cp, err := e.rateCurrentPeriod(ctx, sub, wholePeriod)
 	if err != nil {
 		return domain.RatedSubscription{}, err

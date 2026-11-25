@@ -20,9 +20,8 @@ import (
 )
 
 // TestLifecycleEvents_EnqueuedInTransitionTx is the real-Postgres proof of
-// the DispatchTx subscription subset (2026-07-05): subscription.created /
-// .canceled / .trial_ended are enqueued into webhook_outbox
-// INSIDE the transition tx by the store's writers — so a crash after commit
+// the DispatchTx subscription subset (2026-07-05): subscription.created and
+// .canceled are enqueued into webhook_outbox INSIDE the transition tx by the store's writers — so a crash after commit
 // can no longer silently drop a lifecycle event (a dropped emission left no
 // row anywhere: nothing to replay, nothing to reconcile). Also proves the
 // atomicity direction (a failing billFn rolls the event back with the
@@ -81,23 +80,16 @@ func TestLifecycleEvents_EnqueuedInTransitionTx(t *testing.T) {
 		return n, last
 	}
 
-	newSub := func(code string, status domain.SubscriptionStatus, mutate func(*domain.Subscription)) domain.Subscription {
+	newSub := func(code string) domain.Subscription {
 		t.Helper()
+		// A real create stamps the current billing period, which the
+		// create's interval writer (ADR-101) requires.
 		s := domain.Subscription{
 			Code: code, DisplayName: code, CustomerID: cust.ID,
-			Status: status, BillingTime: domain.BillingTimeAnniversary,
-			Items: []domain.SubscriptionItem{{PlanID: plan.ID, Quantity: 1}},
-		}
-		// Real creates stamp the billing period for both shapes: start-now
-		// actives carry the current period, trialing subs carry the
-		// post-trial one (firstPeriodAfterTrial) — and the ADR-101
-		// activation writers require it.
-		if status == domain.SubscriptionActive || status == domain.SubscriptionTrialing {
-			s.CurrentBillingPeriodStart = bivPS(time.Now().UTC())
-			s.CurrentBillingPeriodEnd = bivPE(time.Now().UTC())
-		}
-		if mutate != nil {
-			mutate(&s)
+			Status: domain.SubscriptionActive, BillingTime: domain.BillingTimeAnniversary,
+			CurrentBillingPeriodStart: bivPS(time.Now().UTC()),
+			CurrentBillingPeriodEnd:   bivPE(time.Now().UTC()),
+			Items:                     []domain.SubscriptionItem{{PlanID: plan.ID, Quantity: 1}},
 		}
 		created, err := store.Create(ctx, tenantID, s)
 		if err != nil {
@@ -113,7 +105,7 @@ func TestLifecycleEvents_EnqueuedInTransitionTx(t *testing.T) {
 	}
 
 	// (1) created — rides the create tx.
-	sub := newSub("lc-created", domain.SubscriptionActive, nil)
+	sub := newSub("lc-created")
 	if n, p := events(domain.EventSubscriptionCreated); n != 1 || resource(p)["id"] != sub.ID {
 		t.Fatalf("created: got n=%d payload=%v", n, p)
 	}
@@ -136,7 +128,7 @@ func TestLifecycleEvents_EnqueuedInTransitionTx(t *testing.T) {
 	}
 
 	// (3) canceled (schedule) — FireScheduledCancellation on an active sub.
-	subB := newSub("lc-sched", domain.SubscriptionActive, nil)
+	subB := newSub("lc-sched")
 	freshB, err := store.Get(ctx, tenantID, subB.ID)
 	if err != nil {
 		t.Fatalf("get subB: %v", err)
@@ -151,58 +143,17 @@ func TestLifecycleEvents_EnqueuedInTransitionTx(t *testing.T) {
 		t.Fatalf("canceled(schedule): got n=%d payload=%v", n, p)
 	}
 
-	// (4) canceled (trial_end_cancel) — CancelAtTrialEnd on a trialing sub
-	// carrying a due schedule.
-	trialEnd := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
-	subC := newSub("lc-trialcancel", domain.SubscriptionTrialing, func(s *domain.Subscription) {
-		s.TrialEndAt = &trialEnd
-	})
-	// The schedule flag is persisted by ScheduleCancellation, not create.
-	if _, err := store.ScheduleCancellation(ctx, tenantID, subC.ID, nil, true, domain.SubscriptionTrialing); err != nil {
-		t.Fatalf("schedule cancel: %v", err)
-	}
-	if _, err := store.CancelAtTrialEnd(ctx, tenantID, subC.ID, trialEnd); err != nil {
-		t.Fatalf("cancel at trial end: %v", err)
-	}
-	if n, p := events(domain.EventSubscriptionCanceled); n != 3 || p["reason"] != "trial_end_cancel" {
-		t.Fatalf("canceled(trial_end): got n=%d payload=%v", n, p)
-	}
-
-	// (5) trial_ended (schedule) — ActivateAfterTrial.
-	subD := newSub("lc-trialflip", domain.SubscriptionTrialing, func(s *domain.Subscription) {
-		s.TrialEndAt = &trialEnd
-	})
-	if _, err := store.ActivateAfterTrial(ctx, tenantID, subD.ID, time.Now().UTC()); err != nil {
-		t.Fatalf("activate after trial: %v", err)
-	}
-	if n, p := events(domain.EventSubscriptionTrialEnded); n != 1 || p["triggered_by"] != "schedule" {
-		t.Fatalf("trial_ended(schedule): got n=%d payload=%v", n, p)
-	}
-
-	// (6) trial_ended (operator) — EndTrialEarly.
-	subE := newSub("lc-trialearly", domain.SubscriptionTrialing, func(s *domain.Subscription) {
-		future := time.Now().UTC().Add(72 * time.Hour)
-		s.TrialEndAt = &future
-	})
-	now := time.Now().UTC()
-	if _, err := store.EndTrialEarly(ctx, tenantID, subE.ID, now, now, now.AddDate(0, 1, 0), now.AddDate(0, 1, 0), 0); err != nil {
-		t.Fatalf("end trial early: %v", err)
-	}
-	if n, p := events(domain.EventSubscriptionTrialEnded); n != 2 || p["triggered_by"] != "operator" {
-		t.Fatalf("trial_ended(operator): got n=%d payload=%v", n, p)
-	}
-
-	// (7) Atomicity: a failing billFn inside CancelAtomicWithBill rolls the
+	// (4) Atomicity: a failing billFn inside CancelAtomicWithBill rolls the
 	// cancel AND its event back together.
-	subF := newSub("lc-rollback", domain.SubscriptionActive, nil)
+	subF := newSub("lc-rollback")
 	sentinel := errors.New("bill failed")
 	if _, err := store.CancelAtomicWithBill(ctx, tenantID, subF.ID, subscription.SnapshotOf(subF), time.Now().UTC(), func(*sql.Tx, domain.Subscription) error {
 		return sentinel
 	}); !errors.Is(err, sentinel) {
 		t.Fatalf("cancel-with-bill: got %v, want sentinel", err)
 	}
-	if n, _ := events(domain.EventSubscriptionCanceled); n != 3 {
-		t.Fatalf("rolled-back cancel leaked an event: canceled count = %d, want 3", n)
+	if n, _ := events(domain.EventSubscriptionCanceled); n != 2 {
+		t.Fatalf("rolled-back cancel leaked an event: canceled count = %d, want 2", n)
 	}
 	got, err := store.Get(ctx, tenantID, subF.ID)
 	if err != nil || got.Status != domain.SubscriptionActive {

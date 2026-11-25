@@ -30,8 +30,8 @@ func TestGetStats_AtRiskScopedToDefaultCurrency(t *testing.T) {
 	}
 
 	store := dunning.NewPostgresStore(db)
-	policy, err := store.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true,
+	_, err = store.PutPolicy(ctx, tenantID, domain.DunningPolicy{
+		Enabled:                 true,
 		RetryDays:               []int{3, 3, 5},
 		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
@@ -54,7 +54,7 @@ func TestGetStats_AtRiskScopedToDefaultCurrency(t *testing.T) {
 			t.Fatalf("create %s invoice: %v", currency, err)
 		}
 		if _, err := store.CreateRun(ctx, tenantID, domain.InvoiceDunningRun{
-			InvoiceID: inv.ID, CustomerID: cust.ID, PolicyID: policy.ID,
+			InvoiceID: inv.ID, CustomerID: cust.ID,
 			State: domain.DunningActive, Reason: "payment_failed",
 		}); err != nil {
 			t.Fatalf("create run for %s: %v", currency, err)
@@ -97,8 +97,8 @@ func TestGetStats_AtRiskByCurrency(t *testing.T) {
 	}
 
 	store := dunning.NewPostgresStore(db)
-	policy, err := store.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true,
+	_, err = store.PutPolicy(ctx, tenantID, domain.DunningPolicy{
+		Enabled:                 true,
 		RetryDays:               []int{3, 3, 5},
 		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
@@ -121,7 +121,7 @@ func TestGetStats_AtRiskByCurrency(t *testing.T) {
 			t.Fatalf("create %s invoice: %v", num, err)
 		}
 		if _, err := store.CreateRun(ctx, tenantID, domain.InvoiceDunningRun{
-			InvoiceID: inv.ID, CustomerID: cust.ID, PolicyID: policy.ID,
+			InvoiceID: inv.ID, CustomerID: cust.ID,
 			State: state, Reason: "payment_failed",
 		}); err != nil {
 			t.Fatalf("create run for %s: %v", num, err)

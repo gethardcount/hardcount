@@ -26,7 +26,7 @@ func TestBootstrap_KeysAreMintedLikeEveryKey(t *testing.T) {
 		HashPassword:  user.HashPassword,
 		CreateUserTx:  user.NewPostgresStore(db).CreateInTx,
 		CreateKeyTx:   keys.CreateKeyTx,
-		SeedDunningTx: dunning.NewService(dunning.NewPostgresStore(db), nil, nil).SeedDefaultPoliciesTx,
+		SeedDunningTx: dunning.NewService(dunning.NewPostgresStore(db), nil, nil).SeedPoliciesTx,
 		Audit:         logger,
 	}, tenant.BootstrapOpts{TenantName: "Setup Keys Co", OwnerEmail: "owner@setup-keys.test"})
 	if err != nil {

@@ -44,8 +44,8 @@ type AuditWriter interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
 
-// SetAuditLogger wires the audit logger so dunning policy changes land in
-// audit_log.
+// SetAuditLogger wires the audit logger so a change to the dunning policy
+// lands in audit_log.
 func (h *Handler) SetAuditLogger(a AuditWriter) {
 	h.auditLogger = a
 }
@@ -57,19 +57,9 @@ func NewHandler(svc *Service) *Handler {
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 
-	// Dunning policies (ADR-036 campaigns model — multi-policy-per-
-	// tenant). Replaces the prior singleton /policy + per-customer
-	// /customers/{id}/override surface. Customers are reassigned via
-	// PATCH /v1/customers/{id} { "dunning_policy_id": ... } on the
-	// customer handler.
-	r.Route("/policies", func(r chi.Router) {
-		r.Get("/", h.listPolicies)
-		r.Post("/", h.createPolicy)
-		r.Get("/{id}", h.getPolicy)
-		r.Patch("/{id}", h.updatePolicy)
-		r.Delete("/{id}", h.deletePolicy)
-		r.Post("/{id}/set-default", h.setDefaultPolicy)
-	})
+	// The account's one policy for the request's mode.
+	r.Get("/policy", h.getPolicy)
+	r.Put("/policy", h.putPolicy)
 
 	r.Route("/runs", func(r chi.Router) {
 		r.Get("/", h.listRuns)
@@ -94,65 +84,44 @@ func (h *Handler) getStats(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, stats)
 }
 
-func (h *Handler) listPolicies(w http.ResponseWriter, r *http.Request) {
-	tenantID := auth.TenantID(r.Context())
-	page, ok := respond.ParsePage(w, r)
-	if !ok {
-		return
-	}
-	// A tenant's policies are read whole and paged here.
-	policies, err := h.svc.ListPolicies(r.Context(), tenantID)
-	if err != nil {
-		respond.InternalError(w, r)
-		slog.ErrorContext(r.Context(), "list dunning policies", "error", err)
-		return
-	}
-	if policies == nil {
-		policies = []domain.DunningPolicy{}
-	}
-	window := respond.Window(policies, page)
-	out := make([]PolicyListItem, 0, len(window))
-	for _, p := range window {
-		count, _ := h.svc.CountCustomersOnPolicy(r.Context(), tenantID, p.ID)
-		out = append(out, PolicyListItem{DunningPolicy: p, AssignedCustomers: count})
-	}
-	respond.List(w, r, out, len(policies))
-}
-
 func (h *Handler) getPolicy(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
-	id := chi.URLParam(r, "id")
-	policy, err := h.svc.GetPolicyByID(r.Context(), tenantID, id)
+	policy, err := h.svc.GetPolicy(r.Context(), tenantID)
 	if errors.Is(err, errs.ErrNotFound) {
 		respond.NotFound(w, r, "dunning_policy")
 		return
 	}
 	if err != nil {
 		respond.InternalError(w, r)
-		slog.ErrorContext(r.Context(), "get dunning policy", "id", id, "error", err)
+		slog.ErrorContext(r.Context(), "get dunning policy", "error", err)
 		return
 	}
 	respond.JSON(w, r, http.StatusOK, policy)
 }
 
-// policyBody is a policy payload: the policy's fields, plus the keys it
-// replaced, declared only so they can be refused by name with what to send
-// instead: the pre-ADR-112 `final_action`, and the three schedule fields
-// that retry_days replaced (2026-10-23). A caller still sending
+// policyBody is a policy payload. PUT replaces the whole policy, so each of
+// its four settings is a pointer: one left out is refused by name, never
+// read as off, empty or a default. It also declares the keys those settings
+// replaced, only so they can be refused by name with what to send instead:
+// the pre-ADR-112 `final_action`, and the three schedule fields that
+// retry_days replaced (2026-10-23). A caller still sending
 // `final_action: "cancel_subscription"` would otherwise store a policy that
 // pauses and never writes off.
 type policyBody struct {
 	domain.DunningPolicy
-	FinalAction      *json.RawMessage `json:"final_action"`
-	RetrySchedule    *json.RawMessage `json:"retry_schedule"`
-	MaxRetryAttempts *json.RawMessage `json:"max_retry_attempts"`
-	GracePeriodDays  *json.RawMessage `json:"grace_period_days"`
+	Enabled                 *bool                             `json:"enabled"`
+	RetryDays               *[]int                            `json:"retry_days"`
+	FinalSubscriptionAction *domain.DunningSubscriptionAction `json:"final_subscription_action"`
+	FinalInvoiceAction      *domain.DunningInvoiceAction      `json:"final_invoice_action"`
+	FinalAction             *json.RawMessage                  `json:"final_action"`
+	RetrySchedule           *json.RawMessage                  `json:"retry_schedule"`
+	MaxRetryAttempts        *json.RawMessage                  `json:"max_retry_attempts"`
+	GracePeriodDays         *json.RawMessage                  `json:"grace_period_days"`
 }
 
-// policyReadOnly are the policy fields the server sets: set-default moves
-// is_default, and an edit clears seeded (ADR-123). A body that sends one is
-// refused, naming it.
-var policyReadOnly = respond.ReadOnly("id", "tenant_id", "is_default", "seeded", "created_at", "updated_at")
+// policyReadOnly are the policy fields the server sets. A body that sends
+// one is refused, naming it.
+var policyReadOnly = respond.ReadOnly("tenant_id", "created_at", "updated_at")
 
 // decodePolicyBody decodes a policy payload strictly (respond.DecodeBody)
 // and refuses the replaced keys by name. It writes the refusal and returns
@@ -189,94 +158,45 @@ func decodePolicyBody(w http.ResponseWriter, r *http.Request) (domain.DunningPol
 			return domain.DunningPolicy{}, false
 		}
 	}
-	return body.DunningPolicy, true
-}
-
-func (h *Handler) createPolicy(w http.ResponseWriter, r *http.Request) {
-	tenantID := auth.TenantID(r.Context())
-	policy, ok := decodePolicyBody(w, r)
-	if !ok {
-		return
-	}
-	result, err := h.svc.UpsertPolicy(r.Context(), tenantID, policy)
-	if err != nil {
-		respond.FromError(w, r, err, "dunning_policy")
-		return
-	}
-	if h.auditLogger != nil {
-		// A create can take the default (the first policy, or the first
-		// enabled one after the account's seeded policy, ADR-123). The old
-		// default's demotion writes no row of its own, so this row is the
-		// only record of why the default moved.
-		var metadata map[string]any
-		if result.IsDefault {
-			metadata = map[string]any{"became_default": true}
+	for _, setting := range []struct {
+		field string
+		sent  bool
+	}{
+		{"enabled", body.Enabled != nil},
+		{"retry_days", body.RetryDays != nil},
+		{"final_subscription_action", body.FinalSubscriptionAction != nil},
+		{"final_invoice_action", body.FinalInvoiceAction != nil},
+	} {
+		if !setting.sent {
+			respond.ValidationField(w, r, setting.field, setting.field+" is required: PUT replaces the whole policy, so send all four settings")
+			return domain.DunningPolicy{}, false
 		}
-		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionCreate, "dunning_policy", result.ID, result.Name, metadata)
 	}
-	respond.JSON(w, r, http.StatusCreated, result)
+	return domain.DunningPolicy{
+		Enabled:                 *body.Enabled,
+		RetryDays:               *body.RetryDays,
+		FinalSubscriptionAction: *body.FinalSubscriptionAction,
+		FinalInvoiceAction:      *body.FinalInvoiceAction,
+	}, true
 }
 
-func (h *Handler) updatePolicy(w http.ResponseWriter, r *http.Request) {
+// putPolicy creates the account's policy for the request's mode, or
+// replaces the one it has with the body, whole.
+func (h *Handler) putPolicy(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
-	id := chi.URLParam(r, "id")
 	policy, ok := decodePolicyBody(w, r)
 	if !ok {
 		return
 	}
-	policy.ID = id
-	result, err := h.svc.UpsertPolicy(r.Context(), tenantID, policy)
+	result, err := h.svc.PutPolicy(r.Context(), tenantID, policy)
 	if err != nil {
 		respond.FromError(w, r, err, "dunning_policy")
 		return
 	}
 	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "dunning_policy", result.ID, result.Name, nil)
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "dunning_policy", result.ID, domain.DunningPolicyAuditLabel, nil)
 	}
 	respond.JSON(w, r, http.StatusOK, result)
-}
-
-func (h *Handler) deletePolicy(w http.ResponseWriter, r *http.Request) {
-	if !respond.NoBody(w, r) {
-		return
-	}
-	tenantID := auth.TenantID(r.Context())
-	id := chi.URLParam(r, "id")
-	err := h.svc.DeletePolicy(r.Context(), tenantID, id)
-	if errors.Is(err, errs.ErrNotFound) {
-		respond.NotFound(w, r, "dunning_policy")
-		return
-	}
-	if err != nil {
-		respond.FromError(w, r, err, "dunning_policy")
-		return
-	}
-	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionDelete, "dunning_policy", id, "", nil)
-	}
-	respond.JSON(w, r, http.StatusOK, map[string]string{"status": "deleted"})
-}
-
-func (h *Handler) setDefaultPolicy(w http.ResponseWriter, r *http.Request) {
-	if !respond.NoBody(w, r) {
-		return
-	}
-	tenantID := auth.TenantID(r.Context())
-	id := chi.URLParam(r, "id")
-	if err := h.svc.SetDefaultPolicy(r.Context(), tenantID, id); err != nil {
-		if errors.Is(err, errs.ErrNotFound) {
-			respond.NotFound(w, r, "dunning_policy")
-			return
-		}
-		respond.FromError(w, r, err, "dunning_policy")
-		return
-	}
-	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "dunning_policy", id, "", map[string]any{
-			"action": "set_default",
-		})
-	}
-	respond.JSON(w, r, http.StatusOK, map[string]string{"status": "default_updated"})
 }
 
 func (h *Handler) listRuns(w http.ResponseWriter, r *http.Request) {
@@ -367,23 +287,9 @@ func (h *Handler) getRun(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// PolicyListItem is one policy as GET /v1/dunning/policies lists it. It
-// carries the number of customers assigned to the policy, so the admin page
-// can show "N customers assigned" without a request per row.
-type PolicyListItem struct {
-	domain.DunningPolicy
-	AssignedCustomers int `json:"assigned_customers"`
-}
-
 // RunEvent is one event of a run on the wire: the event, and its activity
 // line (ADR-128), in the words the invoice's Activity card uses for it.
 type RunEvent struct {
 	domain.InvoiceDunningEvent
 	Line *activity.Line `json:"line,omitempty"`
 }
-
-// Customer override handlers (GetCustomerOverride / UpsertCustomerOverride
-// / DeleteCustomerOverride) were removed in ADR-036. Per-customer
-// differentiation is now expressed as `customers.dunning_policy_id`
-// assignment; mutation goes through PATCH /v1/customers/{id} on the
-// customer handler.

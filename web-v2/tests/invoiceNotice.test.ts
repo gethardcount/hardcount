@@ -37,10 +37,8 @@ test('on a written-off invoice, attention outranks the written-off notice (one n
 })
 
 test('written-off line: a subscription still billing offers Open subscription', () => {
-  for (const status of ['active', 'trialing']) {
-    const line = writtenOffSubscriptionLine({ status, pause_collection: null })
-    assert.deepEqual(line, { state: 'billing', text: 'The subscription is still billing.', openSubscription: true })
-  }
+  const line = writtenOffSubscriptionLine({ status: 'active', pause_collection: null })
+  assert.deepEqual(line, { state: 'billing', text: 'The subscription is still billing.', openSubscription: true })
 })
 
 test('written-off line: paused collection says so, with no button', () => {
@@ -49,12 +47,10 @@ test('written-off line: paused collection says so, with no button', () => {
 })
 
 test('written-off line: a canceled subscription says canceled, even if a pause is still recorded', () => {
-  for (const status of ['canceled']) {
-    const line = writtenOffSubscriptionLine({ status, pause_collection: { behavior: 'keep_as_draft' } })
-    assert.equal(line?.state, 'ended')
-    assert.equal(line?.text, 'The subscription is canceled.')
-    assert.equal(line?.openSubscription, false)
-  }
+  const line = writtenOffSubscriptionLine({ status: 'canceled', pause_collection: { behavior: 'keep_as_draft' } })
+  assert.equal(line?.state, 'ended')
+  assert.equal(line?.text, 'The subscription is canceled.')
+  assert.equal(line?.openSubscription, false)
 })
 
 test('written-off line: a one-off invoice (no subscription) has no line', () => {
@@ -64,9 +60,9 @@ test('written-off line: a one-off invoice (no subscription) has no line', () => 
 
 test('the never-true "remains active" wording is gone', () => {
   for (const sub of [
-    { status: 'active' },
-    { status: 'active', pause_collection: { behavior: 'keep_as_draft' } },
-    { status: 'canceled' },
+    { status: 'active' as const },
+    { status: 'active' as const, pause_collection: { behavior: 'keep_as_draft' } },
+    { status: 'canceled' as const },
   ]) {
     assert.doesNotMatch(writtenOffSubscriptionLine(sub)?.text ?? '', /remains active/)
   }

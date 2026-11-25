@@ -52,7 +52,7 @@ var notListRoutes = map[string]string{
 	"/v1/invoices/{id}/pdf":                  "a PDF",
 	"/v1/credit-notes/{id}":                  "one resource",
 	"/v1/credit-notes/{id}/pdf":              "a PDF",
-	"/v1/dunning/policies/{id}":              "one resource",
+	"/v1/dunning/policy":                     "one resource",
 	"/v1/dunning/runs/{id}":                  "one resource",
 	"/v1/webhook-endpoints/endpoints/{id}":   "one resource",
 	"/v1/recipes/{key}":                      "one resource",
@@ -183,11 +183,10 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 			"idempotency_key": fmt.Sprintf("paging-%d", i),
 		}).want(t, 201, "usage event")
 	}
-	for i := range 2 {
-		call("POST", "/v1/dunning/policies", map[string]any{
-			"name": fmt.Sprintf("Paging policy %d", i), "enabled": true, "retry_days": []int{3, 3},
-		}).want(t, 201, "dunning policy")
-	}
+	call("PUT", "/v1/dunning/policy", map[string]any{
+		"final_subscription_action": "pause", "final_invoice_action": "none",
+		"enabled": true, "retry_days": []int{3, 3},
+	}).want(t, 200, "dunning policy")
 	line := []map[string]any{{"description": "work", "quantity": 1, "unit_amount_cents": 1000}}
 	call("POST", "/v1/invoices", map[string]any{"customer_id": cusA, "line_items": line}).want(t, 201, "draft invoice")
 	var finalInvoice string
@@ -246,7 +245,6 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 		"/v1/customers":                                   "/v1/customers",
 		"/v1/customers/{customer_id}/payment-methods":     "/v1/customers/" + cusA + "/payment-methods",
 		"/v1/customers/{id}/sent-emails":                  "/v1/customers/" + cusB + "/sent-emails",
-		"/v1/dunning/policies":                            "/v1/dunning/policies",
 		"/v1/dunning/runs":                                "/v1/dunning/runs",
 		"/v1/invoices":                                    "/v1/invoices",
 		"/v1/invoices/{id}/disputes":                      "/v1/invoices/" + finalInvoice + "/disputes",

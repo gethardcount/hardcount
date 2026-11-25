@@ -85,16 +85,13 @@ type SubscriptionCurrency struct {
 // The service calls it under the customer-rules lock
 // (Store.WithCustomerRulesLock). Subscription creates hold the same lock, so
 // the answer counts every one that committed first.
-// A trial that ends does not take the lock; the implementation must still
-// count that subscription when it moves from trialing to active between its
-// reads.
 type SubscriptionChecker interface {
 	// NonTerminalForCustomer returns the subscriptions that still bill:
-	// active or trialing, including an active one with a scheduled cancel
-	// (it bills until the boundary).
+	// active ones, including one with a scheduled cancel (it bills until the
+	// boundary).
 	NonTerminalForCustomer(ctx context.Context, tenantID, customerID string) ([]NonTerminalSubscription, error)
-	// PlanCurrencies returns the plan currencies of every trialing and
-	// active subscription of the customer, however many, a pending plan
+	// PlanCurrencies returns the plan currencies of every active
+	// subscription of the customer, however many, a pending plan
 	// change's plan included (ADR-100).
 	PlanCurrencies(ctx context.Context, tenantID, customerID string) ([]SubscriptionCurrency, error)
 }
@@ -107,25 +104,12 @@ type AuditEmitter interface {
 }
 
 type Service struct {
-	store         Store
-	stripeSyncer  StripeSyncer
-	taxFlusher    TaxFlusher
-	subChecker    SubscriptionChecker
-	auditLogger   AuditEmitter
-	dunningPolicy DunningPolicyReader
+	store        Store
+	stripeSyncer StripeSyncer
+	taxFlusher   TaxFlusher
+	subChecker   SubscriptionChecker
+	auditLogger  AuditEmitter
 }
-
-// DunningPolicyReader fetches a dunning policy by id on a tenant- and
-// mode-scoped transaction. Implemented by *dunning.PostgresStore, wired in
-// wire.go.
-type DunningPolicyReader interface {
-	GetPolicyByID(ctx context.Context, tenantID, id string) (domain.DunningPolicy, error)
-}
-
-// SetDunningPolicyReader wires the policy read Update runs before assigning a
-// customer to a dunning policy. When unwired (narrow unit tests) the read is
-// skipped.
-func (s *Service) SetDunningPolicyReader(r DunningPolicyReader) { s.dunningPolicy = r }
 
 func NewService(store Store) *Service {
 	return &Service{store: store}
@@ -294,12 +278,6 @@ type UpdateInput struct {
 	DisplayName string `json:"display_name"`
 	Email       string `json:"email,omitempty"`
 	Status      string `json:"status,omitempty"`
-	// DunningPolicyID assigns this customer to a specific dunning
-	// policy (ADR-036). Pointer so the handler can distinguish
-	// "unset" (omitted) from "clear" (explicit empty string). nil =
-	// leave as-is; *"" = clear assignment (fall back to default);
-	// *"hc_dpol_..." = assign to that policy.
-	DunningPolicyID *string `json:"dunning_policy_id,omitempty"`
 	// AdditionalEmails replaces the CC list (ADR-082). Pointer for the
 	// same omitted-vs-clear distinction: nil = leave as-is; *[] =
 	// clear; *[...] = validated replacement.
@@ -369,22 +347,6 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateI
 			}
 			next.Status = status
 		}
-		if input.DunningPolicyID != nil {
-			policyID := strings.TrimSpace(*input.DunningPolicyID)
-			// An empty id clears the assignment. A set one must be a policy in
-			// the caller's tenant and mode: the foreign key is on the id alone
-			// and foreign-key checks do not apply row-level security, so the
-			// update would accept another tenant's or the other mode's policy.
-			if policyID != "" && s.dunningPolicy != nil {
-				if _, err := s.dunningPolicy.GetPolicyByID(ctx, tenantID, policyID); err != nil {
-					if errors.Is(err, errs.ErrNotFound) {
-						return errs.NotFound("dunning policy")
-					}
-					return fmt.Errorf("get dunning policy: %w", err)
-				}
-			}
-			next.DunningPolicyID = policyID
-		}
 		if input.AdditionalEmails != nil {
 			cc, err := normalizeAdditionalEmails(*input.AdditionalEmails, next.Email)
 			if err != nil {
@@ -429,19 +391,6 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateI
 	}
 
 	return updated, nil
-}
-
-// GetDunningPolicyID returns the customer's assigned dunning_policy_id
-// (empty string = no explicit assignment, dunning service falls back
-// to the tenant default). Satisfies dunning.CustomerPolicyReader so
-// the dunning service can resolve effective policy without importing
-// the customer package.
-func (s *Service) GetDunningPolicyID(ctx context.Context, tenantID, customerID string) (string, error) {
-	c, err := s.store.Get(ctx, tenantID, customerID)
-	if err != nil {
-		return "", err
-	}
-	return c.DunningPolicyID, nil
 }
 
 // deriveProfileStatus answers exactly one question: can the invoice
@@ -627,7 +576,7 @@ func (s *Service) UpsertBillingProfile(ctx context.Context, tenantID string, bp 
 }
 
 // checkProfileCurrency refuses a profile currency that differs from a plan
-// currency of the customer's trialing or active subscriptions
+// currency of the customer's active subscriptions
 // (InvalidState). The profile currency replaces the plan currency on every
 // invoice, so a mismatch would relabel plan prices without conversion
 // ($100 invoiced as €100). An empty currency checks nothing, and a currency

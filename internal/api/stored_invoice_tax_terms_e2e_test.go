@@ -38,7 +38,7 @@ func TestTaxRetry_KeepsTheTermsTheInvoiceWasPricedIn(t *testing.T) {
 			r := newTaxFlagRig(t, "in_advance", inclusive)
 			resolver := &refusingTaxResolver{inner: tax.NewResolver(nil), refuse: true}
 			r.srv.BillingEngine.SetTaxProviderResolver(resolver)
-			r.createSub(lagP0, nil)
+			r.createSub(lagP0)
 			id := r.onlyInvoice(domain.BillingReasonSubscriptionCreate)
 
 			r.setTaxInclusive(!inclusive)

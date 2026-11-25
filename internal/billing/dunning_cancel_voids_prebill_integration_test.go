@@ -190,18 +190,18 @@ func newPrebillVoidRig(t *testing.T, name string, policy domain.DunningPolicy) *
 	r.dsvc.SetSubscriptionStateReader(movers)
 	r.dsvc.SetInvoiceUncollectibleMarker(finalActionWriteOff{svc: invSvc})
 	r.dsvc.SetChargeHoldClaimer(r.invStore)
-	saved, err := r.dsvc.UpsertPolicy(ctx, r.tenantID, policy)
+	_, err = r.dsvc.PutPolicy(ctx, r.tenantID, policy)
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}
-	r.insertRun(saved.ID, policy.Retries())
+	r.insertRun(policy.Retries())
 	return r
 }
 
 // insertRun writes the day-1 invoice's active dunning run. With attempts at
 // the policy's maximum it is due now, so the next tick exhausts it; with
 // fewer its next retry is 72 hours away, so no tick touches it before then.
-func (r *prebillVoidRig) insertRun(policyID string, attempts int) {
+func (r *prebillVoidRig) insertRun(attempts int) {
 	r.t.Helper()
 	now := time.Now().UTC()
 	attempt, next := 1, now.Add(72*time.Hour)
@@ -217,10 +217,10 @@ func (r *prebillVoidRig) insertRun(policyID string, attempts int) {
 		r.t.Fatalf("pin livemode GUC: %v", err)
 	}
 	if _, err := tx.ExecContext(r.ctx, `
-		INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason,
+		INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, state, reason,
 			attempt_count, last_attempt_at, next_action_at, paused, created_at, updated_at, livemode)
-		VALUES ($1, $2, $3, $4, $5, 'active', 'payment_failed', $6, $7, $8, false, $9, $9, false)`,
-		r.runID(), r.tenantID, r.day1.ID, r.sub.CustomerID, policyID, attempt, now.Add(-30*time.Minute), next, now.Add(-time.Hour)); err != nil {
+		VALUES ($1, $2, $3, $4, 'active', 'payment_failed', $5, $6, $7, false, $8, $8, false)`,
+		r.runID(), r.tenantID, r.day1.ID, r.sub.CustomerID, attempt, now.Add(-30*time.Minute), next, now.Add(-time.Hour)); err != nil {
 		r.t.Fatalf("insert run: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -419,7 +419,7 @@ func (r *prebillVoidRig) requireVoidedAndPaymentIntentCanceled(api *cancelingStr
 // attempt is not due for days.
 func waitingPolicy() domain.DunningPolicy {
 	return domain.DunningPolicy{
-		Name: "three retries", Enabled: true, RetryDays: []int{3, 3, 3},
+		Enabled: true, RetryDays: []int{3, 3, 3},
 		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	}
 }
@@ -489,7 +489,7 @@ func TestDunningFinalCancel_VoidsTheUnusedPrebillUnderItsOwnHold(t *testing.T) {
 	for _, action := range []domain.DunningInvoiceAction{domain.InvActionMarkUncollectible, domain.InvActionNone} {
 		t.Run(string(action), func(t *testing.T) {
 			r := newPrebillVoidRig(t, "Dunning Cancel Voids Prebill "+string(action), domain.DunningPolicy{
-				Name: "cancel at the end", Enabled: true, RetryDays: []int{3},
+				Enabled: true, RetryDays: []int{3},
 				FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: action,
 			})
 			if _, errs := r.dsvc.ProcessDueRuns(r.ctx, r.tenantID, 50); len(errs) != 0 {
@@ -532,7 +532,7 @@ func TestDunningFinalCancel_VoidsTheUnusedPrebillUnderItsOwnHold(t *testing.T) {
 func TestBackgroundVoid_CancelsTheDeclinedPaymentIntentAtStripe(t *testing.T) {
 	t.Run("dunning final cancel", func(t *testing.T) {
 		r := newPrebillVoidRig(t, "Background Void PI Cancel: dunning", domain.DunningPolicy{
-			Name: "cancel at the end", Enabled: true, RetryDays: []int{3},
+			Enabled: true, RetryDays: []int{3},
 			FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 		})
 		api := r.declinedAtStripe()

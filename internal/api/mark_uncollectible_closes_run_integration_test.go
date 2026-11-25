@@ -24,9 +24,10 @@ func TestMarkUncollectible_ClosesTheInvoicesRun(t *testing.T) {
 		return flowDo(t, ts, method, path, flowReq{bearer: key, body: body})
 	}
 	// A dunning policy, so finalizing an invoice with no card opens a run.
-	call("POST", "/v1/dunning/policies", map[string]any{
-		"name": "Write-off policy", "enabled": true, "retry_days": []int{3, 3},
-	}).want(t, 201, "create dunning policy")
+	call("PUT", "/v1/dunning/policy", map[string]any{
+		"final_subscription_action": "pause", "final_invoice_action": "none",
+		"enabled": true, "retry_days": []int{3, 3},
+	}).want(t, 200, "create dunning policy")
 	customerID := flowStr(call("POST", "/v1/customers", map[string]any{
 		"external_id": "write-off-closes", "display_name": "Write-off Closes",
 	}).want(t, 201, "create customer").body, "id")

@@ -52,22 +52,17 @@ func newLiveStateRig(t *testing.T, name string) *liveStateRig {
 	}
 }
 
-// seed creates a subscription in status (active or trialing) with a pause and
-// a pending plan change. The caller schedules its cancel.
-func (r *liveStateRig) seed(code string, status domain.SubscriptionStatus) domain.Subscription {
+// seed creates an active subscription with a pause and a pending plan change.
+// The caller schedules its cancel.
+func (r *liveStateRig) seed(code string) domain.Subscription {
 	r.t.Helper()
 	start := r.now.Add(-24 * time.Hour)
 	end := start.AddDate(0, 1, 0)
 	in := domain.Subscription{
 		Code: code, DisplayName: code, CustomerID: r.custID,
-		Status: status, BillingTime: domain.BillingTimeCalendar,
+		Status: domain.SubscriptionActive, BillingTime: domain.BillingTimeCalendar,
+		StartedAt: &start, CurrentBillingPeriodStart: &start, CurrentBillingPeriodEnd: &end, NextBillingAt: &end,
 		Items: []domain.SubscriptionItem{{PlanID: r.planA.ID, Quantity: 1}},
-	}
-	if status == domain.SubscriptionTrialing {
-		trialEnd := r.now.Add(7 * 24 * time.Hour)
-		in.TrialStartAt, in.TrialEndAt = &start, &trialEnd
-	} else {
-		in.StartedAt, in.CurrentBillingPeriodStart, in.CurrentBillingPeriodEnd, in.NextBillingAt = &start, &start, &end, &end
 	}
 	sub, err := r.store.Create(r.ctx, r.tenantID, in)
 	if err != nil {
@@ -132,9 +127,9 @@ func (r *liveStateRig) requireRetired(label string, sub domain.Subscription) {
 	}
 }
 
-// TestCancelWriters_RetireLiveOnlyState runs each of the four cancel writers
-// on a subscription with a cancel schedule, a pause and a pending plan
-// change. Each must hand back, and store, a row with no schedule and no
+// TestCancelWriters_RetireLiveOnlyState runs each cancel writer on a
+// subscription with a cancel schedule, a pause and a pending plan change.
+// Each must hand back, and store, a row with no schedule and no
 // pending plan change but with its pause, without writing an item-change
 // row (clearing the pending columns is no plan or quantity change). A writer
 // that runs billFn must give it the row with its pause: the final invoice is
@@ -152,7 +147,6 @@ func TestCancelWriters_RetireLiveOnlyState(t *testing.T) {
 
 	type writer struct {
 		name   string
-		status domain.SubscriptionStatus
 		cancel func(t *testing.T, sub domain.Subscription) (domain.Subscription, *domain.Subscription)
 	}
 	billSaw := func(saw **domain.Subscription) func(tx *sql.Tx, c domain.Subscription) error {
@@ -163,7 +157,7 @@ func TestCancelWriters_RetireLiveOnlyState(t *testing.T) {
 		}
 	}
 	writers := []writer{
-		{"CancelAtomicWithBill", domain.SubscriptionActive, func(t *testing.T, sub domain.Subscription) (domain.Subscription, *domain.Subscription) {
+		{"CancelAtomicWithBill", func(t *testing.T, sub domain.Subscription) (domain.Subscription, *domain.Subscription) {
 			r.schedule(sub, nil, true)
 			var saw *domain.Subscription
 			got, err := r.store.CancelAtomicWithBill(r.ctx, r.tenantID, sub.ID, SnapshotOf(sub), r.now, billSaw(&saw))
@@ -172,7 +166,7 @@ func TestCancelWriters_RetireLiveOnlyState(t *testing.T) {
 			}
 			return got, saw
 		}},
-		{"FireScheduledCancellationWithBill", domain.SubscriptionActive, func(t *testing.T, sub domain.Subscription) (domain.Subscription, *domain.Subscription) {
+		{"FireScheduledCancellationWithBill", func(t *testing.T, sub domain.Subscription) (domain.Subscription, *domain.Subscription) {
 			at := r.now.Add(-time.Minute)
 			r.schedule(sub, &at, false)
 			var saw *domain.Subscription
@@ -182,7 +176,7 @@ func TestCancelWriters_RetireLiveOnlyState(t *testing.T) {
 			}
 			return got, saw
 		}},
-		{"FireScheduledCancellationTx", domain.SubscriptionActive, func(t *testing.T, sub domain.Subscription) (domain.Subscription, *domain.Subscription) {
+		{"FireScheduledCancellationTx", func(t *testing.T, sub domain.Subscription) (domain.Subscription, *domain.Subscription) {
 			r.schedule(sub, nil, true)
 			var got domain.Subscription
 			if err := r.store.WithTenantTx(r.ctx, r.tenantID, func(tx *sql.Tx) error {
@@ -194,18 +188,10 @@ func TestCancelWriters_RetireLiveOnlyState(t *testing.T) {
 			}
 			return got, nil
 		}},
-		{"CancelAtTrialEnd", domain.SubscriptionTrialing, func(t *testing.T, sub domain.Subscription) (domain.Subscription, *domain.Subscription) {
-			r.schedule(sub, nil, true)
-			got, err := r.store.CancelAtTrialEnd(r.ctx, r.tenantID, sub.ID, *sub.TrialEndAt)
-			if err != nil {
-				t.Fatalf("cancel at trial end: %v", err)
-			}
-			return got, nil
-		}},
 	}
 	for _, w := range writers {
 		t.Run(w.name, func(t *testing.T) {
-			sub := r.seed("sub-live-state-"+strings.ToLower(w.name), w.status)
+			sub := r.seed("sub-live-state-" + strings.ToLower(w.name))
 			changesBefore := r.itemChanges(sub.ID)
 
 			got, billInput := w.cancel(t, sub)
@@ -283,8 +269,8 @@ func (r *liveStateRig) canceledEvent(subID string) json.RawMessage {
 // removed that status.)
 func TestMigration_ClearsLiveOnlyStateOnCanceledSubs(t *testing.T) {
 	r := newLiveStateRig(t, "Migration Clears Live State")
-	canceled := r.seed("sub-mig-canceled", domain.SubscriptionActive)
-	live := r.seed("sub-mig-live", domain.SubscriptionActive)
+	canceled := r.seed("sub-mig-canceled")
+	live := r.seed("sub-mig-live")
 	r.schedule(live, nil, true)
 
 	// The rows an earlier cancel left: terminal status, every field kept.
